@@ -51,7 +51,12 @@ struct MethodInfo {
     X(Il2CppThread*, il2cpp_thread_current, (void))                                         \
     X(void, il2cpp_thread_detach, (Il2CppThread*))                                          \
     X(void, il2cpp_format_exception, (const Il2CppException*, char*, int))                  \
-    X(void, il2cpp_raise_exception, (Il2CppException*))
+    X(void, il2cpp_raise_exception, (Il2CppException*))                                     \
+    X(Il2CppObject*, il2cpp_object_new, (const Il2CppClass*))                               \
+    X(Il2CppObject*, il2cpp_string_new, (const char*))                                      \
+    X(uint32_t, il2cpp_gchandle_new, (Il2CppObject*, bool))                                 \
+    X(Il2CppObject*, il2cpp_gchandle_get_target, (uint32_t))                                \
+    X(void, il2cpp_gc_wbarrier_set_field, (Il2CppObject*, void**, void*))
 
 namespace il2cpp {
 
@@ -89,6 +94,12 @@ inline T* ArrayData(Il2CppArray* arr) {
 template <typename T>
 inline T& FieldAt(void* obj, size_t offset) {
     return *reinterpret_cast<T*>(reinterpret_cast<uint8_t*>(obj) + offset);
+}
+
+// Grava uma referência num campo de objeto gerenciado com a barreira de
+// escrita do GC (a Unity 2021 pode usar o GC incremental).
+inline void SetRefField(Il2CppObject* obj, size_t offset, Il2CppObject* value) {
+    api.il2cpp_gc_wbarrier_set_field(obj, &FieldAt<void*>(obj, offset), value);
 }
 
 }  // namespace il2cpp

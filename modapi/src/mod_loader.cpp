@@ -87,6 +87,48 @@ struct ModLoader::Impl {
     std::vector<NpcSlot> npcSlots;
     uint64_t modNpcSpawns = 0;
 
+    // ---- Itens de mod -----------------------------------------------------------
+    const ItemDefinition* ModItemDef(int32_t type) const {
+        const ContentEntry* e = self->registry_.Get(TLMOD_CONTENT_ITEM, type);
+        return e ? e->Item() : nullptr;
+    }
+    // Pré-Item.SetDefaults: ID de mod -> casca original. O ID de mod nunca chega às tabelas.
+    int32_t RemapItemType(int32_t type) const {
+        const ItemDefinition* def = ModItemDef(type);
+        return def ? def->shellType : type;
+    }
+
+    // give_item: pedidos de qualquer thread, entregues na thread do jogo.
+    struct Give {
+        std::string modId;
+        TLModId type;
+        int32_t stack;
+    };
+    std::mutex giveMutex;
+    std::vector<Give> pendingGives;
+
+    void OnFrame() {
+        std::vector<Give> todo;
+        {
+            std::lock_guard<std::mutex> lock(giveMutex);
+            if (pendingGives.empty()) return;
+            // Só com um mundo carregado: no menu não há inventário para encher.
+            if (game->InWorld() != std::optional<bool>(true)) return;
+            todo.swap(pendingGives);
+        }
+        for (const Give& g : todo) {
+            int32_t given = game->GiveItem(g.type, g.stack);
+            const ContentEntry* e = self->registry_.Get(TLMOD_CONTENT_ITEM, g.type);
+            std::string what = e ? e->key : "item " + std::to_string(g.type);
+            if (given == g.stack)
+                Log(TLMOD_LOG_INFO, g.modId, "give_item: " + std::to_string(given) + "x " + what + " entregue");
+            else
+                Log(TLMOD_LOG_WARN, g.modId,
+                    "give_item: só " + std::to_string(given) + " de " + std::to_string(g.stack) + "x " + what +
+                        " couberam no inventário");
+        }
+    }
+
     const NpcDefinition* ModNpcDef(int32_t type) const {
         const ContentEntry* e = self->registry_.Get(TLMOD_CONTENT_NPC, type);
         return e ? e->Npc() : nullptr;
@@ -211,6 +253,15 @@ TLModId Api_RegisterItem(TLModContext* ctx, const TLModItemDef* def) {
     item.rarity = def->rarity;
     item.damage = def->damage;
     item.useTime = def->use_time;
+    // shell_type veio depois: só existe se struct_size o cobre.
+    constexpr size_t kShellEnd = offsetof(TLModItemDef, shell_type) + sizeof(TLModId);
+    TLModId shell = def->struct_size >= kShellEnd ? def->shell_type : 0;
+    int32_t vanilla = impl->self->Registry().VanillaCount(TLMOD_CONTENT_ITEM).value_or(0);
+    if (shell == 0) shell = kDefaultItemShell;
+    if (shell < 1 || shell >= vanilla)
+        return err("shell_type " + std::to_string(shell) + " não é um item original (1.." +
+                   std::to_string(vanilla - 1) + ")");
+    item.shellType = shell;
 
     std::string error;
     auto id = impl->self->Registry().Register(TLMOD_CONTENT_ITEM, mod.manifest.id, name,
@@ -328,6 +379,24 @@ void Api_BufferAppend(TLModBuffer* out, const char* data, size_t len) {
     if (out && data) out->data.append(data, len);
 }
 
+bool Api_GiveItem(TLModContext* ctx, TLModId type, int32_t stack) {
+    if (!ctx) return false;
+    Impl* impl = ImplOf(ctx);
+    const ContentRegistry& reg = impl->self->Registry();
+    int32_t vanilla = reg.VanillaCount(TLMOD_CONTENT_ITEM).value_or(0);
+    if (!reg.IsModId(TLMOD_CONTENT_ITEM, type) && !(type > 0 && type < vanilla)) {
+        Log(TLMOD_LOG_ERROR, impl->ModId(ctx), "give_item: tipo " + std::to_string(type) + " desconhecido");
+        return false;
+    }
+    if (stack < 1) {
+        Log(TLMOD_LOG_ERROR, impl->ModId(ctx), "give_item: stack precisa ser >= 1");
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(impl->giveMutex);
+    impl->pendingGives.push_back({impl->ModId(ctx), type, stack});
+    return true;
+}
+
 int32_t Api_SpawnNpc(TLModContext* ctx, TLModId type, float x, float y) {
     if (!ctx) return -1;
     Impl* impl = ImplOf(ctx);
@@ -371,6 +440,7 @@ ModLoader::ModLoader(GameAdapter* game)
     a.progress = &Api_Progress;
     a.register_provider = &Api_RegisterProvider;
     a.buffer_append = &Api_BufferAppend;
+    a.give_item = &Api_GiveItem;
 
     Impl* impl = impl_.get();
     game_->SetPlayerHurtHandler([impl](TLModPlayerHurt& ev, bool after) { return impl->DispatchHurt(ev, after); });
@@ -388,6 +458,8 @@ ModLoader::~ModLoader() {
     game_->SetPlayerHurtHandler(nullptr);
     game_->SetNpcHooks({});
     game_->SetPersistenceHooks({});
+    game_->SetItemHooks({});
+    game_->SetFrameHandler(nullptr);
 }
 
 std::vector<std::string> ModLoader::Providers() const {
@@ -646,6 +718,15 @@ size_t ModLoader::LoadAll() {
         ++loaded;
         Log(TLMOD_LOG_INFO, rec.manifest.id, "carregado (" + rec.manifest.version.ToString() + ")");
     }
+
+    // Itens de mod só agora, com o registro completo (o jogo chama SetDefaults
+    // em qualquer thread: o registro não pode estar mudando).
+    Impl* impl = impl_.get();
+    GameAdapter::ItemHooks items;
+    items.remapType = [impl](int32_t t) { return impl->RemapItemType(t); };
+    items.definition = [impl](int32_t t) { return impl->ModItemDef(t); };
+    game_->SetItemHooks(std::move(items));
+    game_->SetFrameHandler([impl] { impl->OnFrame(); });
 
     // Save/load só agora, com o registro completo: antes disso uma chave de
     // mod ainda não registrado viraria órfã à toa. Liga mesmo sem itens de mod

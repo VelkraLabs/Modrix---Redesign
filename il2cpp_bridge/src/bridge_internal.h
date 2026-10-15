@@ -37,6 +37,10 @@ void InstallNpcHooks();
 bool ResolveWorldState();
 void InstallWorldStateHooks();
 
+// Itens de mod: SetDefaults/RebuildTooltip (item_hooks.cpp).
+bool ResolveItems();
+void InstallItemHooks();
+
 // Save/load de personagem e mundo (save_hooks.cpp).
 bool ResolveSaves();
 void InstallSaveHooks();

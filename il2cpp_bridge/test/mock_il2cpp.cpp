@@ -7,7 +7,9 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 extern "C" {
@@ -39,6 +41,7 @@ struct Il2CppClass {
     const char* name;
     std::vector<FieldInfo*> fields;
     std::vector<MethodInfo*> methods;
+    size_t size = 0x200;  // il2cpp_object_new
 };
 
 struct Il2CppImage {
@@ -422,6 +425,85 @@ using LoadWorldFn = decltype(&MockLoadWorld);
 LoadWorldFn g_loadWorldEntry = &MockLoadWorld;
 MethodInfo g_mLoadWorld{reinterpret_cast<Il2CppMethodPointer>(&MockLoadWorld), "LoadWorld", 1};
 
+// ---- Itens: SetDefaults / RebuildTooltip / ItemTooltip -----------------------------
+// Offsets do dump (terraria_offsets.h: item_off, item_tooltip_off).
+constexpr size_t kItemWidth = 0x48, kItemHeight = 0x4C, kItemNameOverride = 0x58, kItemMelee = 0x7D,
+                 kItemUseStyle = 0xC1, kItemUseAnimation = 0xC4, kItemUseTime = 0xC8, kItemMaxStack = 0xD0,
+                 kItemDamage = 0xF0, kItemToolTip = 0x138, kItemRare = 0x14C, kItemValue = 0x178;
+constexpr size_t kTooltipValidator = 0x18, kTooltipText = 0x20, kTextKey = 0x10, kTextValue = 0x18;
+FieldInfo g_fItemStats[] = {{"width", kItemWidth, nullptr},          {"height", kItemHeight, nullptr},
+                            {"_nameOverride", kItemNameOverride, nullptr}, {"melee", kItemMelee, nullptr},
+                            {"useStyle", kItemUseStyle, nullptr},    {"useAnimation", kItemUseAnimation, nullptr},
+                            {"useTime", kItemUseTime, nullptr},      {"maxStack", kItemMaxStack, nullptr},
+                            {"damage", kItemDamage, nullptr},        {"ToolTip", kItemToolTip, nullptr},
+                            {"rare", kItemRare, nullptr},            {"value", kItemValue, nullptr}};
+
+Il2CppClass g_itemTooltip{"Terraria.UI", "ItemTooltip", {}, {}, 0x38};
+Il2CppClass g_localizedText{"Terraria.Localization", "LocalizedText", {}, {}, 0x20};
+Il2CppObject* g_tooltipNone = nullptr;      // static ItemTooltip.None
+uint64_t g_globalValidatorKey = 7;          // static ItemTooltip._globalValidatorKey
+FieldInfo g_fTooltip[] = {{"_validatorKey", kTooltipValidator, nullptr}, {"_text", kTooltipText, nullptr}};
+FieldInfo g_fTooltipNone{"None", 0x0, &g_tooltipNone};
+FieldInfo g_fTooltipKey{"_globalValidatorKey", 0x10, &g_globalValidatorKey, sizeof(uint64_t)};
+MethodInfo g_mTextCtor{nullptr, ".ctor", 2};
+Il2CppObject* g_vanillaTooltip = nullptr;   // o que Lang.GetTooltip devolve no mock
+int g_barriers = 0;                          // il2cpp_gc_wbarrier_set_field chamadas
+std::vector<Il2CppObject*> g_handles;        // GC handles
+
+// "Tabelas do jogo" indexadas pelo tipo do item, com o tamanho original
+// (ItemID.Count). O jogo real lança IndexOutOfRangeException; o mock aborta,
+// para o teste provar que um ID de mod nunca chega a elas.
+std::vector<int32_t> g_itemMaxStackTable(kItemCount, 9999);
+int32_t& TableAt(std::vector<int32_t>& table, int32_t index) {
+    if (index < 0 || static_cast<size_t>(index) >= table.size()) std::abort();
+    return table[static_cast<size_t>(index)];
+}
+
+void MockItemRebuildTooltip(Il2CppObject* self, const MethodInfo*);
+using RebuildFn = decltype(&MockItemRebuildTooltip);
+RebuildFn g_rebuildEntry = &MockItemRebuildTooltip;
+MethodInfo g_mRebuildTooltip{reinterpret_cast<Il2CppMethodPointer>(&MockItemRebuildTooltip), "RebuildTooltip", 0};
+
+// Lang.GetTooltip(netID): _itemTooltipCache[netID].
+void MockItemRebuildTooltip(Il2CppObject* self, const MethodInfo*) {
+    TableAt(g_itemMaxStackTable, At<int32_t>(self, kItemNetId));
+    At<Il2CppObject*>(self, kItemToolTip) = g_vanillaTooltip;
+}
+
+// Item.SetDefaults(int, bool, ItemVariant): zera, indexa tabelas por type e
+// termina em RebuildTooltip, como o do jogo.
+void MockItemSetDefaults(Il2CppObject* self, int32_t type, bool, Il2CppObject*, const MethodInfo*) {
+    At<int32_t>(self, kItemType) = At<int32_t>(self, kItemNetId) = type;
+    At<int32_t>(self, kItemStack) = type ? 1 : 0;
+    At<int32_t>(self, kItemMaxStack) = type ? TableAt(g_itemMaxStackTable, type) : 0;
+    At<int32_t>(self, kItemDamage) = At<int32_t>(self, kItemUseTime) = At<int32_t>(self, kItemUseAnimation) = 0;
+    At<uint8_t>(self, kItemUseStyle) = 0;
+    At<bool>(self, kItemMelee) = false;
+    At<int32_t>(self, kItemValue) = At<int32_t>(self, kItemRare) = 0;
+    At<int32_t>(self, kItemWidth) = 12;
+    At<int32_t>(self, kItemHeight) = 20;
+    At<uint8_t>(self, kItemPrefix) = 0;
+    At<Il2CppObject*>(self, kItemNameOverride) = nullptr;
+    g_rebuildEntry(self, &g_mRebuildTooltip);
+}
+using ItemSetDefaultsFn = decltype(&MockItemSetDefaults);
+ItemSetDefaultsFn g_itemSetDefaultsEntry = &MockItemSetDefaults;
+MethodInfo g_mItemSetDefaults3{reinterpret_cast<Il2CppMethodPointer>(&MockItemSetDefaults), "SetDefaults", 3};
+MethodInfo g_mItemSetDefaults1{nullptr, "SetDefaults", 1};  // no jogo: `b` para o de 3
+MethodInfo g_mItemPrefix{nullptr, "Prefix", 1};
+
+void InitItems() {
+    for (FieldInfo& f : g_fItemStats) g_item.fields.push_back(&f);
+    g_item.methods = {&g_mItemSetDefaults3, &g_mItemSetDefaults1, &g_mRebuildTooltip, &g_mItemPrefix};
+    g_item.size = kItemSize;
+    g_itemTooltip.fields = {&g_fTooltip[0], &g_fTooltip[1], &g_fTooltipNone, &g_fTooltipKey};
+    g_localizedText.methods = {&g_mTextCtor};
+    g_csharp.classes.push_back(&g_itemTooltip);
+    g_csharp.classes.push_back(&g_localizedText);
+    g_tooltipNone = NewObject(0x38);
+    g_vanillaTooltip = NewObject(0x38);
+}
+
 void InitSaveWorld() {
     g_item.fields.clear();
     for (FieldInfo& f : g_fItem) g_item.fields.push_back(&f);
@@ -512,6 +594,7 @@ __attribute__((visibility("default"))) void mock_il2cpp_init() {
     g_localUserClass.fields = {&g_fLocalUserInstance, &g_fGameMenu};
     g_localUser.gameMenu = true;
     InitSaveWorld();
+    InitItems();
     g_initialized = true;
 }
 __attribute__((visibility("default"))) void* mock_local_player() { return g_localPlayer; }
@@ -525,6 +608,8 @@ __attribute__((visibility("default"))) bool mock_patch_function(void* target, vo
     else if (target == reinterpret_cast<void*>(&MockLoadPlayer)) g_loadPlayerEntry = reinterpret_cast<LoadPlayerFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockInternalSaveWorld)) g_saveWorldEntry = reinterpret_cast<SaveWorldFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockLoadWorld)) g_loadWorldEntry = reinterpret_cast<LoadWorldFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockItemSetDefaults)) g_itemSetDefaultsEntry = reinterpret_cast<ItemSetDefaultsFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockItemRebuildTooltip)) g_rebuildEntry = reinterpret_cast<RebuildFn>(replacement);
     else return false;
     return true;
 }
@@ -596,6 +681,59 @@ __attribute__((visibility("default"))) void mock_remove_chest(int32_t index) {
 }
 __attribute__((visibility("default"))) void* mock_held_item(int32_t index) { return g_held[index]; }
 
+// ---- Itens -------------------------------------------------------------------------
+__attribute__((visibility("default"))) void* mock_new_item() { return NewObject(kItemSize); }
+// O jogo cria um item (Item.NewItem, loja, receita...): SetDefaults pelo endereço.
+__attribute__((visibility("default"))) void mock_game_item_set_defaults(void* item, int32_t type) {
+    g_itemSetDefaultsEntry(static_cast<Il2CppObject*>(item), type, false, nullptr, &g_mItemSetDefaults3);
+}
+// Telas de criação (GUICrafting.CraftButtonOver) chamam RebuildTooltip direto.
+__attribute__((visibility("default"))) void mock_game_rebuild_tooltip(void* item) {
+    g_rebuildEntry(static_cast<Il2CppObject*>(item), &g_mRebuildTooltip);
+}
+// Item.Clone = MemberwiseClone.
+__attribute__((visibility("default"))) void* mock_game_clone_item(void* item) {
+    void* copy = NewObject(kItemSize);
+    std::memcpy(copy, item, kItemSize);
+    return copy;
+}
+// Texto (UTF-8) de uma System.String do mock; vazio se nula.
+std::string Utf8Of(Il2CppObject* str) {
+    std::string out;
+    if (!str) return out;
+    int32_t n = At<int32_t>(str, 0x10);
+    const char16_t* p = reinterpret_cast<const char16_t*>(reinterpret_cast<uint8_t*>(str) + 0x14);
+    for (int32_t i = 0; i < n; ++i) {
+        char16_t c = p[i];
+        if (c < 0x80) out += static_cast<char>(c);
+        else if (c < 0x800) out += static_cast<char>(0xC0 | (c >> 6)), out += static_cast<char>(0x80 | (c & 0x3F));
+        else out += static_cast<char>(0xE0 | (c >> 12)), out += static_cast<char>(0x80 | ((c >> 6) & 0x3F)),
+             out += static_cast<char>(0x80 | (c & 0x3F));
+    }
+    return out;
+}
+// Item.Name: _nameOverride ?? nome original (aqui "vanilla:<type>").
+__attribute__((visibility("default"))) size_t mock_item_name(void* item, char* buf, size_t size) {
+    Il2CppObject* over = At<Il2CppObject*>(item, kItemNameOverride);
+    std::string s = over ? Utf8Of(over) : "vanilla:" + std::to_string(At<int32_t>(item, kItemType));
+    std::snprintf(buf, size, "%s", s.c_str());
+    return s.size();
+}
+// ToolTip._text.Value; "vanilla" para o tooltip original e "none" para ItemTooltip.None.
+__attribute__((visibility("default"))) size_t mock_item_tooltip(void* item, char* buf, size_t size) {
+    Il2CppObject* tt = At<Il2CppObject*>(item, kItemToolTip);
+    std::string s = !tt ? "null" : tt == g_vanillaTooltip ? "vanilla" : tt == g_tooltipNone ? "none" : "";
+    if (s.empty()) {
+        Il2CppObject* text = At<Il2CppObject*>(tt, kTooltipText);
+        s = text ? Utf8Of(At<Il2CppObject*>(text, kTextValue)) : "sem _text";
+        if (At<uint64_t>(tt, kTooltipValidator) == g_globalValidatorKey) s = "não valida: " + s;
+    }
+    std::snprintf(buf, size, "%s", s.c_str());
+    return s.size();
+}
+__attribute__((visibility("default"))) int mock_barriers() { return g_barriers; }
+__attribute__((visibility("default"))) size_t mock_gchandles() { return g_handles.size(); }
+
 // ---- exports da API IL2CPP --------------------------------------------------
 const Il2CppImage* il2cpp_get_corlib() { return g_initialized ? &g_corlib : nullptr; }
 Il2CppDomain* il2cpp_domain_get() { return g_initialized ? &g_domain : nullptr; }
@@ -657,6 +795,21 @@ Il2CppObject* il2cpp_runtime_invoke(const MethodInfo* m, void* obj, void** param
         *exc = e.exc;
         return nullptr;
     }
+    if (m == &g_mItemSetDefaults1) {  // SetDefaults(int) -> SetDefaults(int, false, null), com hook
+        g_itemSetDefaultsEntry(static_cast<Il2CppObject*>(obj), *static_cast<int32_t*>(params[0]), false, nullptr,
+                               &g_mItemSetDefaults3);
+        return nullptr;
+    }
+    if (m == &g_mItemPrefix) {
+        At<uint8_t>(obj, kItemPrefix) = static_cast<uint8_t>(*static_cast<int32_t*>(params[0]));
+        g_box.value = 1;
+        return &g_box.header;
+    }
+    if (m == &g_mTextCtor) {  // LocalizedText(string key, string text)
+        At<void*>(obj, kTextKey) = params[0];
+        At<void*>(obj, kTextValue) = params[1];
+        return nullptr;
+    }
     if (m == &g_mGetMouseItem) return g_held[0];
     if (m == &g_mGetGuideItem) return g_held[2];
     if (m == &g_mGetReforgeItem) return g_held[3];
@@ -669,6 +822,30 @@ Il2CppThread* il2cpp_thread_attach(Il2CppDomain*) { return t_current = &g_thread
 Il2CppThread* il2cpp_thread_current() { return t_current; }
 void il2cpp_thread_detach(Il2CppThread*) { t_current = nullptr; }
 void il2cpp_raise_exception(Il2CppException* exc) { throw MockManagedException{exc}; }
+Il2CppObject* il2cpp_object_new(const Il2CppClass* k) {
+    Il2CppObject* o = NewObject(k->size);
+    o->klass = const_cast<Il2CppClass*>(k);
+    return o;
+}
+Il2CppObject* il2cpp_string_new(const char* utf8) {  // UTF-8 -> UTF-16 (BMP)
+    std::u16string u;
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8); *p;) {
+        char32_t c = *p++;
+        if (c >= 0xE0) c = ((c & 0x0F) << 12) | ((p[0] & 0x3F) << 6) | (p[1] & 0x3F), p += 2;
+        else if (c >= 0xC0) c = ((c & 0x1F) << 6) | (p[0] & 0x3F), p += 1;
+        u += static_cast<char16_t>(c);
+    }
+    return NewString(u.c_str());
+}
+uint32_t il2cpp_gchandle_new(Il2CppObject* obj, bool) {
+    g_handles.push_back(obj);
+    return static_cast<uint32_t>(g_handles.size());
+}
+Il2CppObject* il2cpp_gchandle_get_target(uint32_t handle) { return handle ? g_handles[handle - 1] : nullptr; }
+void il2cpp_gc_wbarrier_set_field(Il2CppObject*, void** target, void* value) {
+    ++g_barriers;
+    *target = value;
+}
 void il2cpp_format_exception(const Il2CppException*, char* msg, int size) {
     std::strncpy(msg, "mock exception", size);
 }

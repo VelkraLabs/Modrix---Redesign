@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 
+#include "tlmod/runtime/content_registry.h"
 #include "tlmod/tlmod_api.h"
 
 namespace tlmod::rt {
@@ -127,6 +128,26 @@ public:
     // jogo). nullopt = desconhecido.
     virtual std::optional<bool> InWorld() const = 0;
     virtual std::optional<bool> Progress(TLModProgress flag) const = 0;
+
+    // --- Itens de mod --------------------------------------------------------------
+    // Um item de mod roda numa casca: o jogo monta o item original
+    // def.shellType (é o que todas as tabelas por tipo veem) e o adaptador
+    // aplica por cima atributos, nome e tooltip da definição. O ID de mod fica
+    // no item como identidade (no Terraria: netID); ItemSlots::Read o devolve.
+    struct ItemHooks {
+        // Antes de Item.SetDefaults (qualquer thread): tipo pedido -> tipo que o jogo monta.
+        std::function<int32_t(int32_t requestedType)> remapType;
+        // Definição do item de mod `type`; nulo se não for de mod. Vale enquanto o runtime existir.
+        std::function<const ItemDefinition*(int32_t type)> definition;
+    };
+    virtual void SetItemHooks(ItemHooks hooks) = 0;
+    // Põe até `stack` unidades de `type` no inventário do jogador local, pelo
+    // SetDefaults do jogo (passa pelos ganchos). Empilha com o que já há e
+    // depois usa slots livres do inventário principal. Só na thread do jogo.
+    // Devolve quantas unidades entraram.
+    virtual int32_t GiveItem(int32_t type, int32_t stack) = 0;
+    // Uma vez por frame, na thread do jogo (menu e mundo). Nulo desliga.
+    virtual void SetFrameHandler(std::function<void()> handler) = 0;
 
     // --- Save/load ---------------------------------------------------------------
     // Ganchos em volta do save e do load de personagem e mundo (no Terraria:

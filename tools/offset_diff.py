@@ -53,6 +53,8 @@ FIELD_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "file_data_off": ("Terraria.IO", "FileData", "instance"),
     "player_file_data_off": ("Terraria.IO", "PlayerFileData", "instance"),
     "world_gen_static_off": ("Terraria", "WorldGen", "static"),
+    "item_tooltip_off": ("Terraria.UI", "ItemTooltip", "instance"),
+    "item_tooltip_static_off": ("Terraria.UI", "ItemTooltip", "static"),
 }
 
 # Prefixo de rva::/argc:: (antes do primeiro "_") -> (namespace C#, classe).
@@ -63,6 +65,8 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
     "Main": ("Terraria", "Main"),
     "WorldFile": ("Terraria.IO", "WorldFile"),
     "CreativeUI": ("Terraria.GameContent.Creative", "CreativeUI"),
+    "Item": ("Terraria", "Item"),
+    "Lang": ("Terraria", "Lang"),
 }
 
 # Constantes do header que espelham uma const do jogo.
@@ -71,6 +75,7 @@ CONST_CHECKS: Dict[str, Tuple[str, str, str]] = {
     "kNpcVanillaCount": ("Terraria.ID", "NPCID", "Count"),
     "kMaxChests": ("Terraria", "Main", "maxChests"),
     "kItemVanillaCount": ("Terraria.ID", "ItemID", "Count"),
+    "kDefaultItemShell": ("Terraria.ID", "ItemID", "Lens"),
 }
 
 # Constantes do header que nomeiam classes (namespace onde devem existir).
@@ -86,6 +91,8 @@ CLASS_NAME_CONSTANTS: Dict[str, str] = {
     "kFileDataClass": "Terraria.IO",
     "kPlayerFileDataClass": "Terraria.IO",
     "kWorldFileClass": "Terraria.IO",
+    "kItemTooltipClass": "Terraria.UI",
+    "kLocalizedTextClass": "Terraria.Localization",
 }
 
 # content_registry.cpp DefaultRanges: tipo -> const com a contagem original.

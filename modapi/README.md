@@ -94,6 +94,61 @@ privado do mod, fica guardado no runtime e o jogo não toca. Veja `mods/example_
 Ainda falta: nome exibido, barra e música de boss (`boss`), textura própria, sincronizar a tabela de
 slots e o `local[]` em multiplayer, e confirmar no jogo que `NewNPC` aceita `source` nulo.
 
+## Itens de mod no jogo (casca)
+
+Um item de mod roda numa **casca**: um item original que o jogo monta e desenha. Mesma ideia dos
+NPCs.
+
+```
+Item.SetDefaults(8192)        hook pré: 8192 é o Rubi Fictício -> monta a casca 38 (Lente)
+  └ SetDefaults original(38)  todas as tabelas por tipo só veem 38
+hook pós: netID = 8192        a identidade do item; dano, uso, pilha, valor, raridade, nome e tooltip da definição
+Item.RebuildTooltip           netID de mod: o tooltip vem da definição (Lang.GetTooltip(8192) estouraria)
+```
+
+| campo do `Item` | item original | item de mod |
+|---|---|---|
+| `type` | o ID | a casca (`shell_type`, padrão 38): é o índice de **todas** as tabelas |
+| `netID` | o ID | o ID de mod (8192+): `Clone` copia, `IsTheSameAs` compara, `netDefaults`/`Refresh` voltam ao hook |
+| `_nameOverride`, `ToolTip` | nulo / `Lang` | `display_name` e `tooltip` da definição (`Item.Name` usa `_nameOverride`) |
+
+**Por que casca e não aumentar as tabelas** (o que o tModLoader faz no PC, reescrevendo o IL do jogo):
+
+- **Tabelas por tipo no dump.**
+  - 77 arrays em `ItemID.Sets`;
+  - `TextureAssets.Item` e `ItemFlame`;
+  - `Lang._itemNameCache` e `_itemTooltipCache`;
+  - `Item.headType/bodyType/legType/staff/claw/cachedItemSpawnsByType` e `Main.itemAnimations`;
+  - os dicionários de `ContentSamples` e as tabelas do mobile (`VirtualControllerInputState`, tags de
+    item do chat).
+
+  Todas são criadas com o tamanho `ItemID.Count`.
+- **A constante está embutida no código ARM64.** O IL2CPP compila `ItemID.Count` como imediato: 37
+  ocorrências de `0x1550` em 31 métodos. Algumas são as alocações (`.cctor` de `ItemID.Sets`,
+  `TextureAssets`, `Lang`, `Item`). Outras são guardas: `Item.SetDefaults` troca `type >= 5456` por
+  ar, e também `DeserializeFrom`, `ItemSlot.TryItemSwap`, `Player.UpdateEquips`, `RefreshInfoAccs`,
+  `ItemTagHandler`. Aumentar os arrays não basta: seria preciso patchear essas instruções no binário,
+  e de novo a cada versão do jogo.
+- **Com a casca, `type` nunca sai da faixa original**, então nenhuma tabela precisa mudar. O jogo já
+  separa `type` de `netID` nas variantes antigas (netID negativo), e os leitores de `netID` são
+  poucos: comparações, `netDefaults`, `Serialize` e `RebuildTooltip` (este com hook).
+
+**Na API.** `TLModItemDef.shell_type` escolhe a casca (0 = Lente), que precisa ser um item original.
+Em `damage > 0` numa casca que não se usa, o item vira arma de golpe corpo a corpo.
+`give_item(ctx, tipo, quantidade)` dá um item ao jogador local: pode ser chamado de qualquer thread,
+inclusive no init, e a entrega acontece no próximo frame com um mundo carregado, empilhando com o que
+ele já tem.
+
+**Para testar no aparelho:** crie um arquivo vazio `give_on_start` na pasta do mod de exemplo
+(`.../tlmod/mods/example_item/give_on_start`). Ao entrar num mundo vêm 3 Rubis Fictícios, com o
+desenho da Lente, mas com nome, tooltip, valor (50 de prata), raridade e pilha (999) do mod.
+
+O que ainda não está aqui:
+- textura própria (o jogo desenha a casca, `TextureAssets.Item[type]`);
+- receitas e loja;
+- sincronizar a tabela de IDs em multiplayer;
+- telas que leem o nome direto de `Lang` por `type` em vez de `Item.Name` mostrariam o nome da casca.
+
 ## Itens de mod no save
 
 O jogo grava o ID numérico do item (`netID`) no arquivo. Um ID de mod (8192+) muda quando o
@@ -160,10 +215,11 @@ O formato é o do PC 1.4.4. RVAs em `il2cpp_bridge/include/terraria_offsets.h`.
 | `.plr`: temporários e loadouts | `Item.Serialize` (`0xBB8988`): `netID` int32, `stack` int32, `prefix` byte |
 | `.wld`: `SaveChests` | por baú `x`, `y` int32 e nome; por item `stack` int16 e, se > 0, `netID` int32 + `prefix` byte |
 
-Um ID de mod gravado ali quebra o arquivo: na leitura do `.plr`, `armor`/`dye`/`miscEquips`/`miscDyes`
-chamam `Item.netDefaults(id)` sem conferir a faixa (`IndexOutOfRangeException`, o personagem não
-carrega); inventário e bancos conferem `id >= 5456` e trocam por ar (o item some). No `.wld`,
-`SaveChests` indexa `ItemID.Sets.ItemsThatShouldNotBeInInventory[type]` e estoura antes de gravar.
+Um ID de mod gravado ali não volta: todo load passa por `Item.SetDefaults`, que troca `type >= 5456`
+por ar (`type = netID = stack = 0`, sem erro), e inventário e bancos conferem `id >= 5456` antes. O
+item some em silêncio; e, se os IDs mudarem, um ID antigo vira outro item de mod. No `.wld`,
+`SaveChests` indexa `ItemID.Sets.ItemsThatShouldNotBeInInventory[type]` e estoura antes de gravar
+quando `type >= 5456` (com a casca, abaixo, `type` nunca passa de 5455).
 
 ### O que ainda fica de fora
 
@@ -173,8 +229,9 @@ carrega); inventário e bancos conferem `id >= 5456` e trocam por ar (o item som
   colocado num deles ainda chegaria ao `.wld`.
 - **Pesquisa da Jornada** (`CreativeUnlocksTracker.Save`, chamado pelo save do personagem) e a
   sincronização de saves do celular (`SaveSynchronisationOperation`).
-- **Itens de mod de verdade no jogo**: ainda não há hook em `Item.SetDefaults`. O item reinserido
-  recebe só os campos que o save grava (`type`, `netID`, `stack`, `prefix`, `favorited`).
+- O item reinserido no load é montado pelo `Item.SetDefaults` do jogo (casca + definição) e recebe
+  pilha, prefixo (`Item.Prefix`) e favorito. No save, "tirar" um item zera só o que o arquivo grava
+  (`netID`, `stack`, `prefix`, `favorited`) e o devolve no mesmo objeto, sem `SetDefaults`.
 
 ## Build
 
@@ -196,8 +253,7 @@ No Android, o runtime procura mods em `$TLMOD_MODS_DIR`; se não houver, em
 
 ## Ainda não implementado
 
-- **Fazer o jogo usar o conteúdo registrado.** Hoje o registro atribui IDs e guarda as
-  definições. Falta hookar `Item.SetDefaults`, carregar texturas e tratar nome e tooltip.
+- **Textura própria de item**, receitas e loja (o item de mod usa a textura da casca).
 - **Multiplayer.** O servidor precisa enviar a tabela chave → ID aos clientes.
 - **Outros tipos.** NPC, projectile, tile, wall e buff já têm faixa de ID, mas ainda não têm
   `register_*` na API.

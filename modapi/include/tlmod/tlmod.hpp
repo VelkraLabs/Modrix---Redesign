@@ -29,6 +29,7 @@ struct ItemDef {
     int32_t rarity = 0;
     int32_t damage = 0;
     int32_t useTime = 20;
+    TLModId shellType = 0;     // item original usado como casca; 0 = padrão (Lente)
 };
 
 struct NpcDef {
@@ -91,6 +92,7 @@ public:
         c.rarity = def.rarity;
         c.damage = def.damage;
         c.use_time = def.useTime;
+        c.shell_type = def.shellType;
         return api_->register_item(ctx_, &c);
     }
 
@@ -130,6 +132,11 @@ public:
         return api_->register_provider(ctx_, channel.c_str(), &ProviderTrampoline, provider);
     }
 
+    // Entrega no próximo frame com um mundo carregado (ver tlmod_api.h).
+    bool GiveItem(TLModId type, int32_t stack = 1) const {
+        return HasGiveApi() && api_->give_item(ctx_, type, stack);
+    }
+
     bool OnPlayerHurt(TLModPlayerHurtFn fn, void* user = nullptr) const {
         return api_->subscribe_player_hurt(ctx_, fn, user);
     }
@@ -146,6 +153,9 @@ private:
     }
     bool HasProgressApi() const {
         return api_->struct_size >= offsetof(TLModHostApi, buffer_append) + sizeof(api_->buffer_append);
+    }
+    bool HasGiveApi() const {
+        return api_->struct_size >= offsetof(TLModHostApi, give_item) + sizeof(api_->give_item);
     }
     bool HasNpcApi() const {
         return api_->struct_size >= offsetof(TLModHostApi, spawn_npc) + sizeof(api_->spawn_npc);

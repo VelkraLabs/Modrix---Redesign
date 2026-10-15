@@ -109,6 +109,64 @@ constexpr uint64_t kInWorldBit = 1ull << 31;
 constexpr uint64_t kInWorldKnownBit = 1ull << 63;
 std::atomic<uint64_t> g_snapshot{0};
 
+// --- Itens de mod ----------------------------------------------------------------------
+// Mesma publicação atômica dos outros ganchos; os antigos não são liberados.
+std::atomic<GameAdapter::ItemHooks*> g_itemHooks{nullptr};
+std::atomic<std::function<void()>*> g_frameHandler{nullptr};
+
+int32_t RemapItem(int32_t type) {
+    GameAdapter::ItemHooks* h = g_itemHooks.load(std::memory_order_acquire);
+    return h && h->remapType ? h->remapType(type) : type;
+}
+const ItemDefinition* ItemDef(int32_t type) {
+    GameAdapter::ItemHooks* h = g_itemHooks.load(std::memory_order_acquire);
+    return h && h->definition ? h->definition(type) : nullptr;
+}
+
+// Por cima da casca: atributos, nome e tooltip da definição. Uma arma
+// (damage > 0) numa casca que não se usa vira arma de golpe corpo a corpo.
+void ApplyDefinition(Il2CppObject* item, const ItemDefinition& d) {
+    TLModItemStats st{};
+    TLMod_ReadItemStats(item, &st);
+    st.width = d.width;
+    st.height = d.height;
+    st.maxStack = d.maxStack;
+    st.value = d.value;
+    st.rare = d.rarity;
+    st.damage = d.damage;
+    if (d.useTime > 0) st.useTime = st.useAnimation = d.useTime;
+    if (d.damage > 0 && st.useStyle == 0) {
+        st.useStyle = 1;
+        st.melee = true;
+    }
+    TLMod_WriteItemStats(item, &st);
+    TLMod_SetItemName(item, d.displayName.c_str());
+    TLMod_SetItemTooltip(item, d.tooltip.c_str());
+}
+
+// Callbacks da ponte: rodam dentro de hooks do jogo, em qualquer thread.
+// Nenhuma exceção pode sair daqui.
+int32_t OnItemRemap(int32_t type) {
+    try {
+        return RemapItem(type);
+    } catch (...) {
+        return type;
+    }
+}
+void OnItemDefaults(Il2CppObject* item, int32_t requested, int32_t) {
+    try {
+        if (const ItemDefinition* d = ItemDef(requested)) ApplyDefinition(item, *d);
+    } catch (...) {
+    }
+}
+void OnItemRebuildTooltip(Il2CppObject* item, int32_t netId) {
+    try {
+        const ItemDefinition* d = ItemDef(netId);
+        TLMod_SetItemTooltip(item, d ? d->tooltip.c_str() : nullptr);
+    } catch (...) {
+    }
+}
+
 // Só na thread do jogo (dentro de Main.DoUpdate).
 void OnFrame() {
     static TLModStaticField* fields[TLMOD_PROGRESS_COUNT] = {};
@@ -127,6 +185,13 @@ void OnFrame() {
             snap |= (1ull << (kKnownShift + i)) | (v ? 1ull << i : 0);
     }
     g_snapshot.store(snap, std::memory_order_release);
+
+    if (std::function<void()>* f = g_frameHandler.load(std::memory_order_acquire)) {
+        try {
+            if (*f) (*f)();
+        } catch (...) {
+        }
+    }
 }
 
 // --- Save/load -----------------------------------------------------------------------
@@ -192,12 +257,32 @@ public:
         }
     }
     std::optional<ItemStack> Read(const ItemSlot& slot) const override { return ReadItem(Find(slot)); }
+    // Ar: zera só o que o save grava (netID, pilha, prefixo, favorito); o
+    // objeto continua montado como a casca. Um item num slot esvaziado assim
+    // volta exatamente como estava; em qualquer outro, é montado pelo
+    // SetDefaults do jogo (passa pelo hook) e recebe prefixo, pilha e favorito.
     bool Write(const ItemSlot& slot, const ItemStack& v) override {
         Il2CppObject* item = Find(slot);
-        // Só os campos que o save grava; netID = type (itens de mod não têm variantes).
         TLModItemFields f{};
-        if (!v.IsAir()) f = TLModItemFields{v.type, v.type, v.stack, v.prefix, v.favorited};
-        return item && TLMod_WriteItem(item, &f);
+        if (!item || !TLMod_ReadItem(item, &f)) return false;
+        if (v.IsAir()) {
+            f.netID = f.stack = 0;
+            f.prefix = 0;
+            f.favorited = false;
+            return TLMod_WriteItem(item, &f);
+        }
+        const ItemDefinition* def = ItemDef(v.type);
+        bool placeholder = f.netID == 0 && f.stack == 0 && f.type != 0 && (!def || f.type == def->shellType);
+        if (!placeholder) {
+            if (!TLMod_SetItemDefaults(item, v.type)) return false;
+            TLMod_ApplyItemPrefix(item, v.prefix);
+            if (!TLMod_ReadItem(item, &f) || f.type == 0) return false;  // o jogo não montou (ID sem dono)
+        }
+        f.netID = v.type;
+        f.stack = v.stack;
+        f.prefix = v.prefix;
+        f.favorited = v.favorited;
+        return TLMod_WriteItem(item, &f);
     }
     int32_t Count(const ItemSlot& slot) const override {
         int32_t group = 0;
@@ -283,6 +368,49 @@ void OnBridgeSave(const TLModSaveEvent* ev, TLModSavePhase phase) {
 }  // namespace
 
 BridgeGameAdapter::BridgeGameAdapter() { TLMod_SetFrameCallback(&OnFrame); }
+
+void BridgeGameAdapter::SetItemHooks(ItemHooks hooks) {
+    bool any = hooks.remapType || hooks.definition;
+    g_itemHooks.store(any ? new ItemHooks(std::move(hooks)) : nullptr, std::memory_order_release);
+    TLModItemCallbacks cb{&OnItemRemap, &OnItemDefaults, &OnItemRebuildTooltip};
+    TLMod_SetItemCallbacks(any ? &cb : nullptr);
+}
+
+void BridgeGameAdapter::SetFrameHandler(std::function<void()> handler) {
+    g_frameHandler.store(handler ? new std::function<void()>(std::move(handler)) : nullptr,
+                         std::memory_order_release);
+}
+
+int32_t BridgeGameAdapter::GiveItem(int32_t type, int32_t stack) {
+    Il2CppObject* player = TLMod_GetLocalPlayer();
+    if (!player || stack < 1) return 0;
+    const int32_t shell = RemapItem(type);
+    const int32_t slots = std::min(TLMod_ItemSlotCount(player, TLMOD_ITEMS_INVENTORY, 0), 50);  // inventário principal
+    int32_t left = stack;
+    TLModItemFields f{};
+    TLModItemStats st{};
+    // 1) Empilha com o mesmo item (o critério de Item.IsTheSameAs: netID e type).
+    for (int32_t i = 0; i < slots && left > 0; ++i) {
+        Il2CppObject* item = TLMod_ItemSlot(player, TLMOD_ITEMS_INVENTORY, 0, i);
+        if (!TLMod_ReadItem(item, &f) || f.stack <= 0 || f.netID != type || f.type != shell) continue;
+        if (!TLMod_ReadItemStats(item, &st) || f.stack >= st.maxStack) continue;
+        int32_t add = std::min(left, st.maxStack - f.stack);
+        f.stack += add;
+        left -= add;
+        TLMod_WriteItem(item, &f);
+    }
+    // 2) Slots livres: o jogo monta o item (SetDefaults -> hook -> casca + definição).
+    for (int32_t i = 0; i < slots && left > 0; ++i) {
+        Il2CppObject* item = TLMod_ItemSlot(player, TLMOD_ITEMS_INVENTORY, 0, i);
+        if (!TLMod_ReadItem(item, &f) || (f.type != 0 && f.stack > 0)) continue;
+        if (!TLMod_SetItemDefaults(item, type) || !TLMod_ReadItem(item, &f) || f.type == 0) break;
+        TLMod_ReadItemStats(item, &st);
+        f.stack = std::min(left, std::max(1, st.maxStack));
+        left -= f.stack;
+        TLMod_WriteItem(item, &f);
+    }
+    return stack - left;
+}
 
 void BridgeGameAdapter::SetPersistenceHooks(PersistenceHooks hooks) {
     bool any = hooks.beforeSave || hooks.afterSave || hooks.afterLoad;

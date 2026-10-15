@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -105,13 +106,11 @@ public:
         return (f >= 0 && f < TLMOD_PROGRESS_COUNT) ? progress[static_cast<size_t>(f)] : std::nullopt;
     }
 
-    // --- Itens e saves -------------------------------------------------------------
-    // Mesmo layout de item do jogo (Player.InternalSavePlayerFile, WorldFile.SaveChests:
-    // netID int32, stack, prefix byte) e as mesmas reações a um ID fora de ItemID.Count
-    // (5456): na leitura do .plr, armor/dye/miscEquips/miscDyes, temporários e loadouts
-    // chamam netDefaults(id) e estouram (o personagem não carrega); inventário e bancos
-    // trocam por ar (o item some). SaveChests estoura (o mundo não salva) e LoadChests
-    // também. Os baús voltam do load com índices novos (só os não nulos, em ordem).
+    // --- Itens ------------------------------------------------------------------------
+    // Como no jogo: tabelas indexadas pelo tipo do item com o tamanho original
+    // (ItemID.Count = 5456): nomes, tooltips (por netID), pilha máxima, texturas,
+    // ItemID.Sets. Ler fora delas lança IndexOutOfRangeException e conta em
+    // tableOverflows. Item.SetDefaults troca type >= 5456 por ar.
     static constexpr int32_t kItemCount = 5456;
     using ItemContainer = tlmod::rt::ItemContainer;
     using ItemSlot = tlmod::rt::ItemSlot;
@@ -122,8 +121,161 @@ public:
         int32_t type = 0, stack = 0;
         uint8_t prefix = 0;
         bool favorited = false;
+        int32_t netID = 0;  // o que o save grava; = type, exceto num item de mod (casca)
+        int32_t width = 0, height = 0, damage = 0, useTime = 0, useAnimation = 0, maxStack = 0, value = 0, rare = 0;
+        uint8_t useStyle = 0;
+        bool melee = false;
+        std::string nameOverride;  // Item._nameOverride
+        std::string tooltip;       // texto do ToolTip
         bool IsAir() const { return type == 0 || stack <= 0; }
+        // Item original como o load deixa (netID = type), sem passar pelo SetDefaults.
+        static Item Raw(int32_t type, int32_t stack, uint8_t prefix = 0, bool favorited = false) {
+            Item it;
+            it.type = it.netID = type;
+            it.stack = stack;
+            it.prefix = prefix;
+            it.favorited = favorited;
+            it.maxStack = 9999;
+            return it;
+        }
     };
+
+    std::vector<std::string> itemNames = Table<std::string>("item ");
+    std::vector<std::string> itemTooltips = Table<std::string>("tooltip ");
+    std::vector<int32_t> itemMaxStack = std::vector<int32_t>(kItemCount, 9999);
+    std::vector<int32_t> itemTexture = std::vector<int32_t>(kItemCount, 1);
+    std::vector<bool> itemShouldNotBeInInventory = std::vector<bool>(kItemCount, false);  // ItemID.Sets
+    std::atomic<int> tableOverflows{0};
+    std::atomic<int> lastOverflowIndex{0};
+
+    ItemHooks itemHooks;
+    std::function<void()> frameHandler;
+    void SetItemHooks(ItemHooks h) override { itemHooks = std::move(h); }
+    void SetFrameHandler(std::function<void()> h) override { frameHandler = std::move(h); }
+    // Main.DoUpdate: um frame na thread do jogo.
+    void Frame() {
+        if (frameHandler) frameHandler();
+    }
+
+    // Item.SetDefaults(type), com os ganchos do adaptador em volta (como o hook da ponte).
+    void SetDefaults(Item& it, int32_t requested) {
+        int32_t type = itemHooks.remapType ? itemHooks.remapType(requested) : requested;
+        it = Item{};  // ResetStats
+        it.type = it.netID = type;
+        if (type < 0 || type >= kItemCount) it.type = it.netID = 0;  // a guarda do jogo
+        if (it.type != 0) {
+            it.stack = 1;
+            it.maxStack = At(itemMaxStack, it.type);
+            it.width = 12;
+            it.height = 20;
+            if (At(itemShouldNotBeInInventory, it.type)) it.stack = 0;
+        }
+        RebuildTooltip(it);
+        if (type != requested && it.type == type) {  // casca montada: identidade + definição
+            it.netID = requested;
+            ApplyDefinition(it);
+        }
+    }
+    // O que o adaptador aplica por cima da casca (mesmas regras do BridgeGameAdapter).
+    void ApplyDefinition(Item& it) {
+        const tlmod::rt::ItemDefinition* d = itemHooks.definition ? itemHooks.definition(it.netID) : nullptr;
+        if (!d) return;
+        it.width = d->width;
+        it.height = d->height;
+        it.maxStack = d->maxStack;
+        it.value = d->value;
+        it.rare = d->rarity;
+        it.damage = d->damage;
+        if (d->useTime > 0) it.useTime = it.useAnimation = d->useTime;
+        if (d->damage > 0 && it.useStyle == 0) it.useStyle = 1, it.melee = true;  // arma de golpe
+        it.nameOverride = d->displayName;
+        it.tooltip = d->tooltip;
+    }
+    // Item.RebuildTooltip: Lang.GetTooltip(netID). Com o TLMod, o hook da ponte
+    // atende um netID de mod sem tocar na tabela.
+    void RebuildTooltip(Item& it) {
+        if (it.netID >= kItemCount && (itemHooks.remapType || itemHooks.definition)) {
+            const tlmod::rt::ItemDefinition* def = itemHooks.definition ? itemHooks.definition(it.netID) : nullptr;
+            it.tooltip = def ? def->tooltip : "";
+            return;
+        }
+        it.tooltip = At(itemTooltips, it.netID);
+    }
+    // Item.Name: _nameOverride ?? Lang.GetItemNameValue(type).
+    std::string Name(const Item& it) { return it.nameOverride.empty() ? At(itemNames, it.type) : it.nameOverride; }
+    // TextureAssets.Item[type]: o que o desenho do inventário lê.
+    int32_t Texture(const Item& it) { return At(itemTexture, it.type); }
+    // Item.IsTheSameAs: empilhar, depositar, pegar do chão.
+    static bool IsTheSameAs(const Item& a, const Item& b) { return a.netID == b.netID && a.type == b.type; }
+    // Item.Refresh: netDefaults(netID) mantendo pilha, prefixo e favorito.
+    void Refresh(Item& it) {
+        Item keep = it;
+        SetDefaults(it, keep.netID);
+        it.stack = keep.stack;
+        it.prefix = keep.prefix;
+        it.favorited = keep.favorited;
+    }
+    // new Item() + SetDefaults(type) (Item.NewItem, loja, receita...).
+    Item NewItem(int32_t type, int32_t stack = 1, uint8_t prefix = 0, bool favorited = false) {
+        Item it;
+        SetDefaults(it, type);
+        if (!it.IsAir()) it.stack = stack, it.prefix = prefix, it.favorited = favorited;
+        return it;
+    }
+    // Um frame de interface: textura e nome de tudo que o jogador e os baús têm.
+    void DrawAll() {
+        auto draw = [&](const Item& it) {
+            if (it.IsAir()) return;
+            Texture(it);
+            Name(it);
+        };
+        ForEachPlayerItem([&](Item& it) { draw(it); });
+        for (const auto& c : chests)
+            if (c) for (const Item& it : c->item) draw(it);
+    }
+    template <typename Fn>
+    void ForEachPlayerItem(Fn fn) {
+        for (Item& it : player.inventory) fn(it);
+        for (Item& it : player.armor) fn(it);
+        for (Item& it : player.dye) fn(it);
+        for (Item& it : player.miscEquips) fn(it);
+        for (Item& it : player.miscDyes) fn(it);
+        for (auto& b : player.banks) for (Item& it : b) fn(it);
+        for (auto& l : player.loadoutArmor) for (Item& it : l) fn(it);
+        for (auto& l : player.loadoutDye) for (Item& it : l) fn(it);
+        for (Item& it : player.temporary) fn(it);
+        for (Item& it : held) fn(it);
+    }
+
+    // Jogador local: empilha com o que já tem (IsTheSameAs) e depois usa os
+    // slots livres do inventário principal (0..49).
+    int32_t GiveItem(int32_t type, int32_t stack) override {
+        Item proto = NewItem(type, 1);
+        if (proto.IsAir()) return 0;
+        int32_t left = stack;
+        for (size_t i = 0; i < 50 && left > 0; ++i) {
+            Item& it = player.inventory[i];
+            if (it.IsAir() || !IsTheSameAs(it, proto) || it.stack >= it.maxStack) continue;
+            int32_t add = std::min(left, it.maxStack - it.stack);
+            it.stack += add;
+            left -= add;
+        }
+        for (size_t i = 0; i < 50 && left > 0; ++i) {
+            Item& it = player.inventory[i];
+            if (!it.IsAir()) continue;
+            it = proto;
+            it.stack = std::min(left, proto.maxStack);
+            left -= it.stack;
+        }
+        return stack - left;
+    }
+
+    // --- Saves ---------------------------------------------------------------------
+    // Mesmo layout de item do jogo (Player.InternalSavePlayerFile, WorldFile.SaveChests:
+    // netID int32, stack, prefix byte). No load tudo passa por SetDefaults (netDefaults):
+    // um ID >= 5456 vira ar e o item some; inventário e bancos conferem antes. SaveChests
+    // indexa ItemID.Sets.ItemsThatShouldNotBeInInventory[type]. Os baús voltam do load com
+    // índices novos (só os não nulos, em ordem).
     struct Player {
         std::array<Item, 58> inventory{};  // o que o save grava
         std::array<Item, 20> armor{};
@@ -184,7 +336,7 @@ public:
         void ForEach(const std::function<void(const ItemSlot&, const ItemStack&)>& fn) const override {
             auto visit = [&](ItemSlot s) {
                 for (s.index = 0; s.index < Count(s); ++s.index)
-                    if (Item* it = Ref(s); it && !it->IsAir()) fn(s, ItemStack{it->type, it->stack, it->prefix, it->favorited});
+                    if (Item* it = Ref(s); it && !it->IsAir()) fn(s, Stack(*it));
             };
             if (kind_ == SaveFile::Kind::World) {
                 for (const auto& c : g_.chests)
@@ -200,12 +352,27 @@ public:
         std::optional<ItemStack> Read(const ItemSlot& s) const override {
             Item* it = Ref(s);
             if (!it) return std::nullopt;
-            return ItemStack{it->type, it->stack, it->prefix, it->favorited};
+            return Stack(*it);
         }
+        // Ar: zera só o que o save grava (o objeto continua montado). Um item num
+        // slot esvaziado assim volta como estava; em outro slot, pelo SetDefaults.
         bool Write(const ItemSlot& s, const ItemStack& v) override {
             Item* it = Ref(s);
             if (!it) return false;
-            *it = Item{v.type, v.stack, v.prefix, v.favorited};
+            if (v.IsAir()) {
+                it->netID = it->stack = 0;
+                it->prefix = 0;
+                it->favorited = false;
+                return true;
+            }
+            const tlmod::rt::ItemDefinition* def =
+                g_.itemHooks.definition ? g_.itemHooks.definition(v.type) : nullptr;
+            bool placeholder = it->netID == 0 && it->stack == 0 && it->type != 0 && (!def || it->type == def->shellType);
+            if (!placeholder) g_.SetDefaults(*it, v.type);
+            it->netID = v.type;
+            it->stack = v.stack;
+            it->prefix = v.prefix;
+            it->favorited = v.favorited;
             return true;
         }
         int32_t Count(const ItemSlot& s) const override {
@@ -216,6 +383,10 @@ public:
         }
 
     private:
+        // O ID que o save gravaria (netID); max com type para variantes antigas (netID < 0).
+        static ItemStack Stack(const Item& it) {
+            return ItemStack{std::max(it.type, it.netID), it.stack, it.prefix, it.favorited};
+        }
         Item* Ref(const ItemSlot& s) const {
             if (s.index < 0) return nullptr;
             auto i = static_cast<size_t>(s.index);
@@ -266,6 +437,23 @@ public:
     }
 
 private:
+    template <typename T>
+    static std::vector<T> Table(const char* prefix) {
+        std::vector<T> t(kItemCount);
+        for (int32_t i = 0; i < kItemCount; ++i) t[static_cast<size_t>(i)] = prefix + std::to_string(i);
+        return t;
+    }
+    // Acesso a uma tabela do jogo pelo tipo (bounds-checked, como no IL2CPP).
+    template <typename T>
+    T At(const std::vector<T>& table, int32_t index) {
+        if (index < 0 || static_cast<size_t>(index) >= table.size()) {
+            ++tableOverflows;
+            lastOverflowIndex = index;
+            throw std::out_of_range("IndexOutOfRangeException: tabela de itens[" + std::to_string(index) + "]");
+        }
+        return table[static_cast<size_t>(index)];
+    }
+
     struct Writer {
         std::string out;
         int32_t* maxId;
@@ -273,8 +461,8 @@ private:
         void I16(int16_t v) { out.append(reinterpret_cast<const char*>(&v), 2); }
         void U8(uint8_t v) { out.push_back(static_cast<char>(v)); }
         void NetId(const Item& it) {
-            if (it.type > *maxId) *maxId = it.type;
-            I32(it.type);
+            if (it.netID > *maxId) *maxId = it.netID;
+            I32(it.netID);
         }
     };
     struct Reader {
@@ -289,17 +477,18 @@ private:
             return v;
         }
     };
-    // Item.netDefaults/SetDefaults: o jogo indexa arrays de tamanho ItemID.Count.
-    static Item NetDefaults(int32_t id) {
-        if (id >= kItemCount) throw std::out_of_range("IndexOutOfRangeException: netDefaults(" + std::to_string(id) + ")");
-        return Item{id, id == 0 ? 0 : 1, 0, false};
+    // Item.netDefaults -> SetDefaults (com a guarda type >= 5456 -> ar).
+    Item NetDefaults(int32_t id) {
+        Item it;
+        SetDefaults(it, id);
+        return it;
     }
     static void WriteSerialized(Writer& w, const Item& it) {  // Item.Serialize
         w.NetId(it);
         w.I32(it.stack);
         w.U8(it.prefix);
     }
-    static Item ReadSerialized(Reader& r) {  // Item.DeserializeFrom
+    Item ReadSerialized(Reader& r) {  // Item.DeserializeFrom
         Item it = NetDefaults(r.Get<int32_t>());
         it.stack = r.Get<int32_t>();
         it.prefix = r.Get<uint8_t>();
@@ -328,10 +517,10 @@ private:
             for (const Item& it : player.loadoutDye[l]) WriteSerialized(w, it);
         }
     }
-    static void ReadPlayer(Reader& r, Player& p) {
+    void ReadPlayer(Reader& r, Player& p) {
         for (Item& it : p.armor) it = NetDefaults(r.Get<int32_t>()), it.prefix = r.Get<uint8_t>();
         for (Item& it : p.dye) it = NetDefaults(r.Get<int32_t>()), it.prefix = r.Get<uint8_t>();
-        auto checked = [](int32_t id) { return id >= kItemCount ? Item{} : NetDefaults(id); };  // vira ar
+        auto checked = [this](int32_t id) { return id >= kItemCount ? Item{} : NetDefaults(id); };  // vira ar
         for (Item& it : p.inventory) {
             it = checked(r.Get<int32_t>());
             int32_t stack = r.Get<int32_t>();
@@ -357,7 +546,7 @@ private:
             for (Item& it : p.loadoutDye[l]) it = ReadSerialized(r);
         }
     }
-    void WriteWorld(Writer& w) const {  // WorldFile.SaveChests
+    void WriteWorld(Writer& w) {  // WorldFile.SaveChests
         int16_t count = 0;
         for (const auto& c : chests) count = static_cast<int16_t>(count + (c ? 1 : 0));
         w.I16(count);
@@ -366,14 +555,16 @@ private:
             w.I32(c->x);
             w.I32(c->y);
             for (const Item& it : c->item) {
-                // ItemID.Sets.ItemsThatShouldNotBeInInventory[item.type]
-                if (it.type >= kItemCount) throw std::out_of_range("IndexOutOfRangeException em SaveChests");
+                if (At(itemShouldNotBeInInventory, it.type)) {  // ItemID.Sets.ItemsThatShouldNotBeInInventory[type]
+                    w.I16(0);
+                    continue;
+                }
                 w.I16(static_cast<int16_t>(it.IsAir() ? 0 : it.stack));
                 if (!it.IsAir()) w.NetId(it), w.U8(it.prefix);
             }
         }
     }
-    static void ReadWorld(Reader& r, std::vector<std::optional<Chest>>& out) {  // LoadChests
+    void ReadWorld(Reader& r, std::vector<std::optional<Chest>>& out) {  // LoadChests
         int16_t count = r.Get<int16_t>();
         out.assign(16, std::nullopt);
         for (int16_t c = 0; c < count; ++c) {

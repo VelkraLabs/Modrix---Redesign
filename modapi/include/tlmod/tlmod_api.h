@@ -93,8 +93,15 @@ typedef struct TLModItemDef {
     int32_t max_stack;         /* 1 = não empilha */
     int32_t value;             /* preço em moedas de cobre */
     int32_t rarity;            /* -1 (cinza) .. 11 */
-    int32_t damage;            /* 0 = não é arma */
+    int32_t damage;            /* 0 = não é arma; > 0 vira arma de golpe (corpo a corpo) */
     int32_t use_time;          /* em ticks (60 por segundo) */
+    /* Acrescentado depois de use_time: o runtime só lê se struct_size o cobre
+     * (mods antigos ficam com a casca padrão).
+     * Item original usado como "casca": o jogo só vê este tipo (textura,
+     * tabelas por tipo), e o runtime aplica por cima os atributos, o nome e o
+     * tooltip acima. 0 = padrão (Lente, um material sem uso). Precisa ser um
+     * item original (1..ItemID.Count-1). */
+    TLModId shell_type;
 } TLModItemDef;
 
 /* NPC / boss.
@@ -244,6 +251,13 @@ typedef struct TLModHostApi {
      * channel [a-z0-9_]{1,64}, declarado em manifest "provides". */
     bool (*register_provider)(TLModContext* ctx, const char* channel, TLModProviderFn fn, void* user);
     void (*buffer_append)(TLModBuffer* out, const char* data, size_t len);
+
+    /* Dá `stack` unidades do item `type` (original ou de mod) ao jogador
+     * local. Pode ser chamado de qualquer thread, inclusive no init: a entrega
+     * acontece na thread do jogo, no próximo frame com um mundo carregado,
+     * empilhando com o que ele já tem e depois nos slots livres do inventário.
+     * false = tipo desconhecido ou stack < 1. O resultado da entrega vai para o log. */
+    bool (*give_item)(TLModContext* ctx, TLModId type, int32_t stack);
 } TLModHostApi;
 
 /* Assinatura do ponto de entrada. Retorne 0 em sucesso; qualquer outro valor

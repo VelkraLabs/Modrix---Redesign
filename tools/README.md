@@ -19,10 +19,10 @@ python3 tools/offset_diff.py --dump novo/dump.cs --script novo/script.json
 
 | origem no TLMod | regra |
 |---|---|
-| `terraria_offsets.h` `player_off`, `npc_off`, `main_static_off`, `local_user_off`, `item_off`, `chest_off`, `loadout_off`, `file_data_off`, `player_file_data_off`, `world_gen_static_off` | offset do campo (com herança) e tipo, comparado com a 1ª palavra do comentário |
+| `terraria_offsets.h` `player_off`, `npc_off`, `main_static_off`, `local_user_off`, `item_off`, `chest_off`, `loadout_off`, `file_data_off`, `player_file_data_off`, `world_gen_static_off`, `item_tooltip_off`, `item_tooltip_static_off` | offset do campo (com herança) e tipo, comparado com a 1ª palavra do comentário |
 | `terraria_offsets.h` `rva::Classe_Metodo` | RVA; desambigua overloads com `argc::` |
 | `terraria_offsets.h` `argc::` | número de parâmetros (mudou = o typedef do hook precisa mudar) |
-| `terraria_offsets.h` `kMaxNPCs`, `kNpcVanillaCount`, `kMaxChests`, `kItemVanillaCount`, `k*Class`, `kAssembly` | const do jogo, existência da classe e da imagem |
+| `terraria_offsets.h` `kMaxNPCs`, `kNpcVanillaCount`, `kMaxChests`, `kItemVanillaCount`, `kDefaultItemShell`, `k*Class`, `kAssembly` | const do jogo, existência da classe e da imagem |
 | `bridge_adapter.cpp` (flags do Boss Checklist) | `static bool` resolvido por nome em runtime |
 | `content_registry.cpp` (`DefaultRanges`) | `ItemID.Count` etc.; alerta se passar do 1º ID de mod |
 

@@ -143,6 +143,91 @@ int32_t TypeAt(Il2CppObject* player, TLModItemContainer c, int32_t group, int32_
     return TLMod_ReadItem(TLMod_ItemSlot(player, c, group, index), &f) ? f.type : -1;
 }
 
+// --- Itens de mod: casca + identidade em netID ------------------------------------
+constexpr int32_t kModItem = 8192, kShell = 38;
+int g_onDefaults = 0, g_onRebuild = 0;
+int32_t ItemRemap(int32_t type) { return type >= kItemCount ? kShell : type; }
+void ItemApply(Il2CppObject* item, int32_t requested, int32_t shell) {
+    ++g_onDefaults;
+    if (requested != kModItem || shell != kShell) return;
+    TLModItemStats st{};
+    TLMod_ReadItemStats(item, &st);
+    st.damage = 7;
+    st.useTime = st.useAnimation = 20;
+    st.useStyle = 1;
+    st.melee = true;
+    st.maxStack = 999;
+    st.value = 5000;
+    st.rare = 2;
+    TLMod_WriteItemStats(item, &st);
+    TLMod_SetItemName(item, "Rubi Fict\xc3\xad" "cio");
+    TLMod_SetItemTooltip(item, "Linha 1\nLinha 2");
+}
+void ItemTooltip(Il2CppObject* item, int32_t) {
+    ++g_onRebuild;
+    TLMod_SetItemTooltip(item, "Linha 1\nLinha 2");
+}
+
+int TestItems(void* lib) {
+    auto sym = [&](const char* name) { return dlsym(lib, name); };
+    auto new_item = reinterpret_cast<void* (*)()>(sym("mock_new_item"));
+    auto set_defaults = reinterpret_cast<void (*)(void*, int32_t)>(sym("mock_game_item_set_defaults"));
+    auto rebuild = reinterpret_cast<void (*)(void*)>(sym("mock_game_rebuild_tooltip"));
+    auto clone = reinterpret_cast<void* (*)(void*)>(sym("mock_game_clone_item"));
+    auto name_of = reinterpret_cast<size_t (*)(void*, char*, size_t)>(sym("mock_item_name"));
+    auto tooltip_of = reinterpret_cast<size_t (*)(void*, char*, size_t)>(sym("mock_item_tooltip"));
+    auto barriers = reinterpret_cast<int (*)()>(sym("mock_barriers"));
+    auto handles = reinterpret_cast<size_t (*)()>(sym("mock_gchandles"));
+    CHECK(new_item && set_defaults && rebuild && clone && name_of && tooltip_of && barriers && handles);
+    auto name = [&](void* it) { char b[128]; name_of(it, b, sizeof b); return std::string(b); };
+    auto tooltip = [&](void* it) { char b[128]; tooltip_of(it, b, sizeof b); return std::string(b); };
+    auto fields = [](void* it) { TLModItemFields f{}; TLMod_ReadItem(static_cast<Il2CppObject*>(it), &f); return f; };
+    auto stats = [](void* it) { TLModItemStats s{}; TLMod_ReadItemStats(static_cast<Il2CppObject*>(it), &s); return s; };
+
+    TLModItemCallbacks cbs{&ItemRemap, &ItemApply, &ItemTooltip};
+    TLMod_SetItemCallbacks(&cbs);
+
+    // O jogo pede o item 8192: as tabelas (que abortariam) só veem a casca 38.
+    void* ruby = new_item();
+    set_defaults(ruby, kModItem);
+    CHECK(fields(ruby).type == kShell && fields(ruby).netID == kModItem && fields(ruby).stack == 1);
+    TLModItemStats st = stats(ruby);
+    CHECK(st.damage == 7 && st.useTime == 20 && st.maxStack == 999 && st.value == 5000 && st.rare == 2 && st.melee);
+    CHECK(name(ruby) == "Rubi Fict\xc3\xad" "cio");  // o UTF-8 virou System.String e voltou
+    CHECK(tooltip(ruby) == "Linha 1\nLinha 2");   // ItemTooltip -> LocalizedText, ainda por validar
+    int barriersAfterFirst = barriers();
+    CHECK(barriersAfterFirst >= 3);  // _nameOverride, ToolTip e ItemTooltip._text com barreira
+
+    // Tela de criação reconstrói o tooltip: Lang.GetTooltip(8192) estouraria.
+    rebuild(ruby);
+    CHECK(g_onRebuild == 1 && tooltip(ruby) == "Linha 1\nLinha 2");
+
+    // Clone (MemberwiseClone) leva a identidade; SetDefaults pela API passa pelo hook.
+    void* copy = clone(ruby);
+    CHECK(fields(copy).netID == kModItem && name(copy) == name(ruby));
+    size_t handlesBefore = handles();
+    void* second = new_item();
+    CHECK(TLMod_SetItemDefaults(static_cast<Il2CppObject*>(second), kModItem));
+    CHECK(fields(second).type == kShell && fields(second).netID == kModItem && stats(second).damage == 7);
+    CHECK(handles() == handlesBefore);  // nome e tooltip vêm do cache
+    CHECK(TLMod_ApplyItemPrefix(static_cast<Il2CppObject*>(second), 5) && fields(second).prefix == 5);
+
+    // Item original: o hook só repassa.
+    void* torch = new_item();
+    set_defaults(torch, 8);
+    CHECK(fields(torch).type == 8 && fields(torch).netID == 8 && name(torch) == "vanilla:8" &&
+          tooltip(torch) == "vanilla");
+    // Um item de mod que vira original (ex.: TurnToAir/SetDefaults(0)) perde a identidade.
+    set_defaults(ruby, 0);
+    CHECK(fields(ruby).netID == 0 && name(ruby) == "vanilla:0");
+
+    // Sem callbacks (runtime desligado), um netID de mod ainda não estoura: tooltip vazio.
+    TLMod_SetItemCallbacks(nullptr);
+    rebuild(copy);
+    CHECK(tooltip(copy) == "none");
+    return 0;
+}
+
 int TestSaves(void* lib) {
     auto sym = [&](const char* name) { return dlsym(lib, name); };
     auto save_player = reinterpret_cast<void (*)()>(sym("mock_game_save_player"));
@@ -378,6 +463,7 @@ int main(int argc, char** argv) {
     CHECK(TLMod_ReadStaticBool(boss1, &b) && b);
     CHECK(TLMod_ReadStaticBool(hard, &b) && b);
 
+    if (int rc = TestItems(lib)) return rc;
     if (int rc = TestSaves(lib)) return rc;
 
     std::printf("TODOS OS TESTES PASSARAM\n");

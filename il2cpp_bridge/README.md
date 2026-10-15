@@ -24,6 +24,11 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
    (`TLMod_SetSaveCallback`, `TLMod_ItemSlot`, `src/save_hooks.cpp`). O save original roda via
    `il2cpp_runtime_invoke`, que devolve a exceção gerenciada em vez de desenrolá-la pelos nossos
    frames; o "depois" roda sempre e a exceção é relançada com `il2cpp_raise_exception`.
+8. Itens de mod numa casca original (`src/item_hooks.cpp`): hooks em `Item.SetDefaults(int, bool, ItemVariant)`
+   (`0xBAD034`, por onde passam `SetDefaults(int)` e `netDefaults`) e `Item.RebuildTooltip` (`0xBAAFE8`).
+   `type` fica sempre na faixa original; o ID de mod vai em `netID`. Nome e tooltip são objetos gerenciados
+   criados pela ponte (`il2cpp_string_new`, `il2cpp_object_new` de `ItemTooltip`/`LocalizedText`), presos por
+   GC handle e gravados com `il2cpp_gc_wbarrier_set_field`.
 
 ## Build
 

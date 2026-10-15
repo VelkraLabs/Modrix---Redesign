@@ -1,6 +1,7 @@
 // Testes do runtime de mods: semver, manifest, registro de conteúdo,
 // resolução de dependências e carga real do mod de exemplo.
 #include <algorithm>
+#include <cstddef>
 #include <atomic>
 #include <cstdio>
 #include <thread>
@@ -556,15 +557,25 @@ struct Session {
         }
         if (load) loader.LoadAll();
     }
+    // Ao fechar a "abertura do jogo": a interface desenha tudo o que ficou, e
+    // nenhuma tabela do tamanho original pode ter sido lida com um ID de mod.
+    ~Session() {
+        try {
+            game.DrawAll();
+        } catch (const std::out_of_range&) {
+        }
+        CHECK(game.tableOverflows == 0);
+    }
     TLModId Id(const std::string& key) const {
         return loader.Registry().Find(TLMOD_CONTENT_ITEM, key).value_or(TLMOD_INVALID_ID);
     }
+    // Item de mod: type é a casca, netID a identidade.
     std::string Key(const Item& it) const {
-        const ContentEntry* e = loader.Registry().Get(TLMOD_CONTENT_ITEM, it.type);
-        return e ? e->key : (it.IsAir() ? "ar" : std::to_string(it.type));
+        const ContentEntry* e = loader.Registry().Get(TLMOD_CONTENT_ITEM, it.netID);
+        return e ? e->key : (it.IsAir() ? "ar" : std::to_string(it.netID));
     }
-    Item Make(const std::string& key, int32_t stack, uint8_t prefix = 0, bool fav = false) const {
-        return Item{Id(key), stack, prefix, fav};
+    Item Make(const std::string& key, int32_t stack, uint8_t prefix = 0, bool fav = false) {
+        return game.NewItem(Id(key), stack, prefix, fav);
     }
     const FakeGame::Chest* ChestAt(int32_t x, int32_t y) const {
         for (const auto& c : game.chests)
@@ -624,17 +635,17 @@ static void TestSaves(const fs::path& modsDir) {
     const std::string plr = (dir / "Jogador.plr").string(), wld = (dir / "Mundo.wld").string();
     const std::string plrSide = plr + ItemPersistence::kSidecarSuffix, wldSide = wld + ItemPersistence::kSidecarSuffix;
 
-    // 0) Sem o TLMod: o ID de mod vai para o arquivo e o estraga.
+    // 0) Sem o TLMod: o ID de mod vai para o arquivo e o item some no load
+    //    (SetDefaults troca type >= 5456 por ar). Num baú, SaveChests estoura.
     {
         FakeGame g;
-        g.player.armor[0] = Item{8192, 1, 0, false};
-        g.player.inventory[1] = Item{8193, 5, 0, false};
+        g.player.armor[0] = Item::Raw(8192, 1);
+        g.player.inventory[1] = Item::Raw(8193, 5);
         CHECK(g.SavePlayer(plr) && g.lastSavedMaxId == 8193);
-        std::string err;
-        CHECK(!g.LoadPlayer(plr, &err) && err.find("IndexOutOfRange") != std::string::npos);  // não carrega mais
+        CHECK(g.LoadPlayer(plr) && g.player.armor[0].IsAir() && g.player.inventory[1].IsAir());  // sumiram
         g.chests[0] = FakeGame::Chest{10, 20, {}};
-        g.chests[0]->item[0] = Item{8192, 1, 0, false};
-        CHECK(!g.SaveWorld(wld));  // SaveChests estoura: o mundo não salva
+        g.chests[0]->item[0] = Item::Raw(8192, 1);
+        CHECK(!g.SaveWorld(wld) && g.tableOverflows > 0);  // o mundo não salva
         fs::remove(plr);
     }
 
@@ -647,14 +658,14 @@ static void TestSaves(const fs::path& modsDir) {
         CHECK(rubyId1 >= 8192 && topazId1 >= 8192 && s.Id(kDrill) >= 8192 && s.Id(kFictionalRuby) >= 8192);
         FakeGame::Player& p = s.game.player;
         p.inventory[3] = s.Make(kRuby, 5, 7, true);
-        p.inventory[10] = Item{2, 99, 0, false};  // original (terra)
+        p.inventory[10] = Item::Raw(2, 99);  // original (terra)
         p.armor[0] = s.Make(kTopaz, 1);
         p.loadoutArmor[1][2] = s.Make(kDrill, 1);
         p.banks[3][5] = s.Make(kTopaz, 3, 0, true);  // Cofre do Vazio
         s.game.held[0] = s.Make(kFictionalRuby, 1);  // no mouse
         s.game.chests[0] = FakeGame::Chest{100, 200, {}};
         s.game.chests[0]->item[0] = s.Make(kDrill, 1);
-        s.game.chests[0]->item[1] = Item{8, 10, 0, false};  // tochas
+        s.game.chests[0]->item[1] = Item::Raw(8, 10);  // tochas
         s.game.chests[5] = FakeGame::Chest{300, 50, {}};
         s.game.chests[5]->item[39] = s.Make(kRuby, 20);
         const FakeGame::Player before = p;
@@ -686,7 +697,7 @@ static void TestSaves(const fs::path& modsDir) {
         CHECK(s.Id(kRuby) != rubyId1 && s.Id(kTopaz) != topazId1);
         CHECK(s.game.LoadPlayer(plr) && s.game.LoadWorld(wld));
         const FakeGame::Player& p = s.game.player;
-        CHECK(p.inventory[3].type == s.Id(kRuby) && p.inventory[3].stack == 5 && p.inventory[3].prefix == 7 &&
+        CHECK(p.inventory[3].netID == s.Id(kRuby) && p.inventory[3].stack == 5 && p.inventory[3].prefix == 7 &&
               p.inventory[3].favorited);
         CHECK(s.Key(p.armor[0]) == kTopaz && s.Key(p.loadoutArmor[1][2]) == kDrill);
         CHECK(s.Key(p.banks[3][5]) == kTopaz && p.banks[3][5].stack == 3 && p.banks[3][5].favorited);
@@ -718,7 +729,7 @@ static void TestSaves(const fs::path& modsDir) {
         CHECK(orphans.size() == 4 && CountOrphans(orphans, "missing_mod") == 4);
         CHECK(s.loader.Persistence().Orphans(wld).size() == 1);
         // Jogando sem o mod: terra no slot onde o rubi estava, e salva.
-        s.game.player.inventory[3] = Item{2, 1, 0, false};
+        s.game.player.inventory[3] = Item::Raw(2, 1);
         CHECK(s.game.SavePlayer(plr) && s.game.lastSavedMaxId == 2 && s.game.SaveWorld(wld));
         auto side = Sidecar(plr);
         CHECK(side.size() == 5 && CountOrphans(side, "missing_mod") == 4 && CountOrphans(side, "") == 1);
@@ -745,7 +756,7 @@ static void TestSaves(const fs::path& modsDir) {
 
         // O save roda fora da thread do jogo: o jogador pôs terra no slot do
         // rubi enquanto o arquivo era gravado. O rubi vai para outro slot.
-        s.game.duringSave = [&] { s.game.player.inventory[0] = Item{2, 7, 0, false}; };
+        s.game.duringSave = [&] { s.game.player.inventory[0] = Item::Raw(2, 7); };
         CHECK(s.game.SavePlayer(plr));
         s.game.duringSave = nullptr;
         CHECK(p.inventory[0].type == 2 && p.inventory[0].stack == 7);  // nada sobrescrito
@@ -761,8 +772,10 @@ static void TestSaves(const fs::path& modsDir) {
 
         // ID fora da faixa original e sem dono: nunca vai para o arquivo, mas
         // continua na memória.
-        s.game.player.inventory[21] = Item{9000, 1, 0, false};
-        CHECK(s.game.SavePlayer(plr) && s.game.lastSavedMaxId == 2 && p.inventory[21].type == 9000);
+        Item unknown = Item::Raw(kDefaultItemShell, 1);
+        unknown.netID = 9000;
+        s.game.player.inventory[21] = unknown;
+        CHECK(s.game.SavePlayer(plr) && s.game.lastSavedMaxId == 2 && p.inventory[21].netID == 9000);
         CHECK(ReadAll(plrSide).find("9000") == std::string::npos);
     }
 
@@ -828,6 +841,199 @@ static void TestSaves(const fs::path& modsDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Itens de mod de verdade: casca original + identidade em netID. Nenhum ID de
+// mod pode chegar a uma tabela do tamanho original (FakeGame conta).
+namespace items {
+
+const TLModHostApi* g_api = nullptr;
+TLModContext* g_ctx = nullptr;
+TLModId g_blade = TLMOD_INVALID_ID;
+bool g_badShellRejected = false, g_giveValidation = false;
+TLModId g_oldAbiItem = TLMOD_INVALID_ID;
+
+int BladesInit(const TLModHostApi* api, TLModContext* ctx) {
+    g_api = api;
+    g_ctx = ctx;
+    TLModItemDef d{};
+    d.struct_size = sizeof(d);
+    d.name = "bronze_blade";
+    d.display_name = "L\xc3\xa2mina de Bronze";
+    d.tooltip = "Corta.\nCorta de novo.";
+    d.width = d.height = 32;
+    d.max_stack = 1;
+    d.value = 1200;
+    d.rarity = 1;
+    d.damage = 12;
+    d.use_time = 25;
+    d.shell_type = 9000;  // não é original: recusado
+    g_badShellRejected = api->register_item(ctx, &d) == TLMOD_INVALID_ID;
+    d.shell_type = 24;  // Espada de Madeira
+    g_blade = api->register_item(ctx, &d);
+    // Mod compilado antes de shell_type existir: struct menor, casca padrão.
+    TLModItemDef old{};
+    old.struct_size = static_cast<uint32_t>(offsetof(TLModItemDef, shell_type));
+    old.name = "old_gem";
+    old.display_name = "Gema Antiga";
+    old.width = old.height = 10;
+    old.max_stack = 99;
+    old.shell_type = 1234;  // fora de struct_size: ignorado
+    g_oldAbiItem = api->register_item(ctx, &old);
+    // give_item no init: fica na fila até haver um mundo.
+    g_giveValidation = !api->give_item(ctx, 99999, 1) && !api->give_item(ctx, g_blade, 0);
+    return g_blade != TLMOD_INVALID_ID && api->give_item(ctx, g_blade, 1) ? 0 : 1;
+}
+
+}  // namespace items
+
+static void TestItems(const fs::path& modsDir) {
+    using namespace items;
+    using Item = FakeGame::Item;
+    std::printf("\n== itens de mod (casca + netID)\n");
+
+    // 0) Sem o TLMod, o que o jogo faz com um ID de mod: SetDefaults vira ar; um
+    //    type >= 5456 ou um netID >= 5456 no tooltip estouram as tabelas.
+    {
+        FakeGame g;
+        Item it = g.NewItem(8192);
+        CHECK(it.IsAir() && g.tableOverflows == 0);
+        g.player.inventory[0] = Item::Raw(8192, 1);
+        bool threw = false;
+        try {
+            g.DrawAll();
+        } catch (const std::out_of_range&) {
+            threw = true;
+        }
+        Item shelled = g.NewItem(38);
+        shelled.netID = 8192;
+        try {
+            g.RebuildTooltip(shelled);
+        } catch (const std::out_of_range&) {
+        }
+        CHECK(threw && g.tableOverflows == 2 && g.lastOverflowIndex == 8192);
+    }
+
+    fs::path tmp = fs::temp_directory_path() / "tlmod_items_test";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+    fs::copy(modsDir / "example_item", tmp / "example_item", fs::copy_options::recursive);
+    FakeGame game;
+    ModLoader loader(&game);
+    loader.DiscoverDirectory(tmp);
+    ModManifest m = Builtin("test.blades", {"bronze_blade", "old_gem"});
+    loader.AddBuiltin(m, &BladesInit);
+    CHECK(loader.LoadAll() == 2);
+    const ContentRegistry& reg = loader.Registry();
+    const TLModId ruby = reg.Find(TLMOD_CONTENT_ITEM, "tlmod.example_item:fictional_ruby").value_or(-1);
+    const ItemDefinition* rubyDef = reg.Get(TLMOD_CONTENT_ITEM, ruby)->Item();
+    CHECK(g_badShellRejected && g_giveValidation && g_blade >= 8192 && ruby >= 8192);
+    CHECK(rubyDef->shellType == kDefaultItemShell && reg.Get(TLMOD_CONTENT_ITEM, g_blade)->Item()->shellType == 24);
+    CHECK(reg.Get(TLMOD_CONTENT_ITEM, g_oldAbiItem)->Item()->shellType == kDefaultItemShell);
+
+    // O jogo cria o Rubi Fictício (loja, receita, Item.NewItem...): monta a casca 38.
+    Item r = game.NewItem(ruby, 5, 0, true);
+    CHECK(r.type == kDefaultItemShell && r.netID == ruby && r.stack == 5 && r.favorited);
+    CHECK(game.Name(r) == rubyDef->displayName && r.tooltip == rubyDef->tooltip);
+    CHECK(r.maxStack == 999 && r.value == 5000 && r.rare == 2 && r.damage == 0 && r.useStyle == 0);
+    // A arma: dano e tempo de uso, golpe corpo a corpo por cima da Espada de Madeira.
+    Item b = game.NewItem(g_blade);
+    CHECK(b.type == 24 && b.netID == g_blade && b.damage == 12 && b.useTime == 25 && b.useAnimation == 25);
+    CHECK(b.useStyle == 1 && b.melee && b.maxStack == 1 && b.value == 1200 && b.rare == 1);
+    CHECK(game.Name(b) == "L\xc3\xa2mina de Bronze" && b.tooltip == "Corta.\nCorta de novo.");
+
+    // Refresh (netDefaults(netID)) e cópias mantêm a identidade; o tooltip
+    // reconstruído pelas telas (RebuildTooltip) vem da definição.
+    Item copy = r;
+    game.Refresh(copy);
+    CHECK(copy.netID == ruby && copy.type == kDefaultItemShell && copy.stack == 5 && game.Name(copy) == game.Name(r));
+    copy.tooltip.clear();
+    game.RebuildTooltip(copy);
+    CHECK(copy.tooltip == rubyDef->tooltip);
+    // Não se mistura com a casca: uma Lente de verdade não empilha com o rubi.
+    Item lens = game.NewItem(kDefaultItemShell, 3);
+    CHECK(!FakeGame::IsTheSameAs(r, lens) && FakeGame::IsTheSameAs(r, copy));
+    CHECK(game.Name(lens) == "item 38" && lens.netID == kDefaultItemShell);
+
+    // give_item: pedido no init, entregue só com um mundo carregado.
+    game.player.inventory[0] = lens;
+    game.Frame();  // menu: nada
+    CHECK(game.player.inventory[1].IsAir());
+    game.inWorld = true;
+    game.Frame();
+    CHECK(game.player.inventory[1].netID == g_blade && game.player.inventory[1].type == 24);
+    // Pela API, de outra thread, e empilhando: 5 + 3 rubis viram uma pilha de 8.
+    std::thread([&] { g_api->give_item(g_ctx, ruby, 5); }).join();
+    game.Frame();
+    CHECK(g_api->give_item(g_ctx, ruby, 3));
+    game.Frame();
+    CHECK(game.player.inventory[2].netID == ruby && game.player.inventory[2].stack == 8);
+    CHECK(game.player.inventory[0].netID == kDefaultItemShell && game.player.inventory[0].stack == 3);  // a Lente intacta
+    // Pilha máxima da definição: 1000 rubis = 999 + 1.
+    CHECK(g_api->give_item(g_ctx, ruby, 1000 - 8));
+    game.Frame();
+    CHECK(game.player.inventory[2].stack == 999 && game.player.inventory[3].netID == ruby &&
+          game.player.inventory[3].stack == 1);
+    // Um item original também.
+    CHECK(g_api->give_item(g_ctx, 8, 10));
+    game.Frame();
+    CHECK(game.player.inventory[4].type == 8 && game.player.inventory[4].netID == 8 && game.player.inventory[4].stack == 10);
+
+    // Interface desenhando tudo, várias vezes: nenhuma tabela lida fora do tamanho.
+    for (int i = 0; i < 3; ++i) game.DrawAll();
+    CHECK(game.tableOverflows == 0);
+
+    // Persistência por chave: o .plr só tem originais; com outra ordem de mods os
+    // IDs mudam e os itens voltam montados na casca certa.
+    const std::string plr = (tmp / "Jogador.plr").string();
+    game.player.armor[3] = game.NewItem(g_blade, 1, 0, false);
+    const TLModId blade1 = g_blade;  // BladesInit roda de novo na segunda sessão
+    CHECK(game.SavePlayer(plr) && game.lastSavedMaxId == kDefaultItemShell);
+    CHECK(game.player.inventory[2].netID == ruby && game.player.inventory[2].type == kDefaultItemShell &&
+          game.player.inventory[2].stack == 999 && game.Name(game.player.inventory[2]) == rubyDef->displayName);
+    {
+        FakeGame g2;
+        ModLoader l2(&g2);
+        ModManifest early = Builtin("aaa.first", {"first"});
+        l2.AddBuiltin(early, &saves::FirstInit);
+        l2.DiscoverDirectory(tmp);
+        l2.AddBuiltin(m, &BladesInit);
+        CHECK(l2.LoadAll() == 3);
+        const TLModId ruby2 = l2.Registry().Find(TLMOD_CONTENT_ITEM, "tlmod.example_item:fictional_ruby").value_or(-1);
+        const TLModId blade2 = l2.Registry().Find(TLMOD_CONTENT_ITEM, "test.blades:bronze_blade").value_or(-1);
+        CHECK(ruby2 != ruby && blade2 != blade1);
+        CHECK(g2.LoadPlayer(plr));
+        const Item& rr = g2.player.inventory[2];
+        CHECK(rr.netID == ruby2 && rr.type == kDefaultItemShell && rr.stack == 999 && g2.Name(rr) == rubyDef->displayName);
+        const Item& bb = g2.player.armor[3];
+        CHECK(bb.netID == blade2 && bb.type == 24 && bb.damage == 12 && g2.Name(bb) == "L\xc3\xa2mina de Bronze");
+        CHECK(g2.player.inventory[0].netID == kDefaultItemShell && g2.player.inventory[0].stack == 3);
+        g2.DrawAll();
+        CHECK(g2.tableOverflows == 0);
+    }
+    CHECK(game.tableOverflows == 0);
+
+    // O teste de aparelho do mod de exemplo: com o arquivo give_on_start, 3
+    // Rubis Fictícios chegam no primeiro frame dentro de um mundo, montados.
+    {
+        std::ofstream(tmp / "example_item" / "give_on_start").put('\n');
+        FakeGame g3;
+        ModLoader l3(&g3);
+        l3.DiscoverDirectory(tmp);
+        CHECK(l3.LoadAll() == 1);
+        g3.inWorld = false;
+        g3.Frame();
+        CHECK(g3.player.inventory[0].IsAir());
+        g3.inWorld = true;
+        g3.Frame();
+        g3.Frame();
+        const FakeGame::Item& gift = g3.player.inventory[0];
+        CHECK(gift.netID == l3.Registry().Find(TLMOD_CONTENT_ITEM, "tlmod.example_item:fictional_ruby").value_or(-1) &&
+              gift.type == kDefaultItemShell && gift.stack == 3 && g3.Name(gift) == rubyDef->displayName);
+        CHECK(g3.player.inventory[1].IsAir() && g3.tableOverflows == 0);  // uma vez só
+    }
+    fs::remove_all(tmp);
+}
+
+// ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -842,6 +1048,7 @@ int main(int argc, char** argv) {
     TestNpcs(argv[1]);
     TestBossChecklist(argv[1]);
     TestSaves(argv[1]);
+    TestItems(argv[1]);
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

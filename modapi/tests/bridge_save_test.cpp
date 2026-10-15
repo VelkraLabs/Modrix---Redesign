@@ -49,6 +49,8 @@ int GemsInit(const TLModHostApi* api, TLModContext* ctx) {
         d.display_name = name;
         d.width = d.height = 16;
         d.max_stack = 999;
+        d.value = 500;
+        d.rarity = 3;
         if (api->register_item(ctx, &d) == TLMOD_INVALID_ID) return 1;
     }
     return 0;
@@ -61,10 +63,20 @@ TLModItemFields Get(Il2CppObject* player, TLModItemContainer c, int32_t group, i
     TLMod_ReadItem(TLMod_ItemSlot(player, c, group, index), &f);
     return f;
 }
+// Como o jogo cria um item: SetDefaults(type) (com o hook) e a pilha. 0 = esvazia.
 void Put(Il2CppObject* player, TLModItemContainer c, int32_t group, int32_t index, int32_t type, int32_t stack) {
-    TLModItemFields f{type, type, stack, 0, false};
-    TLMod_WriteItem(TLMod_ItemSlot(player, c, group, index), &f);
+    Il2CppObject* item = TLMod_ItemSlot(player, c, group, index);
+    TLModItemFields f{};
+    if (type != 0) {
+        TLMod_SetItemDefaults(item, type);
+        TLMod_ReadItem(item, &f);
+        f.stack = stack;
+    }
+    TLMod_WriteItem(item, &f);
 }
+constexpr int32_t kShell = 38;  // casca padrão (ItemID.Lens)
+// Item de mod montado: casca no type, identidade no netID.
+bool IsMod(const TLModItemFields& f, int32_t id) { return f.type == kShell && f.netID == id; }
 
 }  // namespace
 
@@ -132,8 +144,9 @@ int main(int argc, char** argv) {
 
     save_player();
     CHECK(maxSaved() == 3);  // só o original foi para o .plr
-    CHECK(Get(player, TLMOD_ITEMS_INVENTORY, 0, 4).type == ruby && Get(player, TLMOD_ITEMS_HELD, 0, 0).type == ruby);
-    CHECK(Get(player, TLMOD_ITEMS_LOADOUT_DYE, 1, 9).type == ruby && Get(player, TLMOD_ITEMS_BANK, 0, 0).stack == 3);
+    CHECK(IsMod(Get(player, TLMOD_ITEMS_INVENTORY, 0, 4), ruby) && IsMod(Get(player, TLMOD_ITEMS_HELD, 0, 0), ruby));
+    CHECK(IsMod(Get(player, TLMOD_ITEMS_LOADOUT_DYE, 1, 9), ruby) && Get(player, TLMOD_ITEMS_BANK, 0, 0).stack == 3);
+    CHECK(Get(player, TLMOD_ITEMS_INVENTORY, 0, 4).stack == 12);
     std::string err;
     auto side = ItemPersistence::ReadSidecar(plr + ItemPersistence::kSidecarSuffix, &err);
     CHECK(side && side->size() == 5);
@@ -144,11 +157,15 @@ int main(int argc, char** argv) {
         Put(player, c, g, i, 0, 0);
     CHECK(load_player(U16(plr).c_str(), false) != nullptr);
     TLModItemFields inv = Get(player, TLMOD_ITEMS_INVENTORY, 0, 4);
-    CHECK(inv.type == ruby && inv.netID == ruby && inv.stack == 12);
-    CHECK(Get(player, TLMOD_ITEMS_DYE, 0, 2).type == topaz && Get(player, TLMOD_ITEMS_BANK, 0, 0).stack == 3);
-    CHECK(Get(player, TLMOD_ITEMS_LOADOUT_DYE, 1, 9).type == ruby);
+    CHECK(IsMod(inv, ruby) && inv.stack == 12);
+    CHECK(IsMod(Get(player, TLMOD_ITEMS_DYE, 0, 2), topaz) && Get(player, TLMOD_ITEMS_BANK, 0, 0).stack == 3);
+    CHECK(IsMod(Get(player, TLMOD_ITEMS_LOADOUT_DYE, 1, 9), ruby));
     // O mouse volta pelos temporários lidos do arquivo (Player._temporaryItemSlots).
-    CHECK(Get(player, TLMOD_ITEMS_TEMPORARY, 0, 0).type == ruby && Get(player, TLMOD_ITEMS_TEMPORARY, 0, 0).stack == 2);
+    CHECK(IsMod(Get(player, TLMOD_ITEMS_TEMPORARY, 0, 0), ruby) && Get(player, TLMOD_ITEMS_TEMPORARY, 0, 0).stack == 2);
+    // Reinserido pelo SetDefaults do jogo: atributos e nome da definição.
+    TLModItemStats st{};
+    TLMod_ReadItemStats(TLMod_ItemSlot(player, TLMOD_ITEMS_INVENTORY, 0, 4), &st);
+    CHECK(st.maxStack == 999 && st.value == 500 && st.rare == 3);
     CHECK(Get(player, TLMOD_ITEMS_HELD, 0, 0).type == 0);
 
     // ---- Mundo: baús pela posição -------------------------------------------------
@@ -162,7 +179,7 @@ int main(int argc, char** argv) {
     } catch (...) {
         threw = true;
     }
-    CHECK(!threw && maxSaved() == 9 && Get(nullptr, TLMOD_ITEMS_CHEST, 3, 6).type == topaz);
+    CHECK(!threw && maxSaved() == 9 && IsMod(Get(nullptr, TLMOD_ITEMS_CHEST, 3, 6), topaz));
     side = ItemPersistence::ReadSidecar(wld + ItemPersistence::kSidecarSuffix, &err);
     CHECK(side && side->size() == 1 && (*side)[0].slot.chestX == 77 && (*side)[0].slot.chestY == 88);
 
@@ -171,7 +188,7 @@ int main(int argc, char** argv) {
     add_chest(0, 77, 88);
     Put(nullptr, TLMOD_ITEMS_CHEST, 0, 7, 9, 2);
     load_world(false);
-    CHECK(Get(nullptr, TLMOD_ITEMS_CHEST, 0, 6).type == topaz && Get(nullptr, TLMOD_ITEMS_CHEST, 0, 6).stack == 40);
+    CHECK(IsMod(Get(nullptr, TLMOD_ITEMS_CHEST, 0, 6), topaz) && Get(nullptr, TLMOD_ITEMS_CHEST, 0, 6).stack == 40);
     CHECK(loader.Persistence().Orphans(wld).empty());
 
     fs::remove_all(dir);

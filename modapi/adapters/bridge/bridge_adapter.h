@@ -31,6 +31,12 @@ public:
     std::optional<bool> InWorld() const override;
     std::optional<bool> Progress(TLModProgress flag) const override;
 
+    // Itens de mod: Item.SetDefaults (0xBAD034) e Item.RebuildTooltip (0xBAAFE8),
+    // via TLMod_SetItemCallbacks. GiveItem e o frame rodam na thread do jogo.
+    void SetItemHooks(ItemHooks hooks) override;
+    int32_t GiveItem(int32_t type, int32_t stack) override;
+    void SetFrameHandler(std::function<void()> handler) override;
+
     // Save/load: Player.InternalSavePlayerFile (0x1044040), Player.LoadPlayer
     // (0x1049FA8), WorldFile.InternalSaveWorld (0x14F1AC8), WorldFile.LoadWorld
     // (0x14EC048), via TLMod_SetSaveCallback.

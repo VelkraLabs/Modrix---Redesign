@@ -66,11 +66,23 @@ constexpr size_t _temporaryItemSlots = 0xD78;
 // --- Terraria.Item / Chest / EquipmentLoadout --------------------------------
 // O save grava netID (int32 no .plr, int32 nos baús do .wld), stack e prefix.
 namespace item_off {
-constexpr size_t favorited = 0x69;  // bool
-constexpr size_t type = 0xBC;       // int
-constexpr size_t stack = 0xCC;      // int
-constexpr size_t netID = 0x198;     // int  <-- o que vai para o arquivo
-constexpr size_t prefix = 0x1A0;    // byte
+constexpr size_t width = 0x48;           // int   (herdado de Entity)
+constexpr size_t height = 0x4C;          // int   (herdado de Entity)
+constexpr size_t _nameOverride = 0x58;   // string: se não nulo, get_Name devolve este
+constexpr size_t favorited = 0x69;       // bool
+constexpr size_t melee = 0x7D;           // bool
+constexpr size_t type = 0xBC;            // int   índice de todas as tabelas por item
+constexpr size_t useStyle = 0xC1;        // byte  (1 = golpe)
+constexpr size_t useAnimation = 0xC4;    // int
+constexpr size_t useTime = 0xC8;         // int
+constexpr size_t stack = 0xCC;           // int
+constexpr size_t maxStack = 0xD0;        // int
+constexpr size_t damage = 0xF0;          // int
+constexpr size_t ToolTip = 0x138;        // ItemTooltip
+constexpr size_t rare = 0x14C;           // int
+constexpr size_t value = 0x178;          // int
+constexpr size_t netID = 0x198;          // int  <-- o que vai para o arquivo
+constexpr size_t prefix = 0x1A0;         // byte
 }  // namespace item_off
 namespace chest_off {
 constexpr size_t item = 0x10;  // Item[] (40)
@@ -81,6 +93,27 @@ namespace loadout_off {
 constexpr size_t Armor = 0x10;  // Item[] (20)
 constexpr size_t Dye = 0x18;    // Item[] (10)
 }  // namespace loadout_off
+
+// --- Item de mod: casca ----------------------------------------------------------
+// O item de mod roda numa casca: type = um item original (texturas, ItemID.Sets,
+// Lang, ContentSamples, tabelas do mobile só veem IDs < 5456) e netID = o ID de
+// mod. O jogo já separa os dois nas variantes antigas (netID < 0). Quem lê netID:
+// netDefaults/Refresh (-> SetDefaults, com hook), IsTheSameAs/IsNotTheSameAs
+// (empilhar, depositar, pegar: um item de mod não se mistura com a casca),
+// Recipe, Serialize/save (o runtime tira do arquivo) e RebuildTooltip, o único
+// que indexa uma tabela com ele (Lang.GetTooltip, bounds-checked): hook.
+// Casca padrão: Lente (ItemID.Lens = 38), material sem uso, sem tile, sem tiro.
+constexpr int32_t kDefaultItemShell = 38;
+constexpr const char* kItemTooltipClass = "ItemTooltip";      // Terraria.UI
+constexpr const char* kLocalizedTextClass = "LocalizedText";  // Terraria.Localization
+namespace item_tooltip_off {
+constexpr size_t _validatorKey = 0x18;  // ulong: != ItemTooltip._globalValidatorKey -> refaz as linhas
+constexpr size_t _text = 0x20;          // LocalizedText: as linhas saem de _text.Value
+}  // namespace item_tooltip_off
+namespace item_tooltip_static_off {
+constexpr size_t None = 0x0;                 // ItemTooltip (sem linhas)
+constexpr size_t _globalValidatorKey = 0x10; // ulong
+}  // namespace item_tooltip_static_off
 
 // --- Terraria.IO.FileData / PlayerFileData -----------------------------------
 // Caminho do arquivo que o jogo grava/lê (o .plr de um personagem, o .wld de
@@ -106,11 +139,11 @@ constexpr size_t loadFailed = 0xC5;  // bool
 }  // namespace world_gen_static_off
 // Main.maxChests (const = 8000): tamanho de Main.chest[].
 constexpr int32_t kMaxChests = 8000;
-// ItemID.Count (const = 5456). Na leitura do .plr, armor/dye/miscEquips/
-// miscDyes chamam netDefaults(id) sem conferir a faixa: um ID >= 5456 ali
-// estoura os arrays do jogo e o personagem não carrega. Inventário e bancos
-// conferem (id >= 5456 vira ar, e o item some). Em SaveChests,
-// ItemID.Sets.ItemsThatShouldNotBeInInventory[type] também estoura.
+// ItemID.Count (const = 5456). Item.SetDefaults troca type >= 5456 por 0 (ar:
+// netID = stack = 0), e todo load passa por ele (netDefaults): um ID de mod no
+// arquivo vira ar e o item some, sem erro. Inventário e bancos conferem antes
+// (id >= 5456 -> netDefaults(0)). Em SaveChests,
+// ItemID.Sets.ItemsThatShouldNotBeInInventory[type] estoura com type >= 5456.
 constexpr int32_t kItemVanillaCount = 5456;
 
 // --- Campos de instância de Terraria.NPC -----------------------------------
@@ -226,6 +259,22 @@ constexpr uintptr_t Main_get_mouseItem = 0xC68290;
 constexpr uintptr_t Main_get_guideItem = 0xC685F4;
 constexpr uintptr_t Main_get_reforgeItem = 0xC686A0;
 constexpr uintptr_t CreativeUI_GetItemByIndex = 0x8F643C;
+
+// --- Itens ---------------------------------------------------------------------
+// void Item.SetDefaults(int Type, bool noMatCheck, ItemVariant variant): todos os
+// caminhos passam por aqui: SetDefaults(int) (0xBA8CD0) é um `b` para cá com
+// false/null, e netDefaults (0xBAB378) também. Depois de ResetStats o próprio
+// SetDefaults faz `if (type >= 5456) type = 0` e indexa ~dezenas de tabelas por type.
+constexpr uintptr_t Item_SetDefaults = 0xBAD034;
+// void Item.RebuildTooltip(): ToolTip = Lang.GetTooltip(netID). Chamado pelo fim
+// de SetDefaults e pelas telas GUICrafting.CraftButtonOver / GUIItemDuplication.
+constexpr uintptr_t Item_RebuildTooltip = 0xBAAFE8;
+// static ItemTooltip Lang.GetTooltip(int): _itemTooltipCache[id], com bounds check.
+constexpr uintptr_t Lang_GetTooltip = 0x11F5414;
+// string Item.get_Name(): _nameOverride ?? Lang.GetItemNameValue(type).
+constexpr uintptr_t Item_get_Name = 0xBA8724;
+constexpr uintptr_t Item_Prefix = 0xBA9A80;           // bool Item.Prefix(int prefixWeWant)
+constexpr uintptr_t Item_IsTheSameAs = 0xBB87D0;      // netID == && type ==
 }  // namespace rva
 
 // Número de parâmetros C# (sem contar `this`), usado em
@@ -247,6 +296,14 @@ constexpr int Main_get_mouseItem = 0;
 constexpr int Main_get_guideItem = 0;
 constexpr int Main_get_reforgeItem = 0;
 constexpr int CreativeUI_GetItemByIndex = 1;
+// Item.SetDefaults tem 2 overloads: o hook é no de 3 parâmetros; o de 1 é
+// chamado via runtime_invoke (TLMod_SetItemDefaults) e cai no hook.
+constexpr int Item_SetDefaults = 3;
+constexpr int Item_RebuildTooltip = 0;
+constexpr int Lang_GetTooltip = 1;
+constexpr int Item_get_Name = 0;
+constexpr int Item_Prefix = 1;
+constexpr int Item_IsTheSameAs = 1;
 }  // namespace argc
 
 }  // namespace terraria

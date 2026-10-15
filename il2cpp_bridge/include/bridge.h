@@ -282,7 +282,62 @@ bool TLMod_WriteItem(Il2CppObject* item, const TLModItemFields* in);
 int32_t TLMod_ChestCount(void);
 bool TLMod_ChestPosition(int32_t index, int32_t* x, int32_t* y);
 
+// ===========================================================================
+// Itens de mod: casca original + identidade em netID
+// ===========================================================================
+//
+//   Item.SetDefaults(8192)            hook pré: remap_type(8192) -> 38 (casca)
+//     └ SetDefaults original com 38   o jogo só indexa tabelas com 38
+//   hook pós: netID = 8192; on_defaults(item, 8192, 38)
+//                                     -> quem chamou aplica dano, pilha, nome, tooltip...
+//   Item.RebuildTooltip               netID fora da faixa original: on_rebuild_tooltip
+//                                     no lugar do original (Lang.GetTooltip(netID) estouraria)
+//
+// type nunca sai da faixa original. netID carrega a identidade: Clone
+// (MemberwiseClone) o copia, IsTheSameAs o compara (empilhar/depositar não
+// mistura com a casca) e netDefaults/Refresh(netID) passam de novo pelo hook.
+
+typedef struct TLModItemCallbacks {
+    // Pré-SetDefaults: tipo pedido -> tipo que o jogo deve montar. Para itens
+    // originais, devolva o próprio tipo. Pode rodar em qualquer thread.
+    int32_t (*remap_type)(int32_t requested_type);
+    // Pós-SetDefaults de um tipo remapeado (netID já é requested_type).
+    void (*on_defaults)(Il2CppObject* item, int32_t requested_type, int32_t shell_type);
+    // RebuildTooltip de um item com netID fora da faixa original. Nulo: tooltip vazio.
+    void (*on_rebuild_tooltip)(Il2CppObject* item, int32_t net_id);
+} TLModItemCallbacks;
+void TLMod_SetItemCallbacks(const TLModItemCallbacks* callbacks);  // copia; nulo desliga
+
+// Atributos de Terraria.Item que um item de mod define.
+typedef struct TLModItemStats {
+    int32_t width, height;
+    int32_t damage;
+    int32_t useTime, useAnimation;
+    uint8_t useStyle;  // 0 = não usa; 1 = golpe
+    bool melee;
+    int32_t maxStack;
+    int32_t value;     // em moedas de cobre
+    int32_t rare;
+} TLModItemStats;
+bool TLMod_ReadItemStats(Il2CppObject* item, TLModItemStats* out);
+bool TLMod_WriteItemStats(Il2CppObject* item, const TLModItemStats* in);
+
+// Nome exibido (Item._nameOverride: get_Name/AffixName/HoverName usam). Nulo
+// limpa. As strings ficam em cache e vivas pelo processo (GC handle).
+bool TLMod_SetItemName(Il2CppObject* item, const char* utf8);
+// Tooltip exibido: um ItemTooltip cujo LocalizedText tem este texto ('\n'
+// separa linhas). Nulo ou vazio: ItemTooltip.None. Em cache, como o nome.
+bool TLMod_SetItemTooltip(Il2CppObject* item, const char* utf8);
+// Item.SetDefaults(type) pelo caminho do jogo (passa pelo hook). Qualquer
+// thread anexada; só mexe neste Item.
+bool TLMod_SetItemDefaults(Il2CppObject* item, int32_t type);
+// Item.Prefix(prefix): aplica o prefixo como o load do jogo faz.
+bool TLMod_ApplyItemPrefix(Il2CppObject* item, int32_t prefix);
+
 // Handlers que os hooks apontam (exportados como TLMod_Hooked_PlayerHurt).
+void TLMod_Hooked_ItemSetDefaults(Il2CppObject* self, int32_t type, bool noMatCheck, Il2CppObject* variant,
+                                  const MethodInfo* method);
+void TLMod_Hooked_ItemRebuildTooltip(Il2CppObject* self, const MethodInfo* method);
 void TLMod_Hooked_PlayerInternalSavePlayerFile(Il2CppObject* playerFile, const MethodInfo* method);
 Il2CppObject* TLMod_Hooked_PlayerLoadPlayer(Il2CppObject* path, bool cloudSave, const MethodInfo* method);
 void TLMod_Hooked_WorldFileInternalSaveWorld(bool useCloudSaving, bool resetTime, const MethodInfo* method);

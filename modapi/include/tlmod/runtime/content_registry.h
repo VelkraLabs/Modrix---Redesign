@@ -31,7 +31,14 @@ struct KindRange {
     int32_t maxId;
 };
 
+// Item original usado como casca quando o mod não escolhe (ItemID.Lens = 38:
+// material sem uso, sem tile, sem tiro). Igual a terraria::kDefaultItemShell,
+// que o offset_diff confere contra o dump.
+constexpr TLModId kDefaultItemShell = 38;
+
+// Item de mod: roda numa casca original (ver TLModItemDef.shell_type).
 struct ItemDefinition {
+    TLModId shellType = kDefaultItemShell;
     std::string displayName;
     std::string tooltip;
     std::string texture;  // caminho absoluto, já resolvido na pasta do mod
