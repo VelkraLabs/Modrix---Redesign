@@ -142,6 +142,48 @@ typedef struct ModrixNpcDef {
     ModrixNpcAiFn on_ai;       /* opcional: comportamento por tick */
 } ModrixNpcDef;
 
+/* Progresso do mundo atual. Valores só são acrescentados ao fim (ABI). */
+typedef enum ModrixProgress {
+    MODRIX_PROGRESS_HARDMODE = 0,       /* Wall of Flesh derrotado */
+    MODRIX_DOWNED_KING_SLIME,
+    MODRIX_DOWNED_EYE_OF_CTHULHU,
+    MODRIX_DOWNED_EVIL_BOSS,            /* Devorador de Mundos OU Cérebro de Cthulhu */
+    MODRIX_DOWNED_QUEEN_BEE,
+    MODRIX_DOWNED_SKELETRON,
+    MODRIX_DOWNED_DEERCLOPS,
+    MODRIX_DOWNED_QUEEN_SLIME,
+    MODRIX_DOWNED_DESTROYER,
+    MODRIX_DOWNED_TWINS,
+    MODRIX_DOWNED_SKELETRON_PRIME,
+    MODRIX_DOWNED_PLANTERA,
+    MODRIX_DOWNED_GOLEM,
+    MODRIX_DOWNED_DUKE_FISHRON,
+    MODRIX_DOWNED_EMPRESS_OF_LIGHT,
+    MODRIX_DOWNED_LUNATIC_CULTIST,
+    MODRIX_DOWNED_MOON_LORD,
+    MODRIX_DOWNED_GOBLIN_ARMY,
+    MODRIX_DOWNED_FROST_LEGION,
+    MODRIX_DOWNED_PIRATES,
+    MODRIX_DOWNED_MARTIANS,
+    MODRIX_DOWNED_MOURNING_WOOD,
+    MODRIX_DOWNED_PUMPKING,
+    MODRIX_DOWNED_EVERSCREAM,
+    MODRIX_DOWNED_SANTA_NK1,
+    MODRIX_DOWNED_ICE_QUEEN,
+    MODRIX_DOWNED_SOLAR_PILLAR,
+    MODRIX_DOWNED_VORTEX_PILLAR,
+    MODRIX_DOWNED_NEBULA_PILLAR,
+    MODRIX_DOWNED_STARDUST_PILLAR,
+    MODRIX_PROGRESS_COUNT
+} ModrixProgress;
+
+/* Provedor de dados para a camada de interface. O mod escreve um documento
+ * JSON em `out` com host->buffer_append; o runtime valida o JSON antes de
+ * entregar à interface. Pode ser chamado em QUALQUER thread (a da UI): use
+ * só funções seguras para isso (progress, in_world, find_content, log). */
+typedef struct ModrixBuffer ModrixBuffer;
+typedef bool (*ModrixProviderFn)(void* user, ModrixBuffer* out);
+
 /* ------------------------------------------------------------------------ */
 /* Eventos                                                                   */
 /* ------------------------------------------------------------------------ */
@@ -190,6 +232,18 @@ typedef struct ModrixHostApi {
     /* Cria um NPC (original ou de mod) via NPC.NewNPC. Só na thread do jogo
      * (ex.: dentro de on_ai ou de um evento). Devolve o índice ou -1. */
     int32_t (*spawn_npc)(ModrixContext* ctx, ModrixId type, float x, float y);
+
+    /* Estado do mundo. Seguras em qualquer thread: leem uma fotografia que o
+     * runtime atualiza a cada frame na thread do jogo.
+     * Retornam 1 (sim), 0 (não) ou -1 (desconhecido: sem mundo carregado,
+     * jogo ainda não rodou um frame, ou flag não mapeada nesta versão). */
+    int32_t (*in_world)(const ModrixContext* ctx);
+    int32_t (*progress)(const ModrixContext* ctx, ModrixProgress flag);
+
+    /* Canal de dados para a interface ("mod_id/channel"). Só durante o init;
+     * channel [a-z0-9_]{1,64}, declarado em manifest "provides". */
+    bool (*register_provider)(ModrixContext* ctx, const char* channel, ModrixProviderFn fn, void* user);
+    void (*buffer_append)(ModrixBuffer* out, const char* data, size_t len);
 } ModrixHostApi;
 
 /* Assinatura do ponto de entrada. Retorne 0 em sucesso; qualquer outro valor

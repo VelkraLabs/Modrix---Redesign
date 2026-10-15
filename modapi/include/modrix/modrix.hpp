@@ -51,6 +51,17 @@ public:
     virtual bool OnAI(ModrixNpcState& /*npc*/) { return false; }
 };
 
+// Provedor de dados para a interface: devolve um documento JSON.
+class DataProvider {
+public:
+    virtual ~DataProvider() = default;
+    virtual bool Build(std::string& json) = 0;
+
+private:
+    friend class Host;
+    const ModrixHostApi* api_ = nullptr;  // preenchido por Host::Provide
+};
+
 class Host {
 public:
     Host(const ModrixHostApi* api, ModrixContext* ctx) : api_(api), ctx_(ctx) {}
@@ -108,6 +119,17 @@ public:
         return HasNpcApi() ? api_->spawn_npc(ctx_, type, x, y) : -1;
     }
 
+    // -1/0/1, ver modrix_api.h. Seguros em qualquer thread.
+    int32_t InWorld() const { return HasProgressApi() ? api_->in_world(ctx_) : -1; }
+    int32_t Progress(ModrixProgress flag) const { return HasProgressApi() ? api_->progress(ctx_, flag) : -1; }
+
+    // `provider` precisa viver enquanto o jogo roda (ex.: objeto estático).
+    bool Provide(const std::string& channel, DataProvider* provider) const {
+        if (!HasProgressApi() || !provider) return false;
+        provider->api_ = api_;
+        return api_->register_provider(ctx_, channel.c_str(), &ProviderTrampoline, provider);
+    }
+
     bool OnPlayerHurt(ModrixPlayerHurtFn fn, void* user = nullptr) const {
         return api_->subscribe_player_hurt(ctx_, fn, user);
     }
@@ -115,6 +137,16 @@ public:
     int32_t PlayerLife(ModrixPlayer p) const { return api_->player_life(ctx_, p); }
 
 private:
+    static bool ProviderTrampoline(void* user, ModrixBuffer* out) {
+        auto* p = static_cast<DataProvider*>(user);
+        std::string json;
+        if (!p->Build(json)) return false;
+        p->api_->buffer_append(out, json.data(), json.size());
+        return true;
+    }
+    bool HasProgressApi() const {
+        return api_->struct_size >= offsetof(ModrixHostApi, buffer_append) + sizeof(api_->buffer_append);
+    }
     bool HasNpcApi() const {
         return api_->struct_size >= offsetof(ModrixHostApi, spawn_npc) + sizeof(api_->spawn_npc);
     }

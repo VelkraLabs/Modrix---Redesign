@@ -67,6 +67,14 @@ bool OnAi(Il2CppObject* npc, int32_t index) {
     return true;  // substitui a AI original
 }
 
+// --- Frame / estado do mundo -----------------------------------------------------
+int g_frameCalls = 0;
+int32_t g_lastGameMenu = -2;
+void OnFrame() {
+    ++g_frameCalls;
+    g_lastGameMenu = Modrix_IsGameMenu();  // aqui estamos na thread do jogo
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -161,6 +169,33 @@ int main(int argc, char** argv) {
     // Spawn pedido pela camada de mods (runtime_invoke -> NewNPC com hook).
     CHECK(Modrix_SpawnNpc(10, 20, 4097) == 2);
     CHECK(g_modSlot[2] == 4097 && Modrix_ReadNpc(Modrix_GetNpcByIndex(2), &f) && f.type == 4);
+
+    // ---- Frame e estado do mundo ------------------------------------------------
+    auto mock_become_game_thread = reinterpret_cast<void (*)()>(dlsym(lib, "mock_become_game_thread"));
+    auto mock_set_game_menu = reinterpret_cast<void (*)(bool)>(dlsym(lib, "mock_set_game_menu"));
+    auto mock_set_flag = reinterpret_cast<bool (*)(const char*, bool)>(dlsym(lib, "mock_set_flag"));
+    auto mock_game_frame = reinterpret_cast<int (*)()>(dlsym(lib, "mock_game_frame"));
+    CHECK(mock_become_game_thread && mock_set_game_menu && mock_set_flag && mock_game_frame);
+    mock_become_game_thread();  // esta thread passa a ser a "thread do jogo"
+    Modrix_SetFrameCallback(&OnFrame);
+
+    CHECK(mock_game_frame() == 1 && g_frameCalls == 1 && g_lastGameMenu == 1);  // no menu
+    mock_set_game_menu(false);
+    CHECK(mock_game_frame() == 2 && g_lastGameMenu == 0);                     // num mundo
+    // Fora da thread do jogo a Instance ThreadStatic é nula: -1, nunca crash.
+    int32_t otherThread = -2;
+    std::thread([&] { otherThread = Modrix_IsGameMenu(); }).join();
+    CHECK(otherThread == -1);
+
+    ModrixStaticField* boss1 = Modrix_FindStaticField("Terraria", "NPC", "downedBoss1");
+    ModrixStaticField* hard = Modrix_FindStaticField("Terraria", "Main", "hardMode");
+    CHECK(boss1 && hard && !Modrix_FindStaticField("Terraria", "NPC", "downedNothing"));
+    bool b = true;
+    CHECK(Modrix_ReadStaticBool(boss1, &b) && !b);
+    mock_set_flag("downedBoss1", true);
+    mock_set_flag("hardMode", true);
+    CHECK(Modrix_ReadStaticBool(boss1, &b) && b);
+    CHECK(Modrix_ReadStaticBool(hard, &b) && b);
 
     std::printf("TODOS OS TESTES PASSARAM\n");
     return 0;

@@ -59,6 +59,14 @@ public:
     // NPC de mod que ocupa o slot de Main.npc (MODRIX_INVALID_ID = original).
     ModrixId NpcInSlot(int32_t index) const;
 
+    // --- Camada de interface ---------------------------------------------------
+    // Canais registrados, como "mod_id/channel".
+    std::vector<std::string> Providers() const;
+    // Chama o provedor e devolve o JSON (já validado). Seguro em qualquer
+    // thread; chamadas concorrentes ao mesmo provedor são serializadas.
+    std::optional<std::string> Query(const std::string& modId, const std::string& channel,
+                                     std::string* error = nullptr) const;
+
     // Resolve dependências e devolve a ordem de carga (ids). Marca como
     // Rejected os mods com dependência ausente/incompatível ou em ciclo.
     // Exposto para testes; LoadAll já chama.

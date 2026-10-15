@@ -175,7 +175,29 @@ int32_t Modrix_FindNpcIndex(Il2CppObject* npc);       // posição em Main.npc[]
 // `source` (IEntitySource) vai nulo.
 int32_t Modrix_SpawnNpc(int32_t x, int32_t y, int32_t type);
 
+// ===========================================================================
+// Estado do mundo / frame
+// ===========================================================================
+
+// Chamado no início de Main.DoUpdate (RVA 0xCADDB8): uma vez por frame, na
+// thread do jogo, tanto no menu quanto no mundo. É o lugar para tirar
+// "fotografias" de estado que outras threads (UI) vão consultar. Nulo desliga.
+typedef void (*ModrixFrameCallback)(void);
+void Modrix_SetFrameCallback(ModrixFrameCallback cb);
+
+// Só na thread do jogo (ex.: dentro do ModrixFrameCallback): 1 = menu,
+// 0 = dentro de um mundo, -1 = indisponível. Lê LocalUserGameState.Instance
+// (ThreadStatic) .gameMenu; em outra thread Instance é nulo e o resultado é -1.
+int32_t Modrix_IsGameMenu(void);
+
+// Campo estático comum (não ThreadStatic), resolvido uma vez e lido muitas.
+// namespaze pode ser "" (namespace global). Nulo se não existir.
+typedef struct ModrixStaticField ModrixStaticField;
+ModrixStaticField* Modrix_FindStaticField(const char* namespaze, const char* klass, const char* field);
+bool Modrix_ReadStaticBool(const ModrixStaticField* field, bool* out);
+
 // Handlers que os hooks apontam (exportados como Modrix_Hooked_PlayerHurt).
+void Modrix_Hooked_MainDoUpdate(Il2CppObject* self, Il2CppObject* gameTime, const MethodInfo* method);
 int32_t Modrix_Hooked_NpcNewNPC(Il2CppObject* source, int32_t x, int32_t y, int32_t type,
                                 int32_t start, float ai0, float ai1, float ai2, float ai3,
                                 int32_t target, const MethodInfo* method);

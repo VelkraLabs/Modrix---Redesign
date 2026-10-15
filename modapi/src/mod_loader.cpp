@@ -4,12 +4,19 @@
 #include <iterator>
 #include <cstddef>
 #include <map>
+#include <mutex>
 #include <queue>
 #include <set>
 
 #include "dynlib.h"
+#include "json.h"
 #include "modrix/runtime/game_adapter.h"
 #include "modrix/runtime/log.h"
+
+// Buffer em que um provedor escreve o JSON. Opaco do lado do mod.
+struct ModrixBuffer {
+    std::string data;
+};
 
 // Contexto entregue ao mod. Opaco do lado do mod (modrix_api.h só declara).
 struct ModrixContext {
@@ -47,6 +54,15 @@ struct ModLoader::Impl {
     std::vector<std::unique_ptr<ModrixContext>> contexts;
     std::vector<void*> libraries;  // nunca fechadas: hooks/eventos podem apontar para elas
     std::vector<HurtSub> hurtSubs;
+
+    // Provedores de dados para a interface ("mod_id/channel").
+    struct Provider {
+        std::string key;
+        ModrixProviderFn fn;
+        void* user;
+        std::unique_ptr<std::mutex> mutex;  // serializa chamadas ao mesmo provedor
+    };
+    std::vector<Provider> providers;
 
     const ModRecord& Mod(const ModrixContext* ctx) const { return self->mods_[ctx->index]; }
     const std::string& ModId(const ModrixContext* ctx) const { return Mod(ctx).manifest.id; }
@@ -274,6 +290,43 @@ ModrixId Api_RegisterNpc(ModrixContext* ctx, const ModrixNpcDef* def) {
     return *id;
 }
 
+int32_t ToTri(std::optional<bool> v) { return v ? (*v ? 1 : 0) : -1; }
+
+int32_t Api_InWorld(const ModrixContext* ctx) { return ctx ? ToTri(ImplOf(ctx)->game->InWorld()) : -1; }
+
+int32_t Api_Progress(const ModrixContext* ctx, ModrixProgress flag) {
+    if (!ctx || flag < 0 || flag >= MODRIX_PROGRESS_COUNT) return -1;
+    GameAdapter* game = ImplOf(ctx)->game;
+    // Flags só fazem sentido com um mundo carregado; no menu ficam com o
+    // valor do último mundo (ou lixo), então a resposta é "desconhecido".
+    if (game->InWorld() != std::optional<bool>(true)) return -1;
+    return ToTri(game->Progress(flag));
+}
+
+bool Api_RegisterProvider(ModrixContext* ctx, const char* channel, ModrixProviderFn fn, void* user) {
+    if (!ctx) return false;
+    Impl* impl = ImplOf(ctx);
+    const ModRecord& mod = impl->Mod(ctx);
+    auto err = [&](const std::string& msg) {
+        Log(MODRIX_LOG_ERROR, mod.manifest.id, "register_provider: " + msg);
+        return false;
+    };
+    if (!ctx->initializing) return err("só pode ser chamado durante modrix_mod_init");
+    if (!channel || !fn) return err("channel e fn são obrigatórios");
+    std::string ch = channel;
+    if (std::find(mod.manifest.provides.begin(), mod.manifest.provides.end(), ch) == mod.manifest.provides.end())
+        return err("\"" + ch + "\" não está declarado em \"provides\" do manifest.json");
+    std::string key = mod.manifest.id + "/" + ch;
+    for (const auto& p : impl->providers)
+        if (p.key == key) return err("canal \"" + ch + "\" já registrado");
+    impl->providers.push_back({key, fn, user, std::make_unique<std::mutex>()});
+    return true;
+}
+
+void Api_BufferAppend(ModrixBuffer* out, const char* data, size_t len) {
+    if (out && data) out->data.append(data, len);
+}
+
 int32_t Api_SpawnNpc(ModrixContext* ctx, ModrixId type, float x, float y) {
     if (!ctx) return -1;
     Impl* impl = ImplOf(ctx);
@@ -309,6 +362,10 @@ ModLoader::ModLoader(GameAdapter* game) : game_(game), registry_(game), impl_(st
     a.player_life = &Api_PlayerLife;
     a.register_npc = &Api_RegisterNpc;
     a.spawn_npc = &Api_SpawnNpc;
+    a.in_world = &Api_InWorld;
+    a.progress = &Api_Progress;
+    a.register_provider = &Api_RegisterProvider;
+    a.buffer_append = &Api_BufferAppend;
 
     Impl* impl = impl_.get();
     game_->SetPlayerHurtHandler([impl](ModrixPlayerHurt& ev, bool after) { return impl->DispatchHurt(ev, after); });
@@ -325,6 +382,39 @@ ModLoader::ModLoader(GameAdapter* game) : game_(game), registry_(game), impl_(st
 ModLoader::~ModLoader() {
     game_->SetPlayerHurtHandler(nullptr);
     game_->SetNpcHooks({});
+}
+
+std::vector<std::string> ModLoader::Providers() const {
+    std::vector<std::string> keys;
+    for (const auto& p : impl_->providers) keys.push_back(p.key);
+    return keys;
+}
+
+std::optional<std::string> ModLoader::Query(const std::string& modId, const std::string& channel,
+                                            std::string* error) const {
+    auto fail = [&](const std::string& msg) -> std::optional<std::string> {
+        if (error) *error = msg;
+        return std::nullopt;
+    };
+    std::string key = modId + "/" + channel;
+    for (const auto& p : impl_->providers) {
+        if (p.key != key) continue;
+        ModrixBuffer buf;
+        bool ok;
+        {
+            std::lock_guard<std::mutex> lock(*p.mutex);
+            ok = p.fn(p.user, &buf);
+        }
+        if (!ok) return fail(key + ": o provedor devolveu erro");
+        // A interface recebe sempre JSON válido: um mod com bug não a quebra.
+        std::string jsonError;
+        if (!json::Parse(buf.data, &jsonError)) {
+            Log(MODRIX_LOG_ERROR, modId, "provedor " + channel + " gerou JSON inválido: " + jsonError);
+            return fail(key + ": " + jsonError);
+        }
+        return std::move(buf.data);
+    }
+    return fail("canal " + key + " não existe");
 }
 
 ModrixId ModLoader::NpcInSlot(int32_t index) const {
@@ -512,6 +602,7 @@ size_t ModLoader::LoadAll() {
 
         auto checkpoint = registry_.Mark();
         size_t subsBefore = impl_->hurtSubs.size();
+        size_t providersBefore = impl_->providers.size();
         ctx->initializing = true;
         int rc = init(&impl_->api, ctx.get());
         ctx->initializing = false;
@@ -519,6 +610,7 @@ size_t ModLoader::LoadAll() {
         if (rc != 0) {
             registry_.Rollback(checkpoint);
             impl_->hurtSubs.resize(subsBefore);
+            while (impl_->providers.size() > providersBefore) impl_->providers.pop_back();
             rec.state = ModState::Failed;
             rec.error = "modrix_mod_init retornou " + std::to_string(rc);
             Log(MODRIX_LOG_ERROR, rec.manifest.id, rec.error);

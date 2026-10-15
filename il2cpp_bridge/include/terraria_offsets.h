@@ -72,6 +72,23 @@ constexpr size_t player = 0x678;   // Player[] Main.player (255 slots)
 constexpr size_t netMode = 0x81C;  // int Main.netMode
 }  // namespace main_static_off
 
+// --- Estado do mundo -------------------------------------------------------
+// LocalUserGameState (namespace global, TypeDefIndex 695):
+//   [ThreadStatic] static LocalUserGameState Instance
+//   bool gameMenu  @0x320   (true = menu, false = dentro de um mundo)
+constexpr const char* kLocalUserGameStateClass = "LocalUserGameState";
+namespace local_user_off {
+constexpr size_t gameMenu = 0x320;
+}
+// Flags de progresso: static bool em Terraria.NPC (static_fields+offset), lidas
+// por nome via il2cpp_field_static_get_value. Offsets do dump, só referência:
+//   downedBoss1 0x8E (Olho de Cthulhu)  downedBoss2 0x8F (Devorador/Cérebro)
+//   downedBoss3 0x90 (Esqueletron)      downedQueenBee 0x91  downedSlimeKing 0x92
+//   downedPlantBoss 0x97  downedGolemBoss 0x98  downedFishron 0x9A
+//   downedAncientCultist 0xA0  downedMoonlord 0xA1  downedEmpressOfLight 0xA6
+//   downedQueenSlime 0xA7  downedDeerclops 0xA8  downedMechBoss1..3 0xCA..0xCC
+// Main.hardMode (static_fields+0x360) liga quando o Wall of Flesh morre.
+
 // --- RVAs de métodos (endereço real = base da libil2cpp.so + RVA) ----------
 namespace rva {
 // double Player.Hurt(PlayerDeathReason damageSource, int Damage, int hitDirection,
@@ -94,6 +111,13 @@ constexpr uintptr_t NPC_SetDefaults = 0xDAF1BC;
 constexpr uintptr_t NPC_UpdateNPC = 0xF4A2E8;
 constexpr uintptr_t NPC_AI = 0xDCE54C;          // void NPC.AI()
 constexpr uintptr_t Main_DoUpdateInWorld = 0xCBBDF0;
+// protected void Main.DoUpdate(GameTime): todo frame, no menu e no mundo,
+// na thread do jogo (chamado por Main.Update 0xCADB8C).
+constexpr uintptr_t Main_DoUpdate = 0xCADDB8;
+// static bool Main.get_gameMenu(): lê LocalUserGameState.Instance.gameMenu.
+// Instance é [ThreadStatic]: fora da thread do jogo é nulo e o getter lança
+// NullReferenceException. Por isso a ponte só lê isso dentro de DoUpdate.
+constexpr uintptr_t Main_get_gameMenu = 0xC69BB0;
 }  // namespace rva
 
 // Número de parâmetros C# (sem contar `this`), usado em
@@ -105,6 +129,7 @@ constexpr int Main_get_myPlayer = 0;  // Main.myPlayer é propriedade nesta buil
 constexpr int NPC_NewNPC = 10;
 constexpr int NPC_SetDefaults = 2;
 constexpr int NPC_AI = 0;
+constexpr int Main_DoUpdate = 1;
 }  // namespace argc
 
 }  // namespace terraria

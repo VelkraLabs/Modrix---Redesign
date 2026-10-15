@@ -50,7 +50,96 @@ bool NpcAi(Il2CppObject*, int32_t index) {
     return h && h->onAi && index >= 0 && h->onAi(index);
 }
 
+// --- Estado do mundo -------------------------------------------------------------
+// ModrixProgress -> campo estático do jogo (nomes conferidos no dump.cs).
+// Mapeamento das mecânicas (MechBoss1..3) segue o código do PC 1.4.4.
+struct ProgressField {
+    ModrixProgress flag;
+    const char* klass;
+    const char* field;
+};
+constexpr ProgressField kProgressFields[] = {
+    {MODRIX_PROGRESS_HARDMODE, "Main", "hardMode"},  // static_fields+0x360
+    {MODRIX_DOWNED_KING_SLIME, "NPC", "downedSlimeKing"},
+    {MODRIX_DOWNED_EYE_OF_CTHULHU, "NPC", "downedBoss1"},
+    {MODRIX_DOWNED_EVIL_BOSS, "NPC", "downedBoss2"},
+    {MODRIX_DOWNED_QUEEN_BEE, "NPC", "downedQueenBee"},
+    {MODRIX_DOWNED_SKELETRON, "NPC", "downedBoss3"},
+    {MODRIX_DOWNED_DEERCLOPS, "NPC", "downedDeerclops"},
+    {MODRIX_DOWNED_QUEEN_SLIME, "NPC", "downedQueenSlime"},
+    {MODRIX_DOWNED_DESTROYER, "NPC", "downedMechBoss1"},
+    {MODRIX_DOWNED_TWINS, "NPC", "downedMechBoss2"},
+    {MODRIX_DOWNED_SKELETRON_PRIME, "NPC", "downedMechBoss3"},
+    {MODRIX_DOWNED_PLANTERA, "NPC", "downedPlantBoss"},
+    {MODRIX_DOWNED_GOLEM, "NPC", "downedGolemBoss"},
+    {MODRIX_DOWNED_DUKE_FISHRON, "NPC", "downedFishron"},
+    {MODRIX_DOWNED_EMPRESS_OF_LIGHT, "NPC", "downedEmpressOfLight"},
+    {MODRIX_DOWNED_LUNATIC_CULTIST, "NPC", "downedAncientCultist"},
+    {MODRIX_DOWNED_MOON_LORD, "NPC", "downedMoonlord"},
+    {MODRIX_DOWNED_GOBLIN_ARMY, "NPC", "downedGoblins"},
+    {MODRIX_DOWNED_FROST_LEGION, "NPC", "downedFrost"},
+    {MODRIX_DOWNED_PIRATES, "NPC", "downedPirates"},
+    {MODRIX_DOWNED_MARTIANS, "NPC", "downedMartians"},
+    {MODRIX_DOWNED_MOURNING_WOOD, "NPC", "downedHalloweenTree"},
+    {MODRIX_DOWNED_PUMPKING, "NPC", "downedHalloweenKing"},
+    {MODRIX_DOWNED_EVERSCREAM, "NPC", "downedChristmasTree"},
+    {MODRIX_DOWNED_SANTA_NK1, "NPC", "downedChristmasSantank"},
+    {MODRIX_DOWNED_ICE_QUEEN, "NPC", "downedChristmasIceQueen"},
+    {MODRIX_DOWNED_SOLAR_PILLAR, "NPC", "downedTowerSolar"},
+    {MODRIX_DOWNED_VORTEX_PILLAR, "NPC", "downedTowerVortex"},
+    {MODRIX_DOWNED_NEBULA_PILLAR, "NPC", "downedTowerNebula"},
+    {MODRIX_DOWNED_STARDUST_PILLAR, "NPC", "downedTowerStardust"},
+};
+static_assert(sizeof(kProgressFields) / sizeof(kProgressFields[0]) == MODRIX_PROGRESS_COUNT,
+              "toda flag de ModrixProgress precisa de um campo");
+static_assert(MODRIX_PROGRESS_COUNT <= 31, "a fotografia usa 31 bits de valor + 31 de 'conhecido'");
+
+// Fotografia num único uint64_t, para leitura consistente de qualquer thread:
+//   bits  0..30  valor da flag i
+//   bit     31   está num mundo
+//   bits 32..62  flag i conhecida (campo resolvido e lido)
+//   bit     63   "está num mundo" conhecido (já houve um frame com Instance)
+constexpr int kKnownShift = 32;
+constexpr uint64_t kInWorldBit = 1ull << 31;
+constexpr uint64_t kInWorldKnownBit = 1ull << 63;
+std::atomic<uint64_t> g_snapshot{0};
+
+// Só na thread do jogo (dentro de Main.DoUpdate).
+void OnFrame() {
+    static ModrixStaticField* fields[MODRIX_PROGRESS_COUNT] = {};
+    static bool resolved = false;
+    if (!resolved) {  // primeira vez: resolve os 30 campos por nome
+        for (const ProgressField& f : kProgressFields)
+            fields[f.flag] = Modrix_FindStaticField("Terraria", f.klass, f.field);
+        resolved = true;
+    }
+    uint64_t snap = 0;
+    int32_t menu = Modrix_IsGameMenu();
+    if (menu >= 0) snap |= kInWorldKnownBit | (menu == 0 ? kInWorldBit : 0);
+    for (int i = 0; i < MODRIX_PROGRESS_COUNT; ++i) {
+        bool v = false;
+        if (Modrix_ReadStaticBool(fields[i], &v))
+            snap |= (1ull << (kKnownShift + i)) | (v ? 1ull << i : 0);
+    }
+    g_snapshot.store(snap, std::memory_order_release);
+}
+
 }  // namespace
+
+BridgeGameAdapter::BridgeGameAdapter() { Modrix_SetFrameCallback(&OnFrame); }
+
+std::optional<bool> BridgeGameAdapter::InWorld() const {
+    uint64_t s = g_snapshot.load(std::memory_order_acquire);
+    if (!(s & kInWorldKnownBit)) return std::nullopt;
+    return (s & kInWorldBit) != 0;
+}
+
+std::optional<bool> BridgeGameAdapter::Progress(ModrixProgress flag) const {
+    if (flag < 0 || flag >= MODRIX_PROGRESS_COUNT) return std::nullopt;
+    uint64_t s = g_snapshot.load(std::memory_order_acquire);
+    if (!(s & (1ull << (kKnownShift + flag)))) return std::nullopt;
+    return (s & (1ull << flag)) != 0;
+}
 
 std::optional<int32_t> BridgeGameAdapter::VanillaCount(ModrixContentKind) const {
     // ItemID.Count, NPCID.Count etc. são `const` no C#: o compilador embute o

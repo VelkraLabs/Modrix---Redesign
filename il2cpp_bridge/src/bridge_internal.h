@@ -32,4 +32,8 @@ bool InstallHook(const char* name, const MethodInfo* method, uintptr_t dumpRva, 
 bool ResolveNpc();
 void InstallNpcHooks();
 
+// Frame / estado do mundo (world_state.cpp).
+bool ResolveWorldState();
+void InstallWorldStateHooks();
+
 }  // namespace bridge

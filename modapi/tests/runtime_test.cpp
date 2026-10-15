@@ -1,6 +1,8 @@
 // Testes do runtime de mods: semver, manifest, registro de conteúdo,
 // resolução de dependências e carga real do mod de exemplo.
+#include <atomic>
 #include <cstdio>
+#include <thread>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -9,6 +11,7 @@
 #include <vector>
 
 #include "fake_game.h"
+#include "json.h"
 #include "modrix/runtime/content_registry.h"
 #include "modrix/runtime/log.h"
 #include "modrix/runtime/manifest.h"
@@ -370,6 +373,137 @@ static void TestNpcs(const fs::path& modsDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Boss Checklist: carrega a .so real e confere o JSON exposto à interface.
+namespace bc {
+
+using modrix::rt::json::Value;
+
+const Value* Entry(const Value& doc, const std::string& key) {
+    for (const Value& e : *doc.Get("entries")->AsArray())
+        if (*e.Get("key")->AsString() == key) return &e;
+    return nullptr;
+}
+std::string Status(const Value& doc, const std::string& key) {
+    const Value* e = Entry(doc, key);
+    return e ? *e->Get("status")->AsString() : "?";
+}
+int Count(const Value& doc, const char* group, const char* field) {
+    return static_cast<int>(*doc.Get("summary")->Get(group)->Get(field)->AsNumber());
+}
+std::string NextKey(const Value& doc) {
+    const Value* n = doc.Get("next");
+    return n->IsNull() ? "null" : *n->Get("key")->AsString();
+}
+std::string Tri(const Value* v) { return v->IsNull() ? "null" : (*v->AsBool() ? "true" : "false"); }
+
+// Builtins para testar a proteção do runtime em volta dos provedores.
+bool BadJson(void*, ModrixBuffer* out);
+bool Refuse(void*, ModrixBuffer*) { return false; }
+const ModrixHostApi* g_api = nullptr;
+bool BadJson(void*, ModrixBuffer* out) {
+    const char text[] = "{\"bosses\": [1, 2";  // JSON truncado
+    g_api->buffer_append(out, text, sizeof(text) - 1);
+    return true;
+}
+int ProvidersInit(const ModrixHostApi* api, ModrixContext* ctx) {
+    g_api = api;
+    if (api->register_provider(ctx, "undeclared", &Refuse, nullptr)) return 2;  // fora de "provides"
+    if (!api->register_provider(ctx, "broken", &BadJson, nullptr)) return 3;
+    if (!api->register_provider(ctx, "refuses", &Refuse, nullptr)) return 4;
+    return 0;
+}
+
+}  // namespace bc
+
+static void TestBossChecklist(const fs::path& modsDir) {
+    std::printf("\n== Boss Checklist (mod real, jogo simulado)\n");
+    fs::path tmp = fs::temp_directory_path() / "modrix_checklist_test";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+    fs::copy(modsDir / "boss_checklist", tmp / "boss_checklist", fs::copy_options::recursive);
+
+    FakeGame game;
+    ModLoader loader(&game);
+    loader.DiscoverDirectory(tmp);
+    ModManifest m = Builtin("test.providers");
+    m.provides = {"broken", "refuses"};
+    loader.AddBuiltin(m, &bc::ProvidersInit);
+    CHECK(loader.LoadAll() == 2);
+    auto providers = loader.Providers();
+    CHECK((providers == std::vector<std::string>{"modrix.boss_checklist/checklist", "test.providers/broken",
+                                                  "test.providers/refuses"}));
+
+    auto query = [&](const char* label) {
+        std::string err;
+        auto text = loader.Query("modrix.boss_checklist", "checklist", &err);
+        auto doc = text ? modrix::rt::json::Parse(*text, &err) : std::nullopt;
+        if (!doc) std::printf("      erro: %s\n", err.c_str());
+        if (text && std::getenv("MODRIX_PRINT_JSON")) std::printf("JSON[%s] %s\n", label, text->c_str());
+        return doc;
+    };
+
+    // 1) O jogo ainda não rodou um frame: nada é conhecido.
+    auto d1 = query("sem_frame");
+    CHECK(d1 && bc::Tri(d1->Get("in_world")) == "null" && bc::Tri(d1->Get("hardmode")) == "null");
+    CHECK(d1 && bc::Count(*d1, "bosses", "unknown") == 17 && bc::NextKey(*d1) == "null");
+    CHECK(d1 && d1->Get("entries")->AsArray()->size() == 30);
+
+    // 2) Início de jogo: 4 bosses pré-hardmode e o Exército Goblin derrotados.
+    game.inWorld = true;
+    for (auto& p : game.progress) p = false;
+    for (ModrixProgress f : {MODRIX_DOWNED_KING_SLIME, MODRIX_DOWNED_EYE_OF_CTHULHU, MODRIX_DOWNED_EVIL_BOSS,
+                             MODRIX_DOWNED_QUEEN_BEE, MODRIX_DOWNED_GOBLIN_ARMY})
+        game.progress[f] = true;
+    auto d2 = query("inicio");
+    CHECK(d2 && bc::Tri(d2->Get("in_world")) == "true" && bc::Tri(d2->Get("hardmode")) == "false");
+    CHECK(d2 && bc::Count(*d2, "bosses", "defeated") == 4 && bc::Count(*d2, "bosses", "pending") == 13);
+    CHECK(d2 && bc::Count(*d2, "events", "defeated") == 1 && bc::Count(*d2, "events", "total") == 4);
+    CHECK(d2 && bc::Count(*d2, "minibosses", "pending") == 9);
+    CHECK(d2 && bc::Status(*d2, "evil_boss") == "defeated" && bc::Status(*d2, "skeletron") == "pending");
+    CHECK(d2 && bc::Status(*d2, "wall_of_flesh") == "pending");
+    CHECK(d2 && bc::NextKey(*d2) == "skeletron");
+
+    // 3) Hardmode: Wall of Flesh (via hardMode) e as três mecânicas caídas;
+    //    Deerclops "desconhecido" (como uma flag que não resolveu nesta versão).
+    for (ModrixProgress f : {MODRIX_PROGRESS_HARDMODE, MODRIX_DOWNED_SKELETRON, MODRIX_DOWNED_TWINS,
+                             MODRIX_DOWNED_DESTROYER, MODRIX_DOWNED_SKELETRON_PRIME, MODRIX_DOWNED_PIRATES})
+        game.progress[f] = true;
+    game.progress[MODRIX_DOWNED_DEERCLOPS] = std::nullopt;
+    auto d3 = query("hardmode");
+    CHECK(d3 && bc::Tri(d3->Get("hardmode")) == "true" && bc::Status(*d3, "wall_of_flesh") == "defeated");
+    CHECK(d3 && bc::Count(*d3, "bosses", "defeated") == 9 && bc::Count(*d3, "bosses", "unknown") == 1 &&
+          bc::Count(*d3, "bosses", "pending") == 7);
+    CHECK(d3 && bc::Status(*d3, "deerclops") == "unknown");
+    CHECK(d3 && bc::NextKey(*d3) == "queen_slime");  // desconhecido não vira "próximo"
+
+    // 4) De volta ao menu: as flags ainda guardam o último mundo, mas a lista
+    //    não deve mostrá-las.
+    game.inWorld = false;
+    auto d4 = query("menu");
+    CHECK(d4 && bc::Tri(d4->Get("in_world")) == "false" && bc::Count(*d4, "bosses", "unknown") == 17);
+    CHECK(d4 && bc::Status(*d4, "king_slime") == "unknown" && bc::NextKey(*d4) == "null");
+
+    // Proteção do runtime: provedor com JSON inválido ou que recusa não chega à UI.
+    std::string err;
+    CHECK(!loader.Query("test.providers", "broken", &err) && err.find("JSON") != std::string::npos);
+    CHECK(!loader.Query("test.providers", "refuses", &err) && err.find("erro") != std::string::npos);
+    CHECK(!loader.Query("modrix.boss_checklist", "nope", &err) && err.find("não existe") != std::string::npos);
+
+    // Consultas de outras threads (como a UI faria) enquanto o estado muda.
+    game.inWorld = true;
+    std::vector<std::thread> uis;
+    std::atomic<int> okQueries{0};
+    for (int t = 0; t < 4; ++t)
+        uis.emplace_back([&] {
+            for (int i = 0; i < 50; ++i)
+                if (loader.Query("modrix.boss_checklist", "checklist")) ++okQueries;
+        });
+    for (auto& t : uis) t.join();
+    CHECK(okQueries == 200);
+    fs::remove_all(tmp);
+}
+
+// ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -382,6 +516,7 @@ int main(int argc, char** argv) {
     TestResolver();
     TestLoader(argv[1]);
     TestNpcs(argv[1]);
+    TestBossChecklist(argv[1]);
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

@@ -87,6 +87,14 @@ public:
         }
     }
 
+    // --- Estado do mundo -----------------------------------------------------------
+    std::optional<bool> inWorld;  // nullopt = o jogo ainda não rodou um frame
+    std::array<std::optional<bool>, MODRIX_PROGRESS_COUNT> progress{};
+    std::optional<bool> InWorld() const override { return inWorld; }
+    std::optional<bool> Progress(ModrixProgress f) const override {
+        return (f >= 0 && f < MODRIX_PROGRESS_COUNT) ? progress[static_cast<size_t>(f)] : std::nullopt;
+    }
+
     // Faz o "jogo" aplicar dano: passa pelos mods (pré), aplica, avisa (pós).
     // Retorna o dano aplicado, ou 0 se algum mod cancelou.
     int32_t Hurt(ModrixPlayer p, int32_t damage) {

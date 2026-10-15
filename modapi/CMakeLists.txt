@@ -29,6 +29,7 @@ set(MODRIX_SDK_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(MODRIX_MODS_OUTPUT_DIR ${CMAKE_BINARY_DIR}/dist/mods)
 add_subdirectory(mods/example_item)
 add_subdirectory(mods/example_boss)
+add_subdirectory(mods/boss_checklist)
 
 # --- Adaptador sobre a ponte IL2CPP -----------------------------------------
 if(MODRIX_WITH_BRIDGE)
@@ -59,8 +60,10 @@ if(NOT ANDROID)
 
   add_executable(runtime_test tests/runtime_test.cpp)
   target_compile_options(runtime_test PRIVATE ${MODRIX_WARNINGS})
-  target_link_libraries(runtime_test PRIVATE modrix_runtime)
-  add_dependencies(runtime_test example_item example_boss)
+  find_package(Threads REQUIRED)
+  target_link_libraries(runtime_test PRIVATE modrix_runtime Threads::Threads)
+  add_dependencies(runtime_test example_item example_boss boss_checklist)
+  target_include_directories(runtime_test PRIVATE src)  # json.h, para conferir a saída
   add_test(NAME runtime_test COMMAND runtime_test ${MODRIX_MODS_OUTPUT_DIR})
 
   # modrix_api.h precisa compilar como C99 puro, sem extensões.

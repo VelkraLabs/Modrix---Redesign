@@ -203,6 +203,26 @@ std::optional<ModManifest> ParseManifest(const std::string& text, std::string* e
         }
     }
 
+    if (const json::Value* p = root->Get("provides")) {
+        const json::Array* arr = p->AsArray();
+        if (!arr) {
+            Fail(error, "provides: deve ser lista de nomes de canal");
+            return std::nullopt;
+        }
+        for (const auto& item : *arr) {
+            const std::string* s = item.AsString();
+            if (!s || !IsValidContentName(*s)) {
+                Fail(error, "provides: canais devem casar [a-z0-9_]{1,64}");
+                return std::nullopt;
+            }
+            if (std::find(m.provides.begin(), m.provides.end(), *s) != m.provides.end()) {
+                Fail(error, "provides: \"" + *s + "\" repetido");
+                return std::nullopt;
+            }
+            m.provides.push_back(*s);
+        }
+    }
+
     const json::Value* entry = root->Get("entry");
     const json::Object* entryObj = entry ? entry->AsObject() : nullptr;
     if (!entryObj || entryObj->empty()) {

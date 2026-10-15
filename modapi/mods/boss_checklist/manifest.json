@@ -1,0 +1,17 @@
+{
+  "modrix_api": 1,
+  "id": "modrix.boss_checklist",
+  "name": "Boss Checklist",
+  "version": "0.1.0",
+  "authors": ["Modrix"],
+  "description": "Lê quais bosses, minibosses e eventos já foram derrotados no mundo atual e expõe a lista para a interface.",
+  "dependencies": {},
+  "provides": ["checklist"],
+  "entry": {
+    "android-arm64": "lib/android-arm64/libboss_checklist.so",
+    "linux-x86_64": "lib/linux-x86_64/libboss_checklist.so",
+    "linux-arm64": "lib/linux-arm64/libboss_checklist.so",
+    "windows-x86_64": "lib/windows-x86_64/boss_checklist.dll",
+    "macos-arm64": "lib/macos-arm64/libboss_checklist.dylib"
+  }
+}

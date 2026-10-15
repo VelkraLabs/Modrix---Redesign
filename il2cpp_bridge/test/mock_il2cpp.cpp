@@ -28,7 +28,9 @@ struct MethodInfo {
 struct FieldInfo {
     const char* name;
     size_t offset;
-    void* staticAddr;  // não nulo para campos estáticos
+    void* staticAddr;              // não nulo para campos estáticos
+    size_t size = sizeof(void*);   // bytes copiados por il2cpp_field_static_get_value
+    void* (*tls)() = nullptr;      // campos [ThreadStatic]: endereço na thread atual
 };
 
 struct Il2CppClass {
@@ -206,13 +208,73 @@ int32_t MockNewNPC(Il2CppObject*, int32_t x, int32_t y, int32_t type, int32_t st
 using NewNpcFn = decltype(&MockNewNPC);
 NewNpcFn g_newNpcEntry = &MockNewNPC;
 
+// ---- Estado do mundo -------------------------------------------------------------
+// Flags estáticas (bool, 1 byte) com os nomes do dump.
+struct BoolStatic {
+    const char* klass;
+    FieldInfo field;
+    bool value;
+};
+BoolStatic g_flags[] = {
+    {"Main", {"hardMode", 0x360, nullptr, 1}, false},
+    {"NPC", {"downedSlimeKing", 0x92, nullptr, 1}, false},
+    {"NPC", {"downedBoss1", 0x8E, nullptr, 1}, false},
+    {"NPC", {"downedBoss2", 0x8F, nullptr, 1}, false},
+    {"NPC", {"downedQueenBee", 0x91, nullptr, 1}, false},
+    {"NPC", {"downedBoss3", 0x90, nullptr, 1}, false},
+    {"NPC", {"downedDeerclops", 0xA8, nullptr, 1}, false},
+    {"NPC", {"downedQueenSlime", 0xA7, nullptr, 1}, false},
+    {"NPC", {"downedMechBoss1", 0xCA, nullptr, 1}, false},
+    {"NPC", {"downedMechBoss2", 0xCB, nullptr, 1}, false},
+    {"NPC", {"downedMechBoss3", 0xCC, nullptr, 1}, false},
+    {"NPC", {"downedPlantBoss", 0x97, nullptr, 1}, false},
+    {"NPC", {"downedGolemBoss", 0x98, nullptr, 1}, false},
+    {"NPC", {"downedFishron", 0x9A, nullptr, 1}, false},
+    {"NPC", {"downedEmpressOfLight", 0xA6, nullptr, 1}, false},
+    {"NPC", {"downedAncientCultist", 0xA0, nullptr, 1}, false},
+    {"NPC", {"downedMoonlord", 0xA1, nullptr, 1}, false},
+    {"NPC", {"downedGoblins", 0x93, nullptr, 1}, false},
+    {"NPC", {"downedFrost", 0x94, nullptr, 1}, false},
+    {"NPC", {"downedPirates", 0x95, nullptr, 1}, false},
+    {"NPC", {"downedMartians", 0x99, nullptr, 1}, false},
+    {"NPC", {"downedHalloweenTree", 0x9B, nullptr, 1}, false},
+    {"NPC", {"downedHalloweenKing", 0x9C, nullptr, 1}, false},
+    {"NPC", {"downedChristmasTree", 0x9E, nullptr, 1}, false},
+    {"NPC", {"downedChristmasSantank", 0x9F, nullptr, 1}, false},
+    {"NPC", {"downedChristmasIceQueen", 0x9D, nullptr, 1}, false},
+    {"NPC", {"downedTowerSolar", 0xA2, nullptr, 1}, false},
+    {"NPC", {"downedTowerVortex", 0xA3, nullptr, 1}, false},
+    {"NPC", {"downedTowerNebula", 0xA4, nullptr, 1}, false},
+    {"NPC", {"downedTowerStardust", 0xA5, nullptr, 1}, false},
+};
+
+// LocalUserGameState: Instance é ThreadStatic, como no jogo.
+struct LocalUserGameState {
+    Il2CppObject header;
+    uint8_t pad[0x320 - sizeof(Il2CppObject)];
+    bool gameMenu;  // @0x320
+};
+LocalUserGameState g_localUser{};
+thread_local Il2CppObject* tl_localUserInstance = nullptr;
+void* LocalUserInstanceAddr() { return &tl_localUserInstance; }
+Il2CppClass g_localUserClass{"", "LocalUserGameState", {}, {}};
+FieldInfo g_fLocalUserInstance{"Instance", 0, nullptr, sizeof(void*), &LocalUserInstanceAddr};
+FieldInfo g_fGameMenu{"gameMenu", 0x320, nullptr};
+
+// Main.DoUpdate: o "frame" do jogo.
+int g_framesRun = 0;
+void MockMainDoUpdate(Il2CppObject*, Il2CppObject*, const MethodInfo*) { ++g_framesRun; }
+using DoUpdateFn = decltype(&MockMainDoUpdate);
+DoUpdateFn g_doUpdateEntry = &MockMainDoUpdate;
+MethodInfo g_mDoUpdate{reinterpret_cast<Il2CppMethodPointer>(&MockMainDoUpdate), "DoUpdate", 1};
+
 }  // namespace
 
 extern "C" {
 
 // ---- controle do teste ------------------------------------------------------
 __attribute__((visibility("default"))) void mock_il2cpp_init() {
-    g_csharp.classes = {&g_player, &g_main, &g_npc};
+    g_csharp.classes = {&g_player, &g_main, &g_npc, &g_localUserClass};
     g_mNewNPC.methodPointer = reinterpret_cast<Il2CppMethodPointer>(&MockNewNPC);
     g_npc.fields.clear();
     for (FieldInfo& f : g_fNpc) g_npc.fields.push_back(&f);
@@ -227,7 +289,7 @@ __attribute__((visibility("default"))) void mock_il2cpp_init() {
     g_player.fields = {&g_fStatLife, &g_fWhoAmI};
     g_player.methods = {&g_mHurt, &g_mHeal};
     g_main.fields = {&g_fMainPlayer, &g_fMainNpc};
-    g_main.methods = {&g_mGetMyPlayer};
+    g_main.methods = {&g_mGetMyPlayer, &g_mDoUpdate};
 
     std::memset(g_localPlayer, 0, sizeof(g_localPlayer));
     I32(g_localPlayer, kStatDefense) = 10;
@@ -235,6 +297,14 @@ __attribute__((visibility("default"))) void mock_il2cpp_init() {
     I32(g_localPlayer, kStatLife) = 400;
     g_mainPlayer->max_length = 255;
     reinterpret_cast<void**>(g_mainPlayer + 1)[0] = g_localPlayer;
+    // Por último: as linhas acima reatribuem as listas de campos.
+    for (BoolStatic& f : g_flags) {
+        f.value = false;
+        f.field.staticAddr = &f.value;
+        (std::strcmp(f.klass, "Main") == 0 ? g_main : g_npc).fields.push_back(&f.field);
+    }
+    g_localUserClass.fields = {&g_fLocalUserInstance, &g_fGameMenu};
+    g_localUser.gameMenu = true;
     g_initialized = true;
 }
 __attribute__((visibility("default"))) void* mock_local_player() { return g_localPlayer; }
@@ -243,6 +313,7 @@ __attribute__((visibility("default"))) bool mock_patch_function(void* target, vo
     else if (target == reinterpret_cast<void*>(&MockNewNPC)) g_newNpcEntry = reinterpret_cast<NewNpcFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockNpcSetDefaults)) g_setDefaultsEntry = reinterpret_cast<SetDefaultsFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockNpcAI)) g_aiEntry = reinterpret_cast<AiFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockMainDoUpdate)) g_doUpdateEntry = reinterpret_cast<DoUpdateFn>(replacement);
     else return false;
     return true;
 }
@@ -260,6 +331,20 @@ __attribute__((visibility("default"))) void mock_game_transform(int32_t index, i
     g_setDefaultsEntry(reinterpret_cast<Il2CppObject*>(g_npcs[index]), newType, SpawnParams{}, &g_mSetDefaults);
 }
 __attribute__((visibility("default"))) void* mock_npc(int32_t index) { return g_npcs[index]; }
+
+// A thread que chama vira a "thread do jogo": recebe a Instance ThreadStatic.
+__attribute__((visibility("default"))) void mock_become_game_thread() { tl_localUserInstance = &g_localUser.header; }
+__attribute__((visibility("default"))) void mock_set_game_menu(bool inMenu) { g_localUser.gameMenu = inMenu; }
+__attribute__((visibility("default"))) bool mock_set_flag(const char* name, bool value) {
+    for (BoolStatic& f : g_flags)
+        if (std::strcmp(f.field.name, name) == 0) return (f.value = value), true;
+    return false;
+}
+// Um frame: Main.Update -> Main.DoUpdate (passa pelo hook se instalado).
+__attribute__((visibility("default"))) int mock_game_frame() {
+    g_doUpdateEntry(nullptr, nullptr, &g_mDoUpdate);
+    return g_framesRun;
+}
 // Simula o jogo aplicando dano ao player (passa pelo hook se instalado).
 __attribute__((visibility("default"))) double mock_game_hurt_player(void* player, int32_t dmg) {
     return g_hurtEntry(static_cast<Il2CppObject*>(player), nullptr, dmg, 1, false, false, false,
@@ -287,7 +372,7 @@ FieldInfo* il2cpp_class_get_field_from_name(Il2CppClass* k, const char* name) {
 }
 size_t il2cpp_field_get_offset(FieldInfo* f) { return f->offset; }
 void il2cpp_field_static_get_value(FieldInfo* f, void* out) {
-    std::memcpy(out, f->staticAddr, sizeof(void*));
+    std::memcpy(out, f->tls ? f->tls() : f->staticAddr, f->size);
 }
 const MethodInfo* il2cpp_class_get_method_from_name(Il2CppClass* k, const char* name, int argc) {
     for (MethodInfo* m : k->methods)

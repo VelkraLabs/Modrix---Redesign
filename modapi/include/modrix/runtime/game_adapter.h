@@ -50,6 +50,12 @@ public:
     virtual bool WriteNpc(int32_t index, const ModrixNpcState& in) = 0;
     // Cria um NPC pelo caminho normal do jogo (passa pelos ganchos). -1 se falhar.
     virtual int32_t SpawnNpc(int32_t type, float x, float y) = 0;
+
+    // --- Estado do mundo -----------------------------------------------------
+    // Precisam ser seguros em QUALQUER thread (a UI consulta fora da thread do
+    // jogo). nullopt = desconhecido.
+    virtual std::optional<bool> InWorld() const = 0;
+    virtual std::optional<bool> Progress(ModrixProgress flag) const = 0;
 };
 
 }  // namespace modrix::rt

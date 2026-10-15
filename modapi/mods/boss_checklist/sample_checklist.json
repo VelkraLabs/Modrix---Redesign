@@ -1,0 +1,272 @@
+{
+  "schema": 1,
+  "in_world": true,
+  "hardmode": true,
+  "summary": {
+    "bosses": {
+      "defeated": 9,
+      "pending": 7,
+      "unknown": 1,
+      "total": 17
+    },
+    "minibosses": {
+      "defeated": 0,
+      "pending": 9,
+      "unknown": 0,
+      "total": 9
+    },
+    "events": {
+      "defeated": 2,
+      "pending": 2,
+      "unknown": 0,
+      "total": 4
+    }
+  },
+  "next": {
+    "key": "queen_slime",
+    "name": "Queen Slime",
+    "order": 8
+  },
+  "entries": [
+    {
+      "key": "king_slime",
+      "name": "King Slime",
+      "category": "boss",
+      "order": 1,
+      "hardmode": false,
+      "status": "defeated"
+    },
+    {
+      "key": "eye_of_cthulhu",
+      "name": "Eye of Cthulhu",
+      "category": "boss",
+      "order": 2,
+      "hardmode": false,
+      "status": "defeated"
+    },
+    {
+      "key": "goblin_army",
+      "name": "Goblin Army",
+      "category": "event",
+      "order": 2.5,
+      "hardmode": false,
+      "status": "defeated"
+    },
+    {
+      "key": "evil_boss",
+      "name": "Eater of Worlds / Brain of Cthulhu",
+      "category": "boss",
+      "order": 3,
+      "hardmode": false,
+      "status": "defeated"
+    },
+    {
+      "key": "queen_bee",
+      "name": "Queen Bee",
+      "category": "boss",
+      "order": 4,
+      "hardmode": false,
+      "status": "defeated"
+    },
+    {
+      "key": "skeletron",
+      "name": "Skeletron",
+      "category": "boss",
+      "order": 5,
+      "hardmode": false,
+      "status": "defeated"
+    },
+    {
+      "key": "deerclops",
+      "name": "Deerclops",
+      "category": "boss",
+      "order": 6,
+      "hardmode": false,
+      "status": "unknown"
+    },
+    {
+      "key": "wall_of_flesh",
+      "name": "Wall of Flesh",
+      "category": "boss",
+      "order": 7,
+      "hardmode": false,
+      "status": "defeated"
+    },
+    {
+      "key": "pirate_invasion",
+      "name": "Pirate Invasion",
+      "category": "event",
+      "order": 7.5,
+      "hardmode": true,
+      "status": "defeated"
+    },
+    {
+      "key": "frost_legion",
+      "name": "Frost Legion",
+      "category": "event",
+      "order": 7.6,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "queen_slime",
+      "name": "Queen Slime",
+      "category": "boss",
+      "order": 8,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "the_twins",
+      "name": "The Twins",
+      "category": "boss",
+      "order": 9,
+      "hardmode": true,
+      "status": "defeated"
+    },
+    {
+      "key": "the_destroyer",
+      "name": "The Destroyer",
+      "category": "boss",
+      "order": 10,
+      "hardmode": true,
+      "status": "defeated"
+    },
+    {
+      "key": "skeletron_prime",
+      "name": "Skeletron Prime",
+      "category": "boss",
+      "order": 11,
+      "hardmode": true,
+      "status": "defeated"
+    },
+    {
+      "key": "plantera",
+      "name": "Plantera",
+      "category": "boss",
+      "order": 12,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "mourning_wood",
+      "name": "Mourning Wood",
+      "category": "miniboss",
+      "order": 12.1,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "pumpking",
+      "name": "Pumpking",
+      "category": "miniboss",
+      "order": 12.2,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "everscream",
+      "name": "Everscream",
+      "category": "miniboss",
+      "order": 12.3,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "santa_nk1",
+      "name": "Santa-NK1",
+      "category": "miniboss",
+      "order": 12.4,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "ice_queen",
+      "name": "Ice Queen",
+      "category": "miniboss",
+      "order": 12.5,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "golem",
+      "name": "Golem",
+      "category": "boss",
+      "order": 13,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "martian_madness",
+      "name": "Martian Madness",
+      "category": "event",
+      "order": 13.5,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "duke_fishron",
+      "name": "Duke Fishron",
+      "category": "boss",
+      "order": 14,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "empress_of_light",
+      "name": "Empress of Light",
+      "category": "boss",
+      "order": 15,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "lunatic_cultist",
+      "name": "Lunatic Cultist",
+      "category": "boss",
+      "order": 16,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "solar_pillar",
+      "name": "Solar Pillar",
+      "category": "miniboss",
+      "order": 16.1,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "vortex_pillar",
+      "name": "Vortex Pillar",
+      "category": "miniboss",
+      "order": 16.2,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "nebula_pillar",
+      "name": "Nebula Pillar",
+      "category": "miniboss",
+      "order": 16.3,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "stardust_pillar",
+      "name": "Stardust Pillar",
+      "category": "miniboss",
+      "order": 16.4,
+      "hardmode": true,
+      "status": "pending"
+    },
+    {
+      "key": "moon_lord",
+      "name": "Moon Lord",
+      "category": "boss",
+      "order": 17,
+      "hardmode": true,
+      "status": "pending"
+    }
+  ]
+}

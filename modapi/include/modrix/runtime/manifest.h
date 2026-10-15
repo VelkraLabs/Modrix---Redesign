@@ -33,6 +33,9 @@ struct ModManifest {
     // registros não declarados.
     std::array<std::vector<std::string>, MODRIX_CONTENT_KIND_COUNT> content;
 
+    // "provides": canais de dados que o mod expõe à interface.
+    std::vector<std::string> provides;
+
     // "entry": plataforma -> caminho relativo da biblioteca nativa.
     std::map<std::string, std::string> entries;
 

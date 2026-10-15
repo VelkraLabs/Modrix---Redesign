@@ -229,6 +229,7 @@ bool Modrix_Init(int timeoutMs) {
         InstallHurtHook();
         // NPCs são opcionais: se algo não resolver, o resto da ponte segue.
         if (bridge::ResolveNpc()) bridge::InstallNpcHooks();
+        if (bridge::ResolveWorldState()) bridge::InstallWorldStateHooks();
         g_ready.store(true);
     } else {
         LOGE("timeout resolvendo Terraria.Player em %s", terraria::kAssembly);

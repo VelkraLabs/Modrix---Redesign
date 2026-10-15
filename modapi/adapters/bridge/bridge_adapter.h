@@ -9,6 +9,10 @@ namespace modrix::rt {
 // e para os mods é índice de player, inteiro ou struct C da API.
 class BridgeGameAdapter final : public GameAdapter {
 public:
+    // Registra o callback por frame da ponte (Main.DoUpdate), que fotografa
+    // o estado do mundo na thread do jogo.
+    BridgeGameAdapter();
+
     const char* Name() const override { return "il2cpp-bridge (Terraria Mobile)"; }
     std::optional<int32_t> VanillaCount(ModrixContentKind kind) const override;
     void SetPlayerHurtHandler(HurtHandler handler) override;
@@ -22,6 +26,10 @@ public:
     bool ReadNpc(int32_t index, ModrixNpcState& out) const override;
     bool WriteNpc(int32_t index, const ModrixNpcState& in) override;
     int32_t SpawnNpc(int32_t type, float x, float y) override;
+
+    // Leem a fotografia do último frame: seguros em qualquer thread.
+    std::optional<bool> InWorld() const override;
+    std::optional<bool> Progress(ModrixProgress flag) const override;
 };
 
 }  // namespace modrix::rt
