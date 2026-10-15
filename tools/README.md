@@ -48,7 +48,8 @@ python3 tools/rename_prefix.py TLMod NovoNome             # aplica e confere que
 ```
 
 - **Grafias.** O nome é dado na grafia de tipo; `TLMod`→`NovoNome`, `tlmod`→`novonome` e
-  `TLMOD`→`NOVONOME` são derivados. Outra grafia (ex.: `TlMod`) faz o script parar sem mudar nada.
+  `TLMOD`→`NOVONOME` são derivados. Qualquer outra mistura de maiúsculas e minúsculas faz o script
+  parar sem mudar nada.
 - **Escopo.** Só `PROJECT_PATHS` (`il2cpp_bridge`, `modapi`, `tools`, `player_fields.md`). O resto
   do repositório é de outro projeto e não é tocado.
 - **Recusa** (sem mudar nada) se o nome novo já aparece no escopo, se um destino já existe ou se um

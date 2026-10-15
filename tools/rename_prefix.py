@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """Troca o prefixo (nome provisório) do projeto em conteúdo, arquivos e pastas.
 
-    python3 tools/rename_prefix.py TLMod NovoNome --dry-run   # só mostra o plano
-    python3 tools/rename_prefix.py TLMod NovoNome             # aplica
+    python3 tools/rename_prefix.py Atual Novo --dry-run   # só mostra o plano
+    python3 tools/rename_prefix.py Atual Novo             # aplica
 
-Os prefixos são dados na grafia de tipo (ex.: TLMod). As três grafias usadas no
-código são derivadas dele, e cada uma vira a grafia correspondente do novo nome:
+Os prefixos são dados na grafia de tipo (ex.: Acme -> Zed). As três grafias
+usadas no código são derivadas deles, e cada uma vira a correspondente:
 
-    TLMod -> NovoNome   tipos C/C++, classes Java, funções da ponte, textos e logs
-    tlmod -> novonome   arquivos, funções exportadas, ids de mod, pacote Java, JSON
-    TLMOD -> NOVONOME   macros, variáveis do CMake
+    Acme -> Zed   tipos C/C++, classes Java, funções da ponte, textos e logs
+    acme -> zed   arquivos, funções exportadas, ids de mod, pacote Java, JSON
+    ACME -> ZED   macros, variáveis do CMake
 
-A troca é por substring (TLModContext, tlmod_mod_init, libtlmod_bridge...). Se
-aparecer qualquer outra grafia (ex.: "TlMod"), o script para sem mudar nada:
-quem decide é uma pessoa.
+A troca é por substring (AcmeContext, acme_mod_init, libacme_bridge...). Se
+aparecer qualquer outra mistura de maiúsculas, o script para sem mudar nada:
+quem decide é uma pessoa. Este arquivo fica fora da troca e não cita o nome
+atual, para continuar valendo depois de cada renomeação.
 
 Escopo: arquivos versionados no git e arquivos novos não ignorados, só dentro
 de PROJECT_PATHS. O resto do repositório pertence a outro projeto e nunca é
@@ -21,7 +22,7 @@ tocado. Pastas e arquivos com o prefixo no nome são movidos com `git mv`,
 para o histórico acompanhar.
 
 Depois de aplicar, recompile em pastas de build novas: as variáveis do CMake
-(TLMOD_ANDROID_SDK...) e os caminhos de include mudam junto.
+e os caminhos de include mudam junto.
 
 Códigos de saída: 0 ok (ou nada a fazer), 1 sobrou ocorrência, 2 erro/recusa.
 """
@@ -158,8 +159,8 @@ def apply(root, edits, moves):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("old", help="prefixo atual, grafia de tipo (ex.: TLMod)")
-    ap.add_argument("new", help="prefixo novo, grafia de tipo (ex.: NovoNome)")
+    ap.add_argument("old", help="prefixo atual, grafia de tipo (ex.: Acme)")
+    ap.add_argument("new", help="prefixo novo, grafia de tipo (ex.: Zed)")
     ap.add_argument("--dry-run", action="store_true", help="mostra o plano e não muda nada")
     ap.add_argument("--root", type=Path, default=SELF.parent.parent, help="raiz do repositório")
     ap.add_argument("--path", action="append", dest="paths",
