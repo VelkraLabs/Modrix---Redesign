@@ -1,0 +1,6 @@
+{
+    global:
+        modrix_mod_init;
+    local:
+        *;
+};

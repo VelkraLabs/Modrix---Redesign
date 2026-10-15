@@ -90,5 +90,98 @@ double Modrix_Hooked_PlayerHurt(Il2CppObject* self, Il2CppObject* damageSource, 
 // Endereço da função original (trampoline) após o hook; nulo se não instalado.
 PlayerHurtFn Modrix_OriginalPlayerHurt(void);
 
+// ===========================================================================
+// NPCs: pontos onde um NPC/boss de mod se pluga
+// ===========================================================================
+//
+// Fluxo de um NPC de mod (ID fora da faixa original, ex.: 4096):
+//
+//   NPC.NewNPC(Type=4096)                 hook pré: remap_spawn_type(4096) -> 4
+//     └ NewNPC original com Type=4 ("casca" original: textura, hitbox, som)
+//         └ NPC.SetDefaults(4)            hook pré: on_set_defaults (slot muda de dono)
+//   NewNPC retorna i                      hook pós: on_spawned(npc, i, 4096, 4)
+//                                         -> quem chamou registra "slot i = NPC de mod 4096"
+//   Main.DoUpdateInWorld -> NPC.UpdateNPC(i) -> NPC.AI()
+//                                         hook pré: on_ai(npc) a cada tick
+//                                         -> true = comportamento do mod substitui a AI original
+//
+// O tipo de mod nunca chega ao SetDefaults original: o jogo indexa arrays por
+// tipo (texturas, npcFrameCount, sons...) e um ID >= NPCID.Count (688)
+// leria fora deles.
+
+// Struct C# Terraria.NPCSpawnParams, passada POR VALOR para SetDefaults.
+// Layout do il2cpp.h/dump.cs: 4 campos de 8 bytes. Com 32 bytes (> 16), a ABI
+// AArch64 passa um ponteiro para uma cópia; declarar o layout exato faz o
+// compilador gerar a mesma convenção no hook.
+typedef struct ModrixNullableF32 { bool hasValue; float value; } ModrixNullableF32;
+typedef struct ModrixNullableI32 { bool hasValue; int32_t value; } ModrixNullableI32;
+typedef struct NPCSpawnParams {
+    ModrixNullableF32 sizeScaleOverride;                    // 0x00
+    ModrixNullableI32 playerCountForMultiplayerDifficultyOverride;  // 0x08
+    Il2CppObject* gameModeData;                             // 0x10 (GameModeData, classe)
+    ModrixNullableF32 strengthMultiplierOverride;           // 0x18
+} NPCSpawnParams;
+
+// Assinaturas nativas (script.json do dump). `this` primeiro em métodos de
+// instância; MethodInfo* oculto no fim.
+typedef int32_t (*NpcNewNpcFn)(Il2CppObject* source, int32_t x, int32_t y, int32_t type,
+                               int32_t start, float ai0, float ai1, float ai2, float ai3,
+                               int32_t target, const MethodInfo* method);
+typedef void (*NpcSetDefaultsFn)(Il2CppObject* self, int32_t type, NPCSpawnParams spawnparams,
+                                 const MethodInfo* method);
+typedef void (*NpcAiFn)(Il2CppObject* self, const MethodInfo* method);
+
+typedef struct ModrixNpcCallbacks {
+    // Pré-NewNPC: devolve o tipo que o jogo deve realmente criar. Para tipos
+    // originais, devolva o próprio type. Nulo = sem troca.
+    int32_t (*remap_spawn_type)(int32_t requested_type);
+    // Pós-NewNPC. index == 200 (Main.maxNPCs) quando o jogo não achou slot;
+    // nesse caso npc é nulo.
+    void (*on_spawned)(Il2CppObject* npc, int32_t index, int32_t requested_type,
+                       int32_t spawned_type);
+    // Pré-SetDefaults: o NPC vai ser (re)inicializado como `type`. index é a
+    // posição em Main.npc[], ou -1 para NPCs fora dele (ex.: amostras do bestiário).
+    void (*on_set_defaults)(Il2CppObject* npc, int32_t index, int32_t type);
+    // Pré-AI, uma vez por NPC ativo por tick (thread do jogo).
+    // Retornar true pula a AI original nesse tick.
+    bool (*on_ai)(Il2CppObject* npc, int32_t index);
+} ModrixNpcCallbacks;
+
+// Copia os callbacks (a struct pode ser temporária). Nulo desliga todos.
+void Modrix_SetNpcCallbacks(const ModrixNpcCallbacks* callbacks);
+
+// Visão plana dos campos de NPC que a camada de mods usa.
+typedef struct ModrixNpcFields {
+    int32_t index;     // whoAmI
+    bool active;
+    int32_t type;
+    float x, y;        // position (canto superior esquerdo, pixels)
+    float vx, vy;      // velocity
+    int32_t life, lifeMax, damage, defense;
+    int32_t target;    // índice do player
+    float ai[4];
+} ModrixNpcFields;
+
+bool Modrix_ReadNpc(Il2CppObject* npc, ModrixNpcFields* out);
+// Escreve posição, velocidade, life, lifeMax, damage, defense, target e ai[].
+// Não muda index, active nem type.
+bool Modrix_WriteNpc(Il2CppObject* npc, const ModrixNpcFields* in);
+
+Il2CppObject* Modrix_GetNpcByIndex(int32_t index);    // Main.npc[index]
+int32_t Modrix_FindNpcIndex(Il2CppObject* npc);       // posição em Main.npc[] ou -1
+
+// Chama NPC.NewNPC via il2cpp_runtime_invoke (passa pelos hooks acima).
+// Só na thread do jogo. Devolve o índice ou 200 se não houver slot.
+// `source` (IEntitySource) vai nulo.
+int32_t Modrix_SpawnNpc(int32_t x, int32_t y, int32_t type);
+
+// Handlers que os hooks apontam (exportados como Modrix_Hooked_PlayerHurt).
+int32_t Modrix_Hooked_NpcNewNPC(Il2CppObject* source, int32_t x, int32_t y, int32_t type,
+                                int32_t start, float ai0, float ai1, float ai2, float ai3,
+                                int32_t target, const MethodInfo* method);
+void Modrix_Hooked_NpcSetDefaults(Il2CppObject* self, int32_t type, NPCSpawnParams spawnparams,
+                                  const MethodInfo* method);
+void Modrix_Hooked_NpcAI(Il2CppObject* self, const MethodInfo* method);
+
 }  // extern "C"
 #pragma GCC visibility pop

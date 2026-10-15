@@ -23,6 +23,13 @@ constexpr const char* kAssembly = "Assembly-CSharp.dll";
 constexpr const char* kNamespace = "Terraria";
 constexpr const char* kPlayerClass = "Player";  // TypeDefIndex 1046 (dump.cs)
 constexpr const char* kMainClass = "Main";      // TypeDefIndex 1017 (dump.cs)
+constexpr const char* kNpcClass = "NPC";        // TypeDefIndex 1022 (dump.cs)
+
+// Main.maxNPCs (const = 200): tamanho de Main.npc[]. NewNPC devolve esse
+// valor quando não há slot livre.
+constexpr int32_t kMaxNPCs = 200;
+// NPCID.Count (const = 688). IDs negativos (-65..-1) também são originais.
+constexpr int32_t kNpcVanillaCount = 688;
 
 // --- Campos de instância de Terraria.Player --------------------------------
 // Offsets relativos ao ponteiro Player* (incluem o cabeçalho de 0x10 bytes).
@@ -40,10 +47,27 @@ constexpr size_t statLifeMax2 = 0x700; // int  (vida máxima com bônus)
 constexpr size_t statLife = 0x704;     // int  <-- usado pela ponte
 }  // namespace player_off
 
+// --- Campos de instância de Terraria.NPC -----------------------------------
+// Os de Entity são os mesmos de Player (whoAmI 0x10, active 0x14, ...).
+namespace npc_off {
+constexpr size_t whoAmI = 0x10;     // int   (Entity)
+constexpr size_t active = 0x14;     // bool  (Entity)
+constexpr size_t position = 0x20;   // Vector2 (Entity)
+constexpr size_t velocity = 0x28;   // Vector2 (Entity)
+constexpr size_t type = 0x154;      // int
+constexpr size_t ai = 0x158;        // float[] (4 posições; ai[0..3] guardam o estado da IA)
+constexpr size_t target = 0x178;    // int   (índice do player alvo)
+constexpr size_t damage = 0x17C;    // int
+constexpr size_t defense = 0x180;   // int
+constexpr size_t life = 0x1A0;      // int
+constexpr size_t lifeMax = 0x1A4;   // int
+}  // namespace npc_off
+
 // --- Campos estáticos de Terraria.Main -------------------------------------
 // Offset dentro de static_fields da classe; a ponte usa
 // il2cpp_field_static_get_value e não este número diretamente.
 namespace main_static_off {
+constexpr size_t npc = 0x5B0;      // NPC[] Main.npc (200 slots)
 constexpr size_t player = 0x678;   // Player[] Main.player (255 slots)
 constexpr size_t netMode = 0x81C;  // int Main.netMode
 }  // namespace main_static_off
@@ -58,7 +82,16 @@ constexpr uintptr_t Player_Hurt = 0xFA15B8;
 constexpr uintptr_t Player_Heal = 0xFF704C;    // void Player.Heal(int amount)
 constexpr uintptr_t Player_Update = 0xF5F9A8;  // void Player.Update(int i)
 constexpr uintptr_t Player_KillMe = 0xFBF6BC;
-constexpr uintptr_t NPC_UpdateNPC = 0xF4A2E8;   // void NPC.UpdateNPC(int i)
+// static int NPC.NewNPC(IEntitySource source, int X, int Y, int Type, int Start = 0,
+//                       float ai0 = 0, float ai1 = 0, float ai2 = 0, float ai3 = 0,
+//                       int Target = 255)
+constexpr uintptr_t NPC_NewNPC = 0xEE4630;
+// void NPC.SetDefaults(int Type, NPCSpawnParams spawnparams). Chamado por
+// NewNPC, Transform (0xEE0C44), SetDefaultsFromNetId (0xEDC5F8) e pela rede.
+constexpr uintptr_t NPC_SetDefaults = 0xDAF1BC;
+// void NPC.UpdateNPC(int i): chamado por Main.DoUpdateInWorld (0xCBBDF0) num
+// laço i < 200; é o ÚNICO chamador de NPC.AI no binário (bl em 0xF4A7C8).
+constexpr uintptr_t NPC_UpdateNPC = 0xF4A2E8;
 constexpr uintptr_t NPC_AI = 0xDCE54C;          // void NPC.AI()
 constexpr uintptr_t Main_DoUpdateInWorld = 0xCBBDF0;
 }  // namespace rva
@@ -69,6 +102,9 @@ namespace argc {
 constexpr int Player_Hurt = 8;
 constexpr int Player_Heal = 1;
 constexpr int Main_get_myPlayer = 0;  // Main.myPlayer é propriedade nesta build
+constexpr int NPC_NewNPC = 10;
+constexpr int NPC_SetDefaults = 2;
+constexpr int NPC_AI = 0;
 }  // namespace argc
 
 }  // namespace terraria

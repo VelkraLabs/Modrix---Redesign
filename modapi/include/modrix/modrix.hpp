@@ -9,6 +9,7 @@
 //   MODRIX_MOD(OnLoad)
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -28,6 +29,26 @@ struct ItemDef {
     int32_t rarity = 0;
     int32_t damage = 0;
     int32_t useTime = 20;
+};
+
+struct NpcDef {
+    std::string name;          // chave local, declarada em content.npcs
+    std::string displayName;
+    ModrixId shellType = 0;    // NPC original usado como casca
+    int32_t lifeMax = 0;       // <= 0: o da casca
+    int32_t damage = -1;       // < 0: o da casca
+    int32_t defense = -1;      // < 0: o da casca
+    bool boss = false;
+};
+
+// Comportamento de um NPC de mod. Uma instância por TIPO (não por NPC): o
+// estado de cada NPC vive em ModrixNpcState (ai[] / local[]).
+class NpcBehavior {
+public:
+    virtual ~NpcBehavior() = default;
+    virtual void OnSpawn(ModrixNpcState& /*npc*/) {}
+    // true = substitui a AI da casca neste tick.
+    virtual bool OnAI(ModrixNpcState& /*npc*/) { return false; }
 };
 
 class Host {
@@ -66,6 +87,27 @@ public:
         return api_->find_content(ctx_, kind, key.c_str());
     }
 
+    // `behavior` precisa viver enquanto o jogo roda (ex.: variável estática).
+    ModrixId RegisterNpc(const NpcDef& def, NpcBehavior* behavior) const {
+        if (!HasNpcApi()) return MODRIX_INVALID_ID;
+        ModrixNpcDef c{};
+        c.struct_size = sizeof(c);
+        c.name = def.name.c_str();
+        c.display_name = def.displayName.c_str();
+        c.shell_type = def.shellType;
+        c.life_max = def.lifeMax;
+        c.damage = def.damage;
+        c.defense = def.defense;
+        c.boss = def.boss;
+        c.user = behavior;
+        c.on_spawn = behavior ? &SpawnTrampoline : nullptr;
+        c.on_ai = behavior ? &AiTrampoline : nullptr;
+        return api_->register_npc(ctx_, &c);
+    }
+    int32_t SpawnNpc(ModrixId type, float x, float y) const {
+        return HasNpcApi() ? api_->spawn_npc(ctx_, type, x, y) : -1;
+    }
+
     bool OnPlayerHurt(ModrixPlayerHurtFn fn, void* user = nullptr) const {
         return api_->subscribe_player_hurt(ctx_, fn, user);
     }
@@ -73,14 +115,26 @@ public:
     int32_t PlayerLife(ModrixPlayer p) const { return api_->player_life(ctx_, p); }
 
 private:
+    bool HasNpcApi() const {
+        return api_->struct_size >= offsetof(ModrixHostApi, spawn_npc) + sizeof(api_->spawn_npc);
+    }
+    static void SpawnTrampoline(void* user, ModrixNpcState* npc) {
+        static_cast<NpcBehavior*>(user)->OnSpawn(*npc);
+    }
+    static bool AiTrampoline(void* user, ModrixNpcState* npc) {
+        return static_cast<NpcBehavior*>(user)->OnAI(*npc);
+    }
+
     const ModrixHostApi* api_;
     ModrixContext* ctx_;
 };
 
-// Confere a versão da ABI antes de qualquer chamada.
+// Confere a versão da ABI antes de qualquer chamada. Exige só o núcleo da
+// tabela (até player_life): funções acrescentadas depois (NPCs) são checadas
+// uma a uma, então o mod roda também num runtime mais antigo, sem elas.
 inline bool CompatibleHost(const ModrixHostApi* api) {
     return api && api->api_version == MODRIX_API_VERSION &&
-           api->struct_size >= sizeof(ModrixHostApi);
+           api->struct_size >= offsetof(ModrixHostApi, register_npc);
 }
 
 }  // namespace modrix

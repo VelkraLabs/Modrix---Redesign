@@ -42,6 +42,31 @@ bool HalfDamage(ModrixHurtEvent* ev, bool after) {
     ev->damage /= 2;
     return true;
 }
+// --- NPCs: o mesmo esquema que a camada de mods usa --------------------------
+// Tabela lateral: slot de Main.npc -> ID de mod (-1 = NPC original).
+int32_t g_modSlot[200];
+int g_setDefaultsCalls = 0;
+int32_t g_lastSetDefaultsIndex = -2;
+
+int32_t RemapSpawn(int32_t type) { return type >= 4096 ? 4 : type; }  // casca: Eye of Cthulhu
+void OnSpawned(Il2CppObject*, int32_t index, int32_t requested, int32_t spawned) {
+    if (index >= 0 && index < 200 && requested != spawned) g_modSlot[index] = requested;
+}
+void OnSetDefaults(Il2CppObject*, int32_t index, int32_t) {
+    ++g_setDefaultsCalls;
+    g_lastSetDefaultsIndex = index;
+    if (index >= 0) g_modSlot[index] = -1;  // o slot mudou de dono
+}
+bool OnAi(Il2CppObject* npc, int32_t index) {
+    if (index < 0 || g_modSlot[index] < 0) return false;  // NPC original: AI original
+    ModrixNpcFields f{};
+    Modrix_ReadNpc(npc, &f);
+    f.ai[1] += 10.0f;  // "comportamento do mod"
+    f.vx = -2.0f;
+    Modrix_WriteNpc(npc, &f);
+    return true;  // substitui a AI original
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -94,6 +119,48 @@ int main(int argc, char** argv) {
     // Golpe cancelado pelo mod: vida inalterada, retorno 0.
     CHECK(mock_game_hurt_player(player, 5000) == 0.0);
     CHECK(Modrix_GetStatLife(player) == 405);
+
+    // ---- NPCs --------------------------------------------------------------
+    auto mock_game_new_npc = reinterpret_cast<int32_t (*)(int32_t, int32_t, int32_t)>(dlsym(lib, "mock_game_new_npc"));
+    auto mock_game_update_npcs = reinterpret_cast<void (*)()>(dlsym(lib, "mock_game_update_npcs"));
+    auto mock_game_transform = reinterpret_cast<void (*)(int32_t, int32_t)>(dlsym(lib, "mock_game_transform"));
+    auto mock_npc = reinterpret_cast<void* (*)(int32_t)>(dlsym(lib, "mock_npc"));
+    CHECK(mock_game_new_npc && mock_game_update_npcs && mock_game_transform && mock_npc);
+    for (int32_t& v : g_modSlot) v = -1;
+    ModrixNpcCallbacks cbs{&RemapSpawn, &OnSpawned, &OnSetDefaults, &OnAi};
+    Modrix_SetNpcCallbacks(&cbs);
+
+    // Spawn original: passa direto.
+    CHECK(mock_game_new_npc(100, 200, 2) == 0);
+    ModrixNpcFields f{};
+    CHECK(Modrix_ReadNpc(Modrix_GetNpcByIndex(0), &f) && f.type == 2 && f.x == 100.0f && g_modSlot[0] == -1);
+
+    // Spawn de mod: 4096 vira casca 4 antes do SetDefaults original (que
+    // abortaria com 4096); o slot fica marcado como NPC de mod.
+    CHECK(mock_game_new_npc(300, 400, 4096) == 1);
+    CHECK(Modrix_ReadNpc(Modrix_GetNpcByIndex(1), &f) && f.type == 4 && f.lifeMax == 104);
+    CHECK(g_modSlot[1] == 4096);
+    // Dentro de NewNPC o whoAmI ainda era 0: o índice veio da busca em Main.npc.
+    CHECK(g_lastSetDefaultsIndex == 1);
+    CHECK(Modrix_GetNpcByIndex(1) == mock_npc(1) && Modrix_FindNpcIndex(static_cast<Il2CppObject*>(mock_npc(1))) == 1);
+
+    // Um tick: NPC original roda a AI original; o de mod roda a do mod.
+    mock_game_update_npcs();
+    Modrix_ReadNpc(Modrix_GetNpcByIndex(0), &f);
+    CHECK(f.ai[0] == 1.0f && f.vx == 1.0f);
+    Modrix_ReadNpc(Modrix_GetNpcByIndex(1), &f);
+    CHECK(f.ai[0] == 0.0f && f.ai[1] == 10.0f && f.vx == -2.0f);
+
+    // Transform (fase de boss, por exemplo) vira tipo original: slot desmarcado.
+    mock_game_transform(1, 5);
+    CHECK(g_modSlot[1] == -1);
+    mock_game_update_npcs();
+    Modrix_ReadNpc(Modrix_GetNpcByIndex(1), &f);
+    CHECK(f.type == 5 && f.ai[0] == 1.0f);
+
+    // Spawn pedido pela camada de mods (runtime_invoke -> NewNPC com hook).
+    CHECK(Modrix_SpawnNpc(10, 20, 4097) == 2);
+    CHECK(g_modSlot[2] == 4097 && Modrix_ReadNpc(Modrix_GetNpcByIndex(2), &f) && f.type == 4);
 
     std::printf("TODOS OS TESTES PASSARAM\n");
     return 0;

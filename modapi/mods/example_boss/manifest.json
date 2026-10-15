@@ -1,0 +1,19 @@
+{
+  "modrix_api": 1,
+  "id": "modrix.example_boss",
+  "name": "Exemplo: Titã de Brasa (esqueleto de boss)",
+  "version": "0.1.0",
+  "authors": ["Modrix"],
+  "description": "Mostra onde um boss customizado se pluga: spawn, estado por NPC e comportamento por tick. Sem combate ainda.",
+  "dependencies": {},
+  "content": {
+    "npcs": ["ember_titan"]
+  },
+  "entry": {
+    "android-arm64": "lib/android-arm64/libexample_boss.so",
+    "linux-x86_64": "lib/linux-x86_64/libexample_boss.so",
+    "linux-arm64": "lib/linux-arm64/libexample_boss.so",
+    "windows-x86_64": "lib/windows-x86_64/example_boss.dll",
+    "macos-arm64": "lib/macos-arm64/libexample_boss.dylib"
+  }
+}

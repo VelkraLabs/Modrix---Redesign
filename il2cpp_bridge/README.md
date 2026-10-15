@@ -16,6 +16,9 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
    inline hook com o [ShadowHook](https://github.com/bytedance/android-inline-hook) v2.0.1 (MIT),
    embutido na `.so`, em modo multi (`src/hook_shadowhook.cpp`).
 5. A cada `Player.Hurt`, `Modrix_Hooked_PlayerHurt` chama o callback do mod antes e depois do original.
+6. Resolve `Terraria.NPC` e instala hooks em `NPC.NewNPC` (`0xEE4630`), `NPC.SetDefaults` (`0xDAF1BC`)
+   e `NPC.AI` (`0xDCE54C`), expostos via `Modrix_SetNpcCallbacks` (`src/npc_hooks.cpp`). Se algo de NPC
+   não resolver, só esses hooks ficam desligados.
 
 ## Build
 

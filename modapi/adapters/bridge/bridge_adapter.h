@@ -14,6 +14,14 @@ public:
     void SetPlayerHurtHandler(HurtHandler handler) override;
     ModrixPlayer LocalPlayer() const override;
     int32_t PlayerLife(ModrixPlayer player) const override;
+
+    // NPCs: NPC.NewNPC (0xEE4630), NPC.SetDefaults (0xDAF1BC) e NPC.AI
+    // (0xDCE54C, chamado por NPC.UpdateNPC 0xF4A2E8), via callbacks da ponte.
+    void SetNpcHooks(NpcHooks hooks) override;
+    int32_t MaxNpcs() const override;
+    bool ReadNpc(int32_t index, ModrixNpcState& out) const override;
+    bool WriteNpc(int32_t index, const ModrixNpcState& in) override;
+    int32_t SpawnNpc(int32_t type, float x, float y) override;
 };
 
 }  // namespace modrix::rt

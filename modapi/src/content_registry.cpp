@@ -56,8 +56,7 @@ ContentRegistry::ContentRegistry(const GameAdapter* game,
 }
 
 std::optional<ModrixId> ContentRegistry::Register(ModrixContentKind kind, const std::string& modId,
-                                                  const std::string& name,
-                                                  std::optional<ItemDefinition> item,
+                                                  const std::string& name, ContentPayload payload,
                                                   std::string* error) {
     auto fail = [&](const std::string& msg) -> std::optional<ModrixId> {
         if (error) *error = msg;
@@ -78,7 +77,7 @@ std::optional<ModrixId> ContentRegistry::Register(ModrixContentKind kind, const 
                     std::to_string(r.firstModId) + ".." + std::to_string(r.maxId) + ")");
     }
     auto id = static_cast<ModrixId>(next);
-    entries_[kind].push_back({kind, id, key, modId, name, std::move(item)});
+    entries_[kind].push_back({kind, id, key, modId, name, std::move(payload)});
     byKey_[kind][key] = id;
     return id;
 }

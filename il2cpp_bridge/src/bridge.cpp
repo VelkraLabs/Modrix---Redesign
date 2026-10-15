@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstring>
 
+#include "bridge_internal.h"
 #include "log.h"
 #include "terraria_offsets.h"
 
@@ -57,11 +58,7 @@ void SleepMs(int ms) {
     nanosleep(&ts, nullptr);
 }
 
-void LogException(const char* where, Il2CppException* exc) {
-    char buf[512] = {0};
-    if (api.il2cpp_format_exception) api.il2cpp_format_exception(exc, buf, sizeof(buf));
-    LOGE("exceção em %s: %s", where, buf);
-}
+using bridge::LogException;
 
 // Espera `pred` virar true, consultando a cada 100 ms, até timeoutMs.
 template <typename Pred>
@@ -95,24 +92,9 @@ bool ResolveTerraria() {
 
     // --- Player.statLife: offset resolvido pela API ------------------------
     // Esperado nesta build: 0x704 (terraria_offsets.h / player_fields.md).
-    if (FieldInfo* f = api.il2cpp_class_get_field_from_name(g.playerClass, "statLife")) {
-        size_t off = api.il2cpp_field_get_offset(f);
-        if (off != terraria::player_off::statLife) {
-            LOGW("statLife em 0x%zx (dump dizia 0x%zx): build diferente do dump",
-                 off, terraria::player_off::statLife);
-        }
-        g.statLifeOffset = off;
-    } else {
-        LOGW("campo statLife não encontrado; usando offset do dump 0x%zx", g.statLifeOffset);
-    }
-
-    // --- Entity.whoAmI: il2cpp_class_get_field_from_name também procura nas
-    // classes-base, então funciona a partir de Terraria.Player.
-    if (FieldInfo* f = api.il2cpp_class_get_field_from_name(g.playerClass, "whoAmI")) {
-        g.whoAmIOffset = api.il2cpp_field_get_offset(f);
-    } else {
-        LOGW("campo whoAmI não encontrado; usando offset do dump 0x%zx", g.whoAmIOffset);
-    }
+    g.statLifeOffset = bridge::FieldOffset(g.playerClass, "statLife", terraria::player_off::statLife);
+    // Entity.whoAmI: a busca inclui as classes-base, então funciona a partir de Player.
+    g.whoAmIOffset = bridge::FieldOffset(g.playerClass, "whoAmI", terraria::player_off::whoAmI);
 
     // --- Main.player (static Player[]) e Main.get_myPlayer -----------------
     // Main.player fica em static_fields+0x678 nesta build; lido via
@@ -130,35 +112,12 @@ bool ResolveTerraria() {
         LOGE("Player.Hurt(8) não encontrado");
         return false;
     }
-
-    // Checagem cruzada: methodPointer deve ser base + RVA do dump (0xFA15B8).
-    // Se divergir, a build é outra; seguimos com o ponteiro vindo do runtime.
-    uintptr_t fromApi = reinterpret_cast<uintptr_t>(g.playerHurt->methodPointer);
-    uintptr_t fromDump = g_base + terraria::rva::Player_Hurt;
-    if (fromApi != fromDump) {
-        LOGW("Player.Hurt: runtime=%p, base+RVA=%p (RVA 0x%lx). Usando o ponteiro do runtime.",
-             reinterpret_cast<void*>(fromApi), reinterpret_cast<void*>(fromDump),
-             static_cast<unsigned long>(terraria::rva::Player_Hurt));
-    } else {
-        LOGI("Player.Hurt confere com o dump: base+0x%lx",
-             static_cast<unsigned long>(terraria::rva::Player_Hurt));
-    }
     return true;
 }
 
 bool InstallHurtHook() {
-    if (!g_installer) {
-        LOGW("nenhum ModrixHookInstaller configurado; hook de Player.Hurt não instalado");
-        return false;
-    }
-    void* target = reinterpret_cast<void*>(g.playerHurt->methodPointer);
-    if (!g_installer(target, reinterpret_cast<void*>(&Modrix_Hooked_PlayerHurt), &g_origHurtSlot) ||
-        !LoadOrigHurt()) {
-        LOGE("falha ao instalar hook em Player.Hurt (%p)", target);
-        return false;
-    }
-    LOGI("hook em Player.Hurt instalado (%p)", target);
-    return true;
+    return bridge::InstallHook("Player.Hurt", g.playerHurt, terraria::rva::Player_Hurt,
+                               reinterpret_cast<void*>(&Modrix_Hooked_PlayerHurt), &g_origHurtSlot);
 }
 
 void* InitThreadMain(void*) {
@@ -167,6 +126,65 @@ void* InitThreadMain(void*) {
 }
 
 }  // namespace
+
+// ===========================================================================
+// Interno (bridge_internal.h)
+// ===========================================================================
+namespace bridge {
+
+bool Ready() { return g_ready.load(); }
+Il2CppDomain* Domain() { return g.domain; }
+const Il2CppImage* Image() { return g.image; }
+Il2CppClass* MainClass() { return g.mainClass; }
+
+void LogException(const char* where, Il2CppException* exc) {
+    char buf[512] = {0};
+    if (api.il2cpp_format_exception) api.il2cpp_format_exception(exc, buf, sizeof(buf));
+    LOGE("exceção em %s: %s", where, buf);
+}
+
+size_t FieldOffset(Il2CppClass* klass, const char* name, size_t fallback) {
+    FieldInfo* f = klass ? api.il2cpp_class_get_field_from_name(klass, name) : nullptr;
+    if (!f) {
+        LOGW("campo %s não encontrado; usando offset do dump 0x%zx", name, fallback);
+        return fallback;
+    }
+    size_t off = api.il2cpp_field_get_offset(f);
+    if (off != fallback) LOGW("%s em 0x%zx (dump dizia 0x%zx): build diferente do dump", name, off, fallback);
+    return off;
+}
+
+bool InstallHook(const char* name, const MethodInfo* method, uintptr_t dumpRva, void* replacement,
+                 void** slot) {
+    if (!method) {
+        LOGE("%s: método não resolvido; hook não instalado", name);
+        return false;
+    }
+    // Checagem cruzada: methodPointer deve ser base + RVA do dump. Se divergir,
+    // a build é outra; seguimos com o ponteiro vindo do runtime.
+    uintptr_t fromApi = reinterpret_cast<uintptr_t>(method->methodPointer);
+    uintptr_t fromDump = g_base + dumpRva;
+    if (fromApi != fromDump) {
+        LOGW("%s: runtime=%p, base+RVA=%p (RVA 0x%lx). Usando o ponteiro do runtime.", name,
+             reinterpret_cast<void*>(fromApi), reinterpret_cast<void*>(fromDump),
+             static_cast<unsigned long>(dumpRva));
+    } else {
+        LOGI("%s confere com o dump: base+0x%lx", name, static_cast<unsigned long>(dumpRva));
+    }
+    if (!g_installer) {
+        LOGW("nenhum ModrixHookInstaller configurado; hook de %s não instalado", name);
+        return false;
+    }
+    void* target = reinterpret_cast<void*>(method->methodPointer);
+    if (!g_installer(target, replacement, slot) || !__atomic_load_n(slot, __ATOMIC_ACQUIRE)) {
+        LOGE("falha ao instalar hook em %s (%p)", name, target);
+        return false;
+    }
+    LOGI("hook em %s instalado (%p)", name, target);
+    return true;
+}
+
+}  // namespace bridge
 
 // ===========================================================================
 // API pública
@@ -209,6 +227,8 @@ bool Modrix_Init(int timeoutMs) {
         LOGI("Terraria.Player=%p, statLife @0x%zx", static_cast<void*>(g.playerClass),
              g.statLifeOffset);
         InstallHurtHook();
+        // NPCs são opcionais: se algo não resolver, o resto da ponte segue.
+        if (bridge::ResolveNpc()) bridge::InstallNpcHooks();
         g_ready.store(true);
     } else {
         LOGE("timeout resolvendo Terraria.Player em %s", terraria::kAssembly);

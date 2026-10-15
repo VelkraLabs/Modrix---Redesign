@@ -97,6 +97,51 @@ typedef struct ModrixItemDef {
     int32_t use_time;          /* em ticks (60 por segundo) */
 } ModrixItemDef;
 
+/* NPC / boss.
+ *
+ * Um NPC de mod roda dentro de uma "casca": um NPC original (shell_type) que
+ * fornece textura, hitbox, sons e, se o mod quiser, a própria AI. O jogo só
+ * enxerga a casca; o runtime sabe quais slots de Main.npc são do mod e chama
+ * os callbacks abaixo.
+ *
+ * Estado:
+ *   ai[0..3]  campos do jogo. Se on_ai devolver false, a AI da casca roda e
+ *             usa ai[] para as fases DELA: não guarde estado do mod ali nesse caso.
+ *   local[]   estado privado do mod por NPC, guardado pelo runtime. O jogo
+ *             nunca toca. (Ainda não vai pela rede.)
+ */
+typedef struct ModrixNpcState {
+    int32_t index;          /* posição em Main.npc (0..199) */
+    ModrixId type;          /* ID do NPC de mod (faixa de mods, ex.: 4096) */
+    ModrixId shell_type;    /* tipo original em uso como casca */
+    float x, y;             /* posição, canto superior esquerdo, em pixels */
+    float vx, vy;           /* velocidade; o jogo aplica depois da AI */
+    int32_t life, life_max, damage, defense;
+    ModrixPlayer target;
+    float ai[4];
+    float local[8];
+} ModrixNpcState;
+
+typedef void (*ModrixNpcSpawnFn)(void* user, ModrixNpcState* npc);
+/* Roda a cada tick (60/s), na thread do jogo, antes da AI da casca.
+ * true = o mod assume este tick (a AI da casca não roda);
+ * false = a AI da casca roda depois. */
+typedef bool (*ModrixNpcAiFn)(void* user, ModrixNpcState* npc);
+
+typedef struct ModrixNpcDef {
+    uint32_t struct_size;
+    const char* name;          /* chave local; declarada em manifest content.npcs */
+    const char* display_name;
+    ModrixId shell_type;       /* NPC original usado como casca (1..NPCID.Count-1) */
+    int32_t life_max;          /* <= 0 mantém o da casca */
+    int32_t damage;            /* < 0 mantém o da casca */
+    int32_t defense;           /* < 0 mantém o da casca */
+    bool boss;                 /* reservado: barra de vida/música de boss */
+    void* user;                /* repassado aos callbacks */
+    ModrixNpcSpawnFn on_spawn; /* opcional: logo após o NPC entrar no mundo */
+    ModrixNpcAiFn on_ai;       /* opcional: comportamento por tick */
+} ModrixNpcDef;
+
 /* ------------------------------------------------------------------------ */
 /* Eventos                                                                   */
 /* ------------------------------------------------------------------------ */
@@ -138,6 +183,13 @@ typedef struct ModrixHostApi {
     bool (*subscribe_player_hurt)(ModrixContext* ctx, ModrixPlayerHurtFn fn, void* user);
     ModrixPlayer (*local_player)(const ModrixContext* ctx);
     int32_t (*player_life)(const ModrixContext* ctx, ModrixPlayer player); /* -1 se inválido */
+
+    /* NPCs. Campos acrescentados ao fim da tabela: um mod que os usa deve
+     * conferir struct_size (modrix.hpp já confere). */
+    ModrixId (*register_npc)(ModrixContext* ctx, const ModrixNpcDef* def); /* só no init */
+    /* Cria um NPC (original ou de mod) via NPC.NewNPC. Só na thread do jogo
+     * (ex.: dentro de on_ai ou de um evento). Devolve o índice ou -1. */
+    int32_t (*spawn_npc)(ModrixContext* ctx, ModrixId type, float x, float y);
 } ModrixHostApi;
 
 /* Assinatura do ponto de entrada. Retorne 0 em sucesso; qualquer outro valor

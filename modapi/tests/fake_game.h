@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <cstring>
 
 #include "modrix/runtime/game_adapter.h"
 
@@ -18,6 +19,72 @@ public:
     ModrixPlayer LocalPlayer() const override { return local; }
     int32_t PlayerLife(ModrixPlayer p) const override {
         return (p >= 0 && p < static_cast<int>(life.size())) ? life[static_cast<size_t>(p)] : -1;
+    }
+
+    // --- NPCs -------------------------------------------------------------------
+    static constexpr int kMaxNpcs = 200;
+    static constexpr int32_t kVanillaNpcs = 688;
+    struct Npc {
+        bool active = false;
+        ModrixNpcState s{};  // só os campos "do jogo" (local[] não existe aqui)
+    };
+    std::array<Npc, kMaxNpcs> npcs{};
+    NpcHooks npcHooks;
+    bool vanillaSetDefaultsOverflow = false;  // um tipo de mod chegou ao SetDefaults original
+
+    void SetNpcHooks(NpcHooks h) override { npcHooks = std::move(h); }
+    int32_t MaxNpcs() const override { return kMaxNpcs; }
+    bool ReadNpc(int32_t i, ModrixNpcState& out) const override {
+        if (i < 0 || i >= kMaxNpcs || !npcs[static_cast<size_t>(i)].active) return false;
+        out = npcs[static_cast<size_t>(i)].s;
+        std::memset(out.local, 0, sizeof(out.local));
+        return true;
+    }
+    bool WriteNpc(int32_t i, const ModrixNpcState& in) override {
+        if (i < 0 || i >= kMaxNpcs) return false;
+        ModrixNpcState& s = npcs[static_cast<size_t>(i)].s;
+        int32_t type = s.type;  // o jogo não deixa mudar type/index por aqui
+        s = in;
+        s.type = s.shell_type = type;
+        s.index = i;
+        return true;
+    }
+    int32_t SpawnNpc(int32_t type, float x, float y) override { return NewNpc(type, x, y); }
+
+    // NPC.SetDefaults: o jogo de verdade indexa arrays por tipo.
+    void SetDefaults(int32_t i, int32_t type) {
+        if (npcHooks.onSetDefaults) npcHooks.onSetDefaults(i, type);
+        if (type <= 0 || type >= kVanillaNpcs) vanillaSetDefaultsOverflow = true;
+        ModrixNpcState& s = npcs[static_cast<size_t>(i)].s;
+        s = ModrixNpcState{};
+        s.index = i;
+        s.type = s.shell_type = type;
+        s.life = s.life_max = 100 + type;
+        s.damage = 10;
+        s.defense = 5;
+    }
+    // NPC.NewNPC: remap (pré) -> slot -> SetDefaults -> onSpawned (pós).
+    int32_t NewNpc(int32_t type, float x, float y) {
+        int32_t spawnType = npcHooks.remapSpawnType ? npcHooks.remapSpawnType(type) : type;
+        int32_t index = kMaxNpcs;
+        for (int i = 0; i < kMaxNpcs; ++i)
+            if (!npcs[static_cast<size_t>(i)].active) { index = i; break; }
+        if (index < kMaxNpcs) {
+            SetDefaults(index, spawnType);
+            npcs[static_cast<size_t>(index)].active = true;
+            npcs[static_cast<size_t>(index)].s.x = x;
+            npcs[static_cast<size_t>(index)].s.y = y;
+        }
+        if (npcHooks.onSpawned) npcHooks.onSpawned(index, type, spawnType);
+        return index < kMaxNpcs ? index : -1;
+    }
+    // Main.DoUpdateInWorld -> UpdateNPC(i) -> AI(): AI original conta ticks em ai[0].
+    void UpdateNpcs() {
+        for (int i = 0; i < kMaxNpcs; ++i) {
+            if (!npcs[static_cast<size_t>(i)].active) continue;
+            if (npcHooks.onAi && npcHooks.onAi(i)) continue;
+            npcs[static_cast<size_t>(i)].s.ai[0] += 1.0f;
+        }
     }
 
     // Faz o "jogo" aplicar dano: passa pelos mods (pré), aplica, avisa (pós).

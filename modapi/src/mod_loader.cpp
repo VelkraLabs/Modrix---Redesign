@@ -1,6 +1,7 @@
 #include "modrix/runtime/mod_loader.h"
 
 #include <algorithm>
+#include <iterator>
 #include <cstddef>
 #include <map>
 #include <queue>
@@ -56,6 +57,86 @@ struct ModLoader::Impl {
             if (!after && !keep) return false;  // um mod cancelou o golpe
         }
         return true;
+    }
+
+    // ---- NPCs de mod ----------------------------------------------------------
+    // Tabela lateral: para cada slot de Main.npc, qual NPC de mod está ali
+    // (MODRIX_INVALID_ID = NPC original) e o estado privado local[] dele.
+    // É o "registro de spawns": preenchido no pós-NewNPC, limpo no SetDefaults.
+    struct NpcSlot {
+        ModrixId type = MODRIX_INVALID_ID;
+        float local[8] = {};
+    };
+    std::vector<NpcSlot> npcSlots;
+    uint64_t modNpcSpawns = 0;
+
+    const NpcDefinition* ModNpcDef(int32_t type) const {
+        const ContentEntry* e = self->registry_.Get(MODRIX_CONTENT_NPC, type);
+        return e ? e->Npc() : nullptr;
+    }
+    bool ValidSlot(int32_t index) const {
+        return index >= 0 && static_cast<size_t>(index) < npcSlots.size();
+    }
+    bool ReadModNpc(int32_t index, ModrixNpcState& st) const {
+        if (!game->ReadNpc(index, st)) return false;
+        st.index = index;
+        st.type = npcSlots[static_cast<size_t>(index)].type;  // o jogo só vê a casca
+        std::copy(std::begin(npcSlots[static_cast<size_t>(index)].local),
+                  std::end(npcSlots[static_cast<size_t>(index)].local), st.local);
+        return true;
+    }
+    void WriteModNpc(int32_t index, const ModrixNpcState& st) {
+        game->WriteNpc(index, st);
+        std::copy(std::begin(st.local), std::end(st.local), npcSlots[static_cast<size_t>(index)].local);
+    }
+
+    // Pré-NewNPC: ID de mod -> casca original. O ID de mod nunca chega ao jogo.
+    int32_t RemapSpawnType(int32_t type) const {
+        const NpcDefinition* def = ModNpcDef(type);
+        return def ? def->shellType : type;
+    }
+
+    // Pós-NewNPC: registra o spawn e aplica a definição do mod.
+    void OnNpcSpawned(int32_t index, int32_t requested, int32_t spawned) {
+        const NpcDefinition* def = ModNpcDef(requested);
+        if (!def) return;  // NPC original: nada a fazer (ponto para eventos de spawn no futuro)
+        const ContentEntry* e = self->registry_.Get(MODRIX_CONTENT_NPC, requested);
+        if (!ValidSlot(index)) {
+            Log(MODRIX_LOG_WARN, e->modId, "spawn de " + e->key + " falhou: sem slot livre");
+            return;
+        }
+        npcSlots[static_cast<size_t>(index)] = NpcSlot{requested, {}};
+        ++modNpcSpawns;
+        Log(MODRIX_LOG_DEBUG, e->modId,
+            "spawn " + e->key + " no slot " + std::to_string(index) + " (casca " + std::to_string(spawned) + ")");
+
+        ModrixNpcState st{};
+        if (!ReadModNpc(index, st)) return;
+        if (def->lifeMax > 0) st.life = st.life_max = def->lifeMax;
+        if (def->damage >= 0) st.damage = def->damage;
+        if (def->defense >= 0) st.defense = def->defense;
+        if (def->onSpawn) def->onSpawn(def->user, &st);
+        WriteModNpc(index, st);
+    }
+
+    // Pré-SetDefaults: o slot vai virar outro NPC. Desmarca; se for um spawn de
+    // mod, OnNpcSpawned (pós-NewNPC) marca de novo logo depois.
+    void OnNpcSetDefaults(int32_t index, int32_t /*newType*/) {
+        if (ValidSlot(index)) npcSlots[static_cast<size_t>(index)] = NpcSlot{};
+    }
+
+    // Pré-AI, por tick: só NPCs de mod com on_ai pagam o custo de ler/escrever.
+    bool OnNpcAi(int32_t index) {
+        if (!ValidSlot(index)) return false;
+        ModrixId type = npcSlots[static_cast<size_t>(index)].type;
+        if (type == MODRIX_INVALID_ID) return false;
+        const NpcDefinition* def = ModNpcDef(type);
+        if (!def || !def->onAi) return false;
+        ModrixNpcState st{};
+        if (!ReadModNpc(index, st)) return false;
+        bool replace = def->onAi(def->user, &st);
+        WriteModNpc(index, st);
+        return replace;
     }
 };
 
@@ -148,6 +229,65 @@ int32_t Api_PlayerLife(const ModrixContext* ctx, ModrixPlayer p) {
     return ctx ? ImplOf(ctx)->game->PlayerLife(p) : -1;
 }
 
+constexpr uint32_t kNpcDefV1Size = static_cast<uint32_t>(offsetof(ModrixNpcDef, on_ai) + sizeof(ModrixNpcAiFn));
+
+ModrixId Api_RegisterNpc(ModrixContext* ctx, const ModrixNpcDef* def) {
+    if (!ctx) return MODRIX_INVALID_ID;
+    Impl* impl = ImplOf(ctx);
+    const ModRecord& mod = impl->Mod(ctx);
+    auto err = [&](const std::string& msg) {
+        Log(MODRIX_LOG_ERROR, mod.manifest.id, "register_npc: " + msg);
+        return MODRIX_INVALID_ID;
+    };
+    if (!ctx->initializing) return err("só pode ser chamado durante modrix_mod_init");
+    if (!def || def->struct_size < kNpcDefV1Size) return err("ModrixNpcDef nulo ou struct_size inválido");
+    if (!def->name) return err("name é obrigatório");
+    std::string name = def->name;
+    if (!mod.manifest.Declares(MODRIX_CONTENT_NPC, name))
+        return err("\"" + name + "\" não está declarado em content.npcs do manifest.json");
+    if (!def->display_name || !*def->display_name) return err("display_name é obrigatório");
+
+    // A casca tem de ser um NPC original existente: é ela que o jogo vê.
+    ContentRegistry& reg = impl->self->Registry();
+    int32_t vanilla = reg.VanillaCount(MODRIX_CONTENT_NPC).value_or(0);
+    if (def->shell_type <= 0 || def->shell_type >= vanilla)
+        return err("shell_type " + std::to_string(def->shell_type) + " não é um NPC original (1.." +
+                   std::to_string(vanilla - 1) + ")");
+
+    NpcDefinition npc;
+    npc.displayName = def->display_name;
+    npc.shellType = def->shell_type;
+    npc.lifeMax = def->life_max;
+    npc.damage = def->damage;
+    npc.defense = def->defense;
+    npc.boss = def->boss;
+    npc.user = def->user;
+    npc.onSpawn = def->on_spawn;
+    npc.onAi = def->on_ai;
+
+    std::string error;
+    auto id = reg.Register(MODRIX_CONTENT_NPC, mod.manifest.id, name, std::move(npc), &error);
+    if (!id) return err(error);
+    Log(MODRIX_LOG_INFO, mod.manifest.id,
+        "npc " + mod.manifest.id + ":" + name + " -> ID " + std::to_string(*id) + " (casca " +
+            std::to_string(def->shell_type) + ")");
+    return *id;
+}
+
+int32_t Api_SpawnNpc(ModrixContext* ctx, ModrixId type, float x, float y) {
+    if (!ctx) return -1;
+    Impl* impl = ImplOf(ctx);
+    const ContentRegistry& reg = impl->self->Registry();
+    int32_t vanilla = reg.VanillaCount(MODRIX_CONTENT_NPC).value_or(0);
+    bool known = reg.IsModId(MODRIX_CONTENT_NPC, type) || (type > 0 && type < vanilla);
+    if (!known) {
+        Log(MODRIX_LOG_ERROR, impl->ModId(ctx), "spawn_npc: tipo " + std::to_string(type) + " desconhecido");
+        return -1;
+    }
+    // Passa pelo NewNPC do jogo; o remap para a casca acontece no gancho.
+    return impl->game->SpawnNpc(type, x, y);
+}
+
 }  // namespace
 
 // ---- ModLoader -----------------------------------------------------------
@@ -167,12 +307,29 @@ ModLoader::ModLoader(GameAdapter* game) : game_(game), registry_(game), impl_(st
     a.subscribe_player_hurt = &Api_SubscribePlayerHurt;
     a.local_player = &Api_LocalPlayer;
     a.player_life = &Api_PlayerLife;
+    a.register_npc = &Api_RegisterNpc;
+    a.spawn_npc = &Api_SpawnNpc;
 
-    game_->SetPlayerHurtHandler(
-        [impl = impl_.get()](ModrixPlayerHurt& ev, bool after) { return impl->DispatchHurt(ev, after); });
+    Impl* impl = impl_.get();
+    game_->SetPlayerHurtHandler([impl](ModrixPlayerHurt& ev, bool after) { return impl->DispatchHurt(ev, after); });
+
+    impl->npcSlots.resize(static_cast<size_t>(std::max(0, game_->MaxNpcs())));
+    GameAdapter::NpcHooks hooks;
+    hooks.remapSpawnType = [impl](int32_t t) { return impl->RemapSpawnType(t); };
+    hooks.onSpawned = [impl](int32_t i, int32_t req, int32_t sp) { impl->OnNpcSpawned(i, req, sp); };
+    hooks.onSetDefaults = [impl](int32_t i, int32_t t) { impl->OnNpcSetDefaults(i, t); };
+    hooks.onAi = [impl](int32_t i) { return impl->OnNpcAi(i); };
+    game_->SetNpcHooks(std::move(hooks));
 }
 
-ModLoader::~ModLoader() { game_->SetPlayerHurtHandler(nullptr); }
+ModLoader::~ModLoader() {
+    game_->SetPlayerHurtHandler(nullptr);
+    game_->SetNpcHooks({});
+}
+
+ModrixId ModLoader::NpcInSlot(int32_t index) const {
+    return impl_->ValidSlot(index) ? impl_->npcSlots[static_cast<size_t>(index)].type : MODRIX_INVALID_ID;
+}
 
 const ModrixHostApi& ModLoader::HostApi() const { return impl_->api; }
 

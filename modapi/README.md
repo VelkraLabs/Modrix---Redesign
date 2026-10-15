@@ -71,6 +71,29 @@ Se o jogo informar mais IDs originais do que o 1º ID de mod, aquele tipo é des
 mods: o runtime prefere desativar a colidir. A chave `mod_id:nome` é estável. Use a chave
 para salvar e sincronizar; o ID numérico pode mudar quando o conjunto de mods muda.
 
+## NPCs e bosses de mod
+
+Um NPC de mod roda dentro de uma **casca**: um NPC original (`shell_type`) que fornece
+textura, hitbox, sons e, se o mod quiser, a própria AI. O jogo indexa arrays por tipo
+(texturas, `npcFrameCount`, sons), então um ID ≥ 688 nunca pode chegar a ele.
+
+| gancho | RVA | o que o runtime faz |
+|---|---|---|
+| `NPC.NewNPC` (pré) | `0xEE4630` | ID de mod (4096+) vira o `shell_type` |
+| `NPC.NewNPC` (pós) | `0xEE4630` | registra "slot i = NPC de mod X", aplica vida/dano/defesa e chama `on_spawn` |
+| `NPC.SetDefaults` (pré) | `0xDAF1BC` | desmarca o slot, que mudou de dono (morte e reuso, `Transform`, rede) |
+| `NPC.AI` (pré) | `0xDCE54C` | a cada tick, se o slot é de mod, chama `on_ai`; `true` pula a AI da casca |
+
+`NPC.AI` só é chamado por `NPC.UpdateNPC` (`0xF4A2E8`), que `Main.DoUpdateInWorld`
+(`0xCBBDF0`) chama para os 200 slots a cada tick. Movimento e colisão rodam em
+`UpdateNPC` depois da AI, então `on_ai` só precisa ajustar velocidade e estado.
+
+Estado por NPC: `ai[0..3]` são do jogo, e a AI da casca usa esses campos quando roda. `local[8]` é
+privado do mod, fica guardado no runtime e o jogo não toca. Veja `mods/example_boss`.
+
+Ainda falta: nome exibido, barra e música de boss (`boss`), textura própria, sincronizar a tabela de
+slots e o `local[]` em multiplayer, e confirmar no jogo que `NewNPC` aceita `source` nulo.
+
 ## Build
 
 ```sh

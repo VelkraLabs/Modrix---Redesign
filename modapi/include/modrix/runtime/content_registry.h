@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "modrix/modrix_api.h"
@@ -37,13 +38,29 @@ struct ItemDefinition {
     int32_t width = 0, height = 0, maxStack = 1, value = 0, rarity = 0, damage = 0, useTime = 0;
 };
 
+// NPC de mod: roda dentro de uma "casca" original (ver ModrixNpcDef).
+struct NpcDefinition {
+    std::string displayName;
+    ModrixId shellType = 0;
+    int32_t lifeMax = 0, damage = -1, defense = -1;
+    bool boss = false;
+    void* user = nullptr;
+    ModrixNpcSpawnFn onSpawn = nullptr;
+    ModrixNpcAiFn onAi = nullptr;
+};
+
+using ContentPayload = std::variant<std::monostate, ItemDefinition, NpcDefinition>;
+
 struct ContentEntry {
     ModrixContentKind kind;
     ModrixId id;
     std::string key;      // "mod_id:nome", estável: use para salvar/sincronizar
     std::string modId;
     std::string name;
-    std::optional<ItemDefinition> item;  // preenchido quando kind == ITEM
+    ContentPayload payload;
+
+    const ItemDefinition* Item() const { return std::get_if<ItemDefinition>(&payload); }
+    const NpcDefinition* Npc() const { return std::get_if<NpcDefinition>(&payload); }
 };
 
 class ContentRegistry {
@@ -58,7 +75,7 @@ public:
     // *error) se o nome for inválido, a chave já existir, o tipo estiver
     // desativado ou a faixa tiver acabado.
     std::optional<ModrixId> Register(ModrixContentKind kind, const std::string& modId,
-                                     const std::string& name, std::optional<ItemDefinition> item,
+                                     const std::string& name, ContentPayload payload,
                                      std::string* error);
 
     std::optional<ModrixId> Find(ModrixContentKind kind, const std::string& key) const;

@@ -28,6 +28,7 @@ set_target_properties(modrix_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set(MODRIX_SDK_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(MODRIX_MODS_OUTPUT_DIR ${CMAKE_BINARY_DIR}/dist/mods)
 add_subdirectory(mods/example_item)
+add_subdirectory(mods/example_boss)
 
 # --- Adaptador sobre a ponte IL2CPP -----------------------------------------
 if(MODRIX_WITH_BRIDGE)
@@ -59,7 +60,7 @@ if(NOT ANDROID)
   add_executable(runtime_test tests/runtime_test.cpp)
   target_compile_options(runtime_test PRIVATE ${MODRIX_WARNINGS})
   target_link_libraries(runtime_test PRIVATE modrix_runtime)
-  add_dependencies(runtime_test example_item)
+  add_dependencies(runtime_test example_item example_boss)
   add_test(NAME runtime_test COMMAND runtime_test ${MODRIX_MODS_OUTPUT_DIR})
 
   # modrix_api.h precisa compilar como C99 puro, sem extensões.

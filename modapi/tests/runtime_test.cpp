@@ -104,32 +104,32 @@ static void TestRegistry() {
     auto a = reg.Register(MODRIX_CONTENT_ITEM, "acme.swords", "iron_katana", ItemDefinition{}, &err);
     auto b = reg.Register(MODRIX_CONTENT_ITEM, "acme.swords", "gold_katana", ItemDefinition{}, &err);
     CHECK(a == 8192 && b == 8193);
-    auto buff = reg.Register(MODRIX_CONTENT_BUFF, "acme.swords", "bleeding", std::nullopt, &err);
+    auto buff = reg.Register(MODRIX_CONTENT_BUFF, "acme.swords", "bleeding", {}, &err);
     CHECK(buff == 4096);
     CHECK(reg.Find(MODRIX_CONTENT_ITEM, "acme.swords:gold_katana") == 8193);
     CHECK(reg.Get(MODRIX_CONTENT_ITEM, 8192)->key == "acme.swords:iron_katana");
     CHECK(reg.Get(MODRIX_CONTENT_ITEM, 5455) == nullptr);  // original: não é do registro
     CHECK(!reg.IsModId(MODRIX_CONTENT_ITEM, 100));
 
-    CHECK(!reg.Register(MODRIX_CONTENT_ITEM, "acme.swords", "iron_katana", std::nullopt, &err));
+    CHECK(!reg.Register(MODRIX_CONTENT_ITEM, "acme.swords", "iron_katana", {}, &err));
     CHECK(err.find("já registrado") != std::string::npos);
     // Mesmo nome em outro mod não colide: a chave inclui o id do mod.
-    CHECK(reg.Register(MODRIX_CONTENT_ITEM, "other.mod", "iron_katana", std::nullopt, &err) == 8194);
-    CHECK(!reg.Register(MODRIX_CONTENT_ITEM, "acme.swords", "Iron Katana", std::nullopt, &err));
+    CHECK(reg.Register(MODRIX_CONTENT_ITEM, "other.mod", "iron_katana", {}, &err) == 8194);
+    CHECK(!reg.Register(MODRIX_CONTENT_ITEM, "acme.swords", "Iron Katana", {}, &err));
 
     auto cp = reg.Mark();
-    reg.Register(MODRIX_CONTENT_ITEM, "acme.swords", "temp", std::nullopt, &err);
+    reg.Register(MODRIX_CONTENT_ITEM, "acme.swords", "temp", {}, &err);
     reg.Rollback(cp);
     CHECK(!reg.Find(MODRIX_CONTENT_ITEM, "acme.swords:temp"));
-    CHECK(reg.Register(MODRIX_CONTENT_ITEM, "acme.swords", "after_rollback", std::nullopt, &err) == 8195);
+    CHECK(reg.Register(MODRIX_CONTENT_ITEM, "acme.swords", "after_rollback", {}, &err) == 8195);
 
     // Faixa esgotada.
     auto ranges = ContentRegistry::DefaultRanges();
     ranges[MODRIX_CONTENT_NPC] = {"npc", 688, 1000, 1001};
     ContentRegistry small(&game, ranges);
-    CHECK(small.Register(MODRIX_CONTENT_NPC, "m", "a", std::nullopt, &err) == 1000);
-    CHECK(small.Register(MODRIX_CONTENT_NPC, "m", "b", std::nullopt, &err) == 1001);
-    CHECK(!small.Register(MODRIX_CONTENT_NPC, "m", "c", std::nullopt, &err));
+    CHECK(small.Register(MODRIX_CONTENT_NPC, "m", "a", {}, &err) == 1000);
+    CHECK(small.Register(MODRIX_CONTENT_NPC, "m", "b", {}, &err) == 1001);
+    CHECK(!small.Register(MODRIX_CONTENT_NPC, "m", "c", {}, &err));
     CHECK(err.find("esgotada") != std::string::npos);
 
     // Jogo atualizado com mais itens que a folga: tipo desativado, nunca colide.
@@ -137,7 +137,7 @@ static void TestRegistry() {
     bigGame.vanilla[MODRIX_CONTENT_ITEM] = 9000;
     ContentRegistry guarded(&bigGame);
     CHECK(!guarded.KindEnabled(MODRIX_CONTENT_ITEM));
-    CHECK(!guarded.Register(MODRIX_CONTENT_ITEM, "m", "x", std::nullopt, &err));
+    CHECK(!guarded.Register(MODRIX_CONTENT_ITEM, "m", "x", {}, &err));
     CHECK(guarded.KindEnabled(MODRIX_CONTENT_TILE));
 }
 
@@ -261,7 +261,7 @@ static void TestLoader(const fs::path& modsDir) {
     CHECK(rubyId == 8192);
     if (rubyId) {
         const ContentEntry* e = loader.Registry().Get(MODRIX_CONTENT_ITEM, *rubyId);
-        CHECK(e && e->item && e->item->displayName == "Rubi Fictício" && e->item->maxStack == 999);
+        CHECK(e && e->Item() && e->Item()->displayName == "Rubi Fictício" && e->Item()->maxStack == 999);
     }
     // O item do mod que falhou foi desfeito.
     CHECK(!loader.Registry().Find(MODRIX_CONTENT_ITEM, "test.bad:declared_item"));
@@ -280,6 +280,96 @@ static void TestLoader(const fs::path& modsDir) {
 }
 
 // ---------------------------------------------------------------------------
+// NPCs: carrega o example_boss real + um mod embutido que testa validações.
+static const ModrixHostApi* g_npcApi = nullptr;
+static ModrixContext* g_npcCtx = nullptr;
+
+static int NpcValidationInit(const ModrixHostApi* api, ModrixContext* ctx) {
+    g_npcApi = api;
+    g_npcCtx = ctx;
+    ModrixNpcDef d{};
+    d.struct_size = sizeof(d);
+    d.display_name = "Lacaio";
+    d.life_max = 0;  // mantém o da casca
+    d.damage = d.defense = -1;
+    d.name = "undeclared";
+    d.shell_type = 4;
+    if (api->register_npc(ctx, &d) != MODRIX_INVALID_ID) return 2;  // fora de content.npcs
+    d.name = "minion";
+    d.shell_type = 4096;
+    if (api->register_npc(ctx, &d) != MODRIX_INVALID_ID) return 3;  // casca precisa ser original
+    d.shell_type = 0;
+    if (api->register_npc(ctx, &d) != MODRIX_INVALID_ID) return 4;
+    d.shell_type = 1;
+    return api->register_npc(ctx, &d) == MODRIX_INVALID_ID ? 5 : 0;
+}
+
+static void TestNpcs(const fs::path& modsDir) {
+    std::printf("\n== NPCs (example_boss + ganchos NewNPC/SetDefaults/AI)\n");
+    fs::path tmp = fs::temp_directory_path() / "modrix_npc_test";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+    fs::copy(modsDir / "example_boss", tmp / "example_boss", fs::copy_options::recursive);
+
+    FakeGame game;
+    ModLoader loader(&game);
+    loader.DiscoverDirectory(tmp);
+    ModManifest m = Builtin("test.npcs");
+    m.content[MODRIX_CONTENT_NPC] = {"minion"};
+    loader.AddBuiltin(m, &NpcValidationInit);
+    CHECK(loader.LoadAll() == 2);
+    for (const auto& r : loader.Mods())
+        if (r.state != ModState::Loaded) std::printf("      %s: %s\n", r.manifest.id.c_str(), r.error.c_str());
+
+    auto bossId = loader.Registry().Find(MODRIX_CONTENT_NPC, "modrix.example_boss:ember_titan");
+    auto minionId = loader.Registry().Find(MODRIX_CONTENT_NPC, "test.npcs:minion");
+    CHECK(bossId == 4096 && minionId == 4097);
+    CHECK(loader.Registry().Get(MODRIX_CONTENT_NPC, 4096)->Npc()->shellType == 4);
+
+    // NPC original: nenhum gancho interfere.
+    CHECK(game.NewNpc(2, 0, 0) == 0 && loader.NpcInSlot(0) == MODRIX_INVALID_ID);
+
+    // Boss pelo caminho do jogo (como um item de invocação chamando NewNPC).
+    CHECK(game.NewNpc(4096, 500, 600) == 1);
+    const ModrixNpcState& boss = game.npcs[1].s;
+    CHECK(boss.type == 4 && loader.NpcInSlot(1) == 4096);  // jogo vê a casca; runtime sabe que é o boss
+    CHECK(boss.life == 12000 && boss.life_max == 12000 && boss.damage == 40 && boss.defense == 14);
+    CHECK(boss.x == 500.0f && boss.y == 600.0f);
+
+    // Introdução: 120 ticks em que o mod assume a AI (a da casca não roda).
+    game.npcs[1].s.vx = 3.0f;
+    game.UpdateNpcs();
+    CHECK(game.npcs[0].s.ai[0] == 1.0f);                      // original rodou
+    CHECK(boss.ai[0] == 0.0f && boss.vx == 0.0f);             // mod assumiu e parou o boss
+    for (int t = 1; t < 120; ++t) game.UpdateNpcs();
+    CHECK(boss.ai[0] == 0.0f);
+    // Tick 121: fase 1 devolve o controle à AI da casca. Prova também que
+    // local[] (fase/timer) persistiu entre ticks no runtime.
+    game.UpdateNpcs();
+    CHECK(boss.ai[0] == 1.0f);
+
+    // Transform/reuso do slot: SetDefaults desmarca, o mod para de rodar.
+    game.SetDefaults(1, 5);
+    CHECK(loader.NpcInSlot(1) == MODRIX_INVALID_ID);
+
+    // Spawn pela API do mod: passa pelo mesmo remap.
+    int32_t idx = g_npcApi->spawn_npc(g_npcCtx, 4097, 10, 20);
+    CHECK(idx == 2 && loader.NpcInSlot(2) == 4097 && game.npcs[2].s.type == 1);
+    CHECK(game.npcs[2].s.life_max == 101);  // life_max 0 = o da casca
+    CHECK(g_npcApi->spawn_npc(g_npcCtx, 9999, 0, 0) == -1);
+    CHECK(g_npcApi->spawn_npc(g_npcCtx, 3, 0, 0) == 3 && loader.NpcInSlot(3) == MODRIX_INVALID_ID);
+
+    // Sem slot livre: o spawn falha e nada é marcado.
+    while (game.NewNpc(2, 0, 0) >= 0) {
+    }
+    CHECK(g_npcApi->spawn_npc(g_npcCtx, 4096, 0, 0) == -1);
+
+    // Em nenhum momento um ID de mod chegou ao SetDefaults original.
+    CHECK(!game.vanillaSetDefaultsOverflow);
+    fs::remove_all(tmp);
+}
+
+// ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -291,6 +381,7 @@ int main(int argc, char** argv) {
     TestRegistry();
     TestResolver();
     TestLoader(argv[1]);
+    TestNpcs(argv[1]);
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
