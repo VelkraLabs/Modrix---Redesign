@@ -171,7 +171,51 @@ struct ModLoader::Impl {
         return true;
     }
 
+    // ---- Casca de item: avaliação ---------------------------------------------
+    // register_item avisa se a casca tem propriedades que provavelmente não
+    // combinam com a definição. As propriedades vêm do jogo; se ele ainda não
+    // pode responder (thread do loader, antes do primeiro frame), a avaliação
+    // fica para o frame handler.
+    // Pela chave: se o init do mod falhar, o registro desfaz e o ID pode ser
+    // reusado por outro item.
+    std::vector<std::string> pendingShellChecks;  // só o loader (LoadAll) e depois o frame handler
+
+    bool CheckItemShell(const std::string& key) {
+        std::optional<TLModId> id = self->registry_.Find(TLMOD_CONTENT_ITEM, key);
+        const ContentEntry* e = id ? self->registry_.Get(TLMOD_CONTENT_ITEM, *id) : nullptr;
+        const ItemDefinition* def = e ? e->Item() : nullptr;
+        if (!def) return true;
+        std::optional<ItemTraits> traits = game->ItemShellTraits(def->shellType);
+        if (!traits) return false;
+        std::vector<ShellIssue> issues = CheckShell(*def, *traits);
+        if (issues.empty()) return true;
+        const std::string where = "register_item: \"" + e->key + "\" na casca " + std::to_string(def->shellType) + ": ";
+        for (const ShellIssue& i : issues) Log(TLMOD_LOG_WARN, e->modId, where + i.text);
+        ItemCategory cat = InferCategory(*def, *traits);
+        const ShellRecommendation& rec = RecommendedShell(cat);
+        if (rec.shell != def->shellType)
+            Log(TLMOD_LOG_WARN, e->modId,
+                where + "para " + ToString(cat) + ", a casca recomendada é " + std::to_string(rec.shell) + " (" +
+                    rec.shellName + "): " + rec.why);
+        return true;
+    }
+    void ProcessShellChecks() {
+        if (pendingShellChecks.empty()) return;
+        std::vector<std::string> left;
+        for (const std::string& key : pendingShellChecks)
+            if (!CheckItemShell(key)) left.push_back(key);
+        pendingShellChecks.swap(left);
+    }
+
+    const std::string* NpcName(int32_t index) const {
+        if (!ValidSlot(index)) return nullptr;
+        TLModId type = npcSlots[static_cast<size_t>(index)].type;
+        const NpcDefinition* def = type == TLMOD_INVALID_ID ? nullptr : ModNpcDef(type);
+        return def ? &def->displayName : nullptr;
+    }
+
     void OnFrame() {
+        ProcessShellChecks();
         ProcessTextures();
         std::vector<Give> todo;
         {
@@ -339,6 +383,8 @@ TLModId Api_RegisterItem(TLModContext* ctx, const TLModItemDef* def) {
     if (!id) return err(error);
     Log(TLMOD_LOG_INFO, mod.manifest.id,
         "item " + mod.manifest.id + ":" + name + " -> ID " + std::to_string(*id));
+    const std::string key = mod.manifest.id + ":" + name;
+    if (!impl->CheckItemShell(key)) impl->pendingShellChecks.push_back(key);
     return *id;
 }
 
@@ -723,6 +769,7 @@ void ModLoader::LoadTextures() {
 }
 
 size_t ModLoader::PendingTextures() const { return impl_->pendingTextures.size(); }
+size_t ModLoader::PendingShellChecks() const { return impl_->pendingShellChecks.size(); }
 int32_t ModLoader::TexturesCreated() const { return impl_->texturesCreated; }
 
 size_t ModLoader::LoadAll() {
@@ -844,6 +891,7 @@ size_t ModLoader::LoadAll() {
     GameAdapter::DrawHooks draw;
     draw.itemTexture = [impl](int32_t t) { return impl->ItemTexture(t); };
     draw.npcTexture = [impl](int32_t i, GameAdapter::NpcDraw& out) { return impl->NpcTexture(i, out); };
+    draw.npcName = [impl](int32_t i) { return impl->NpcName(i); };
     game_->SetDrawHooks(std::move(draw));
     game_->SetFrameHandler([impl] { impl->OnFrame(); });
 

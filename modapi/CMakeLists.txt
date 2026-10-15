@@ -17,6 +17,7 @@ add_library(tlmod_runtime STATIC
   src/content_registry.cpp
   src/item_persistence.cpp
   src/png.cpp
+  src/item_shell.cpp
   src/dynlib.cpp
   src/mod_loader.cpp)
 target_include_directories(tlmod_runtime PUBLIC include PRIVATE src)

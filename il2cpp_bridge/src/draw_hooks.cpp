@@ -6,10 +6,13 @@
 
 #include "bridge.h"
 #include "bridge_internal.h"
+#include "draw_internal.h"
 #include "log.h"
 #include "terraria_offsets.h"
 
 using namespace il2cpp;
+using drawx::ItemSwap;
+using drawx::Swap;
 
 typedef void (*GridDrawItemFn)(Il2CppObject* self, Il2CppObject* spriteBatch, Il2CppObject* layout, Il2CppArray* inv,
                                int32_t slot, TLModXnaVector2 position, TLModXnaColor lightColor, float scale,
@@ -40,6 +43,7 @@ struct DrawResolved {
     FieldInfo* itemAssets = nullptr;     // static Asset<Texture2D>[] TextureAssets.Item
     FieldInfo* npcAssets = nullptr;      // static Asset<Texture2D>[] TextureAssets.Npc
     FieldInfo* npcFrameCount = nullptr;  // static int[] Main.npcFrameCount
+    FieldInfo* itemAnimations = nullptr; // static DrawAnimation[] Main.itemAnimations
 
     // Criação de textura.
     Il2CppClass* unityTexture2D = nullptr;  // UnityEngine.Texture2D
@@ -122,13 +126,6 @@ const MethodInfo* FindCtor1(Il2CppClass* klass, const char* paramType) {
 }
 
 // ---- Troca durante um desenho ------------------------------------------------------
-// POD de propósito: os frames dos hooks não têm objetos com destrutor.
-struct Swap {
-    Il2CppArray* array;
-    int32_t index;
-    Il2CppObject* previous;
-};
-
 Il2CppObject*& Elem(Il2CppArray* arr, int32_t i) { return ArrayData<Il2CppObject*>(arr)[i]; }
 
 bool SwapIn(FieldInfo* assets, int32_t index, Il2CppObject* asset, Swap* out) {
@@ -147,17 +144,44 @@ void SwapOut(const Swap& s) {
                                      reinterpret_cast<void**>(&Elem(s.array, s.index)), s.previous);
 }
 
+}  // namespace
+
 // Antes de desenhar `item`: se for de mod e tiver textura, o Asset da casca
-// sai e entra o do mod. Devolve false se nada mudou.
-bool BeginItem(Il2CppObject* item, Swap* swap) {
+// sai e entra o do mod; a animação da casca (Main.itemAnimations[type], que
+// fatiaria a textura em quadros) sai junto. Devolve false se nada mudou.
+bool drawx::BeginItem(Il2CppObject* item, ItemSwap* swap) {
+    swap->texture = swap->animation = false;
     if (!item || !d.ready) return false;
     int32_t net = FieldAt<int32_t>(item, d.itemNetId);
     if (net < terraria::kItemVanillaCount) return false;  // original: nada a trocar
     const TLModDrawCallbacks* cb = g_callbacks.load(std::memory_order_acquire);
     if (!cb || !cb->item_texture) return false;
     Il2CppObject* asset = AssetOf(cb->item_texture(item, net));
-    return asset && SwapIn(d.itemAssets, FieldAt<int32_t>(item, d.itemType), asset, swap);
+    int32_t type = FieldAt<int32_t>(item, d.itemType);
+    if (!asset || !SwapIn(d.itemAssets, type, asset, &swap->tex)) return false;
+    swap->texture = true;
+    Il2CppArray* anims = StaticValue<Il2CppArray*>(d.itemAnimations);
+    if (anims && static_cast<uint32_t>(type) < api.il2cpp_array_length(anims) && Elem(anims, type))
+        swap->animation = SwapIn(d.itemAnimations, type, nullptr, &swap->anim);
+    return true;
 }
+
+void drawx::EndItem(const ItemSwap& swap) {
+    if (swap.animation) SwapOut(swap.anim);
+    if (swap.texture) SwapOut(swap.tex);
+}
+
+bool drawx::ItemTexturesActive() {
+    const TLModDrawCallbacks* cb = g_callbacks.load(std::memory_order_acquire);
+    return d.ready && cb && cb->item_texture && g_textureCount.load(std::memory_order_acquire) > 0;
+}
+
+int32_t drawx::ItemType(Il2CppObject* item) { return item ? FieldAt<int32_t>(item, d.itemType) : 0; }
+bool drawx::IsModItem(Il2CppObject* item) {
+    return item && FieldAt<int32_t>(item, d.itemNetId) >= terraria::kItemVanillaCount;
+}
+
+namespace {
 
 Il2CppObject* ItemAt(Il2CppArray* inv, int32_t slot) {
     if (!inv || slot < 0 || static_cast<uint32_t>(slot) >= api.il2cpp_array_length(inv)) return nullptr;
@@ -173,11 +197,18 @@ struct NpcSwap {
     TLModXnaRectangle previousFrame;
 };
 
-int32_t NpcIndex(Il2CppObject* npc) {
+}  // namespace
+
+int32_t drawx::NpcIndex(Il2CppObject* npc) {
     int32_t w = FieldAt<int32_t>(npc, d.npcWhoAmI);
     if (w >= 0 && w < terraria::kMaxNPCs && TLMod_GetNpcByIndex(w) == npc) return w;
     return TLMod_FindNpcIndex(npc);
 }
+
+const TLModDrawCallbacks* drawx::Callbacks() { return g_callbacks.load(std::memory_order_acquire); }
+
+namespace {
+using drawx::NpcIndex;
 
 bool BeginNpc(Il2CppObject* npc, NpcSwap* swap) {
     if (!npc || !d.ready) return false;
@@ -241,6 +272,7 @@ bool ResolveDraw() {
     d.itemAssets = api.il2cpp_class_get_field_from_name(assets, "Item");
     d.npcAssets = api.il2cpp_class_get_field_from_name(assets, "Npc");
     d.npcFrameCount = api.il2cpp_class_get_field_from_name(MainClass(), "npcFrameCount");
+    d.itemAnimations = api.il2cpp_class_get_field_from_name(MainClass(), "itemAnimations");
 
     const Il2CppImage* core = FindImage("UnityEngine.CoreModule.dll");
     d.unityTexture2D = core ? api.il2cpp_class_from_name(core, "UnityEngine", "Texture2D") : nullptr;
@@ -404,10 +436,10 @@ void TLMod_Hooked_GUIInventoryDrawItem(Il2CppObject* self, Il2CppObject* spriteB
                                        TLModXnaColor lightColor, float scale, const MethodInfo* method) {
     auto orig = LoadOrig<GridDrawItemFn>(g_origInventorySlot);
     if (!orig) return;
-    Swap swap{};
-    bool swapped = BeginItem(ItemAt(inv, slot), &swap);
+    ItemSwap swap{};
+    bool swapped = drawx::BeginItem(ItemAt(inv, slot), &swap);
     orig(self, spriteBatch, layout, inv, slot, position, lightColor, scale, method);
-    if (swapped) SwapOut(swap);
+    if (swapped) drawx::EndItem(swap);
 }
 
 void TLMod_Hooked_GUIHotbarDrawHotbarItem(Il2CppObject* self, Il2CppObject* spriteBatch, Il2CppObject* layout,
@@ -415,19 +447,19 @@ void TLMod_Hooked_GUIHotbarDrawHotbarItem(Il2CppObject* self, Il2CppObject* spri
                                           TLModXnaColor lightColor, float scale, const MethodInfo* method) {
     auto orig = LoadOrig<GridDrawItemFn>(g_origHotbarSlot);
     if (!orig) return;
-    Swap swap{};
-    bool swapped = BeginItem(ItemAt(inv, slot), &swap);
+    ItemSwap swap{};
+    bool swapped = drawx::BeginItem(ItemAt(inv, slot), &swap);
     orig(self, spriteBatch, layout, inv, slot, position, lightColor, scale, method);
-    if (swapped) SwapOut(swap);
+    if (swapped) drawx::EndItem(swap);
 }
 
 void TLMod_Hooked_MainDrawItem(Il2CppObject* self, Il2CppObject* item, int32_t whoami, const MethodInfo* method) {
     auto orig = LoadOrig<MainDrawItemFn>(g_origMainDrawItemSlot);
     if (!orig) return;
-    Swap swap{};
-    bool swapped = BeginItem(item, &swap);
+    ItemSwap swap{};
+    bool swapped = drawx::BeginItem(item, &swap);
     orig(self, item, whoami, method);
-    if (swapped) SwapOut(swap);
+    if (swapped) drawx::EndItem(swap);
 }
 
 float TLMod_Hooked_ItemSlotDrawItemIcon(Il2CppObject* item, int32_t context, Il2CppObject* spriteBatch,
@@ -435,20 +467,20 @@ float TLMod_Hooked_ItemSlotDrawItemIcon(Il2CppObject* item, int32_t context, Il2
                                         TLModXnaColor environmentColor, const MethodInfo* method) {
     auto orig = LoadOrig<DrawItemIconFn>(g_origDrawItemIconSlot);
     if (!orig) return 0.0f;
-    Swap swap{};
-    bool swapped = BeginItem(item, &swap);
+    ItemSwap swap{};
+    bool swapped = drawx::BeginItem(item, &swap);
     float result = orig(item, context, spriteBatch, screenPositionForItemCenter, scale, sizeLimit, environmentColor, method);
-    if (swapped) SwapOut(swap);
+    if (swapped) drawx::EndItem(swap);
     return result;
 }
 
 void TLMod_Hooked_DrawPlayerHeldItem(void* drawinfo, const MethodInfo* method) {
     auto orig = LoadOrig<HeldItemFn>(g_origHeldItemSlot);
     if (!orig) return;
-    Swap swap{};
-    bool swapped = drawinfo && BeginItem(FieldAt<Il2CppObject*>(drawinfo, d.heldItem), &swap);
+    ItemSwap swap{};
+    bool swapped = drawinfo && drawx::BeginItem(FieldAt<Il2CppObject*>(drawinfo, d.heldItem), &swap);
     orig(drawinfo, method);
-    if (swapped) SwapOut(swap);
+    if (swapped) drawx::EndItem(swap);
 }
 
 void TLMod_Hooked_MainDrawNPCDirect(Il2CppObject* self, Il2CppObject* spriteBatch, Il2CppObject* npc, bool behindTiles,

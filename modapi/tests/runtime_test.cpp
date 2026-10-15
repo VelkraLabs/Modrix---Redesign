@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <atomic>
 #include <cstdio>
+#include <mutex>
 #include <thread>
 #include <cstdlib>
 #include <filesystem>
@@ -17,6 +18,7 @@
 #include "json.h"
 #include "tlmod/runtime/content_registry.h"
 #include "tlmod/runtime/item_persistence.h"
+#include "tlmod/runtime/item_shell.h"
 #include "tlmod/runtime/log.h"
 #include "tlmod/runtime/manifest.h"
 #include "tlmod/runtime/mod_loader.h"
@@ -1490,6 +1492,165 @@ static void TestTextures(const fs::path& modsDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Casca de item: o que ela passa para o item de mod e os avisos do register_item.
+namespace shells {
+
+std::vector<std::string> g_logs;  // avisos capturados
+std::mutex g_logMutex;
+void CaptureSink(TLModLogLevel level, const std::string& source, const std::string& msg) {
+    if (level < TLMOD_LOG_WARN) return;
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    g_logs.push_back(source + ": " + msg);
+}
+size_t Count(const std::string& needle) {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    return static_cast<size_t>(std::count_if(g_logs.begin(), g_logs.end(),
+                                             [&](const std::string& l) { return l.find(needle) != std::string::npos; }));
+}
+
+ItemDefinition Def(int32_t damage, int32_t maxStack, TLModId shell) {
+    ItemDefinition d;
+    d.displayName = "x";
+    d.damage = damage;
+    d.maxStack = maxStack;
+    d.shellType = shell;
+    return d;
+}
+bool Mentions(const std::vector<ShellIssue>& issues, const std::string& needle) {
+    for (const ShellIssue& i : issues)
+        if (i.text.find(needle) != std::string::npos) return true;
+    return false;
+}
+
+TLModId Reg(const TLModHostApi* api, TLModContext* ctx, const char* name, TLModId shell, int32_t damage,
+            int32_t maxStack) {
+    TLModItemDef d{};
+    d.struct_size = sizeof(d);
+    d.name = name;
+    d.display_name = name;
+    d.width = d.height = 16;
+    d.max_stack = maxStack;
+    d.damage = damage;
+    d.use_time = damage > 0 ? 20 : 0;
+    d.shell_type = shell;
+    return api->register_item(ctx, &d);
+}
+int GoodInit(const TLModHostApi* api, TLModContext* ctx) {
+    return Reg(api, ctx, "gem", 38, 0, 999) != TLMOD_INVALID_ID &&      // material na Lente
+                   Reg(api, ctx, "sword", 24, 12, 1) != TLMOD_INVALID_ID &&  // espada na Espada de Madeira
+                   Reg(api, ctx, "heart_gem", 58, 0, 99) != TLMOD_INVALID_ID &&  // material num Coração
+                   Reg(api, ctx, "magic_sword", 739, 20, 1) != TLMOD_INVALID_ID  // espada num cajado
+               ? 0
+               : 1;
+}
+int FailingInit(const TLModHostApi* api, TLModContext* ctx) {
+    Reg(api, ctx, "torch_gem", 8, 0, 99);  // seria avisado, mas o init falha: o registro é desfeito
+    return 7;
+}
+
+}  // namespace shells
+
+static void TestShells(const fs::path& modsDir) {
+    using namespace shells;
+    std::printf("\n== casca de item: propriedades herdadas e avisos do register_item\n");
+    FakeGame game;
+    auto traits = [&](TLModId t) { return *game.ItemShellTraits(t); };
+
+    // Casca recomendada + definição típica da categoria: nenhum aviso.
+    struct Typical {
+        ItemCategory cat;
+        int32_t damage, maxStack;
+    };
+    const Typical typical[] = {{ItemCategory::Material, 0, 999}, {ItemCategory::MeleeWeapon, 12, 1},
+                               {ItemCategory::Bow, 9, 1},        {ItemCategory::Gun, 11, 1},
+                               {ItemCategory::Ammo, 6, 999},     {ItemCategory::Accessory, 0, 1}};
+    int clean = 0;
+    for (const Typical& t : typical) {
+        const ShellRecommendation& rec = RecommendedShell(t.cat);
+        ItemDefinition d = Def(t.damage, t.maxStack, rec.shell);
+        auto issues = CheckShell(d, traits(rec.shell));
+        bool ok = issues.empty() && InferCategory(d, traits(rec.shell)) == t.cat;
+        if (!ok) std::printf("      %s na casca %d: %zu avisos\n", ToString(t.cat), rec.shell, issues.size());
+        clean += ok;
+    }
+    CHECK(clean == 6);
+    CHECK(RecommendedShell(ItemCategory::Material).shell == kDefaultItemShell);
+
+    // Propriedades da casca que não combinam com a definição.
+    CHECK(Mentions(CheckShell(Def(0, 99, 58), traits(58)), "IsAPickup"));            // Coração
+    CHECK(Mentions(CheckShell(Def(0, 99, 71), traits(71)), "moeda"));                // Moeda
+    CHECK(Mentions(CheckShell(Def(0, 99, 2334), traits(2334)), "botão direito"));    // Caixa
+    CHECK(Mentions(CheckShell(Def(0, 99, 8), traits(8)), "coloca o bloco 4"));       // Tocha
+    auto arrowSword = CheckShell(Def(12, 1, 40), traits(40));                         // espada numa flecha
+    CHECK(Mentions(arrowSword, "some no primeiro uso") && Mentions(arrowSword, "max_stack é 1"));
+    CHECK(Mentions(CheckShell(Def(20, 1, 739), traits(739)), "mana"));               // espada num cajado
+    auto swordGem = CheckShell(Def(0, 999, 24), traits(24));                          // material numa espada
+    CHECK(Mentions(swordGem, "a casca é arma"));
+    CHECK(Mentions(CheckShell(Def(0, 999, 39), traits(39)), "dispara o projétil 1"));  // material num arco
+    CHECK(Mentions(CheckShell(Def(0, 20, 216), traits(216)), "não empilham"));        // acessório empilhável
+    CHECK(Mentions(CheckShell(Def(5, 1, 3507), traits(3507)), "Shimmer vira o item 3508"));
+    CHECK(Mentions(CheckShell(Def(8, 1, 40), traits(40)), "munição") &&
+          !Mentions(CheckShell(Def(8, 999, 40), traits(40)), "prefixos"));            // munição não reforja: ok
+    CHECK(InferCategory(Def(9, 1, 39), traits(39)) == ItemCategory::Bow &&
+          InferCategory(Def(0, 1, 216), traits(216)) == ItemCategory::Accessory &&
+          InferCategory(Def(6, 999, 97), traits(97)) == ItemCategory::Ammo);
+
+    // register_item avisa no log, com a casca recomendada; uma vez por item.
+    SetLogSink(&CaptureSink);
+    {
+        FakeGame g;
+        ModLoader loader(&g);
+        ModManifest m = Builtin("test.shells", {"gem", "sword", "heart_gem", "magic_sword"});
+        loader.AddBuiltin(m, &GoodInit);
+        CHECK(loader.LoadAll() == 1 && loader.PendingShellChecks() == 0);
+        CHECK(Count("\"test.shells:gem\"") == 0 && Count("\"test.shells:sword\"") == 0);
+        CHECK(Count("\"test.shells:heart_gem\" na casca 58: é coletada ao encostar") == 1);
+        CHECK(Count("\"test.shells:heart_gem\" na casca 58: para material, a casca recomendada é 38 (Lente)") == 1);
+        CHECK(Count("\"test.shells:magic_sword\" na casca 739: gasta 5 de mana") == 1);
+        CHECK(Count("\"test.shells:magic_sword\" na casca 739: para arma corpo a corpo, a casca recomendada é 24") == 1);
+        g.Frame();
+        CHECK(Count("heart_gem") == 2);  // nada repetido no frame
+    }
+    // O jogo ainda não responde (no Terraria: thread do loader): a avaliação fica
+    // para o frame handler; a de um mod cujo init falhou some junto com ele.
+    g_logs.clear();
+    {
+        FakeGame g;
+        g.traitsReady = false;
+        ModLoader loader(&g);
+        loader.AddBuiltin(Builtin("aaa.failing", {"torch_gem"}), &FailingInit);
+        loader.AddBuiltin(Builtin("test.shells", {"gem", "sword", "heart_gem", "magic_sword"}), &GoodInit);
+        CHECK(loader.LoadAll() == 1 && loader.PendingShellChecks() == 5 && Count("na casca") == 0);
+        g.Frame();  // o item do mod que falhou não existe mais: sai da fila sem aviso
+        CHECK(loader.PendingShellChecks() == 4 && Count("na casca") == 0);
+        g.traitsReady = true;
+        g.Frame();
+        CHECK(loader.PendingShellChecks() == 0 && Count("heart_gem\" na casca 58") == 2 && Count("torch_gem") == 0);
+        CHECK(Count("magic_sword\" na casca 739") == 2 && Count("\"test.shells:gem\"") == 0);
+    }
+    SetLogSink(std::getenv("TLMOD_VERBOSE") ? nullptr : &QuietSink);
+
+    // Nome de NPC: o do mod no slot dele, o da casca nos outros (e sem o runtime).
+    fs::path tmp = fs::temp_directory_path() / "tlmod_npcname_test";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+    fs::copy(modsDir / "example_boss", tmp / "example_boss", fs::copy_options::recursive);
+    FakeGame g;
+    {
+        ModLoader loader(&g);
+        loader.DiscoverDirectory(tmp);
+        CHECK(loader.LoadAll() == 1);
+        TLModId boss = loader.Registry().Find(TLMOD_CONTENT_NPC, "tlmod.example_boss:ember_titan").value_or(-1);
+        CHECK(g.NewNpc(4, 0, 0) == 0 && g.NewNpc(boss, 0, 0) == 1);
+        CHECK(g.NpcName(1) == "Tit\xc3\xa3 de Brasa" && g.NpcName(0) == "npc 4");
+        g.SetDefaults(1, 5);  // slot reaproveitado
+        CHECK(g.NpcName(1) == "npc 5");
+    }
+    CHECK(!g.drawHooks.npcName);
+    fs::remove_all(tmp);
+}
+
+// ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -1507,6 +1668,7 @@ int main(int argc, char** argv) {
     TestItems(argv[1]);
     TestPng(argv[1]);
     TestTextures(argv[1]);
+    TestShells(argv[1]);
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

@@ -284,7 +284,7 @@ int TestDraw(void* lib) {
     Il2CppObject* noTex = make(2, kShell, kModItem + 1);  // de mod, sem textura
     void* lensTex = item_tex(kShell);
 
-    TLModDrawCallbacks cbs{&DrawItemTexture, &DrawNpcTexture};
+    TLModDrawCallbacks cbs{&DrawItemTexture, &DrawNpcTexture, nullptr};
     TLMod_SetDrawCallbacks(&cbs);
     void* modTex = draw_inv(0);
     CHECK(modTex != lensTex && modTex != nullptr);
@@ -315,6 +315,161 @@ int TestDraw(void* lib) {
     TLMod_SetDrawCallbacks(nullptr);
     CHECK(draw_inv(0) == lensTex && draw_npc(modIndex, &frames, frame) == eyeTex);
     for (int32_t slot = 0; slot < 3; ++slot) make(slot, 0, 0);  // o teste de save usa o mesmo inventário
+    return 0;
+}
+
+// --- Telas que leem TextureAssets.Item sozinhas, e nome de NPC ----------------------
+const char* DrawNpcName(Il2CppObject*, int32_t index) { return index == g_modNpcIndex ? "Tit\xc3\xa3 de Brasa" : nullptr; }
+
+int TestScreens(void* lib) {
+    auto sym = [&](const char* name) { return dlsym(lib, name); };
+    auto new_item = reinterpret_cast<void* (*)()>(sym("mock_new_item"));
+    auto set_defaults = reinterpret_cast<void (*)(void*, int32_t)>(sym("mock_game_item_set_defaults"));
+    auto item_tex = reinterpret_cast<void* (*)(int32_t)>(sym("mock_item_asset_texture"));
+    auto draw_icon = reinterpret_cast<void* (*)(void*)>(sym("mock_game_draw_item_icon"));
+    auto last_name = reinterpret_cast<size_t (*)(char*, size_t)>(sym("mock_last_name"));
+    auto last_animated = reinterpret_cast<bool (*)()>(sym("mock_last_animated"));
+    auto set_animated = reinterpret_cast<void (*)(int32_t, bool)>(sym("mock_set_item_animated"));
+    auto transaction = reinterpret_cast<void* (*)(void*)>(sym("mock_game_transaction"));
+    auto reforge = reinterpret_cast<void* (*)(void*)>(sym("mock_game_reforge"));
+    auto research = reinterpret_cast<void* (*)(void*)>(sym("mock_game_research"));
+    auto can_research = reinterpret_cast<int32_t (*)(void*, int32_t*)>(sym("mock_game_can_research"));
+    auto guide = reinterpret_cast<void* (*)(void*, int32_t, int32_t)>(sym("mock_game_guide"));
+    auto recipe_item = reinterpret_cast<void* (*)(int32_t, int32_t)>(sym("mock_recipe_item"));
+    auto material = reinterpret_cast<void* (*)(int32_t, int32_t)>(sym("mock_game_material"));
+    auto material_tip = reinterpret_cast<void* (*)(int32_t, int32_t)>(sym("mock_game_material_tooltip"));
+    auto set_hands = reinterpret_cast<void (*)(int32_t, void*, void*)>(sym("mock_set_hands"));
+    auto controls = reinterpret_cast<void (*)(void**, void**)>(sym("mock_game_controls"));
+    auto quick = reinterpret_cast<void* (*)(int32_t)>(sym("mock_game_quick_action"));
+    auto interact = reinterpret_cast<void (*)(void**, void**)>(sym("mock_game_interact_icon"));
+    auto chat = reinterpret_cast<void* (*)(void*, float*)>(sym("mock_game_chat_item"));
+    auto npc_name = reinterpret_cast<size_t (*)(int32_t, char*, size_t)>(sym("mock_npc_type_name"));
+    auto npc_net_name = reinterpret_cast<size_t (*)(int32_t, char*, size_t)>(sym("mock_npc_type_net_name"));
+    auto new_npc = reinterpret_cast<int32_t (*)(int32_t, int32_t, int32_t)>(sym("mock_game_new_npc"));
+    CHECK(new_item && set_defaults && item_tex && draw_icon && last_name && last_animated && set_animated &&
+          transaction && reforge && research && can_research && guide && recipe_item && material && material_tip &&
+          set_hands && controls && quick && interact && chat && npc_name && npc_net_name && new_npc);
+
+    TLModItemCallbacks icb{&ItemRemap, &ItemApply, &ItemTooltip};
+    TLMod_SetItemCallbacks(&icb);
+    TLModDrawCallbacks dcb{&DrawItemTexture, &DrawNpcTexture, &DrawNpcName};
+    TLMod_SetDrawCallbacks(&dcb);
+    auto modItem = [&](void* it) { return set_defaults(it, kModItem), it; };
+    auto vanilla = [&](void* it, int32_t type) { return set_defaults(it, type), it; };
+    void* ruby = modItem(new_item());
+    void* lens = vanilla(new_item(), kShell);  // a casca de verdade, ao lado
+    void* lensTex = item_tex(kShell);
+    void* modTex = draw_icon(ruby);
+    CHECK(modTex && modTex != lensTex);
+    auto name = [&] {
+        char buf[128] = {};
+        last_name(buf, sizeof(buf));
+        return std::string(buf);
+    };
+    const std::string rubyName = "Rubi Fict\xc3\xad" "cio", lensName = "vanilla:38";
+    // A casca tem animação (Main.itemAnimations[38]): a textura do mod não pode ser fatiada por ela.
+    set_animated(kShell, true);
+    // Cada tela: o item de mod com a textura e o nome dele; a Lente ao lado com os dela;
+    // e a casca volta ao normal depois do desenho.
+    auto screen = [&](const char* what, void* (*draw)(void*)) {
+        bool modOk = draw(ruby) == modTex && name() == rubyName && !last_animated();
+        bool lensOk = draw(lens) == lensTex && name() == lensName && last_animated();
+        bool restored = item_tex(kShell) == lensTex;
+        if (!(modOk && lensOk && restored)) std::printf("      %s: mod=%d lente=%d devolvida=%d\n", what, modOk, lensOk, restored);
+        return modOk && lensOk && restored;
+    };
+    CHECK(screen("transação", transaction));
+    CHECK(screen("reforja", reforge));
+    CHECK(screen("pesquisa", research));
+    static void* (*s_guide)(void*, int32_t, int32_t) = guide;
+    CHECK(screen("guia", [](void* it) { return s_guide(it, -1, 0); }));
+    // A pesquisa só olha o type: um item de mod seria consumido e desbloquearia a Lente.
+    int32_t percent = -1;
+    CHECK(can_research(ruby, &percent) == 0 && percent == 0);
+    CHECK(can_research(lens, &percent) == 1 && percent == 50);
+
+    // Receitas: receita 2 com o rubi (resultado e ingrediente 0) e uma Lente (ingrediente 1).
+    modItem(recipe_item(2, -1));
+    modItem(recipe_item(2, 0));
+    vanilla(recipe_item(2, 1), kShell);
+    CHECK(guide(nullptr, 0, 2) == modTex && name() == rubyName && !last_animated());
+    CHECK(material(2, 0) == modTex && name() == rubyName && material(2, 1) == lensTex && name() == lensName);
+    CHECK(material_tip(2, 0) == modTex && name() == rubyName && material_tip(2, 1) == lensTex && name() == lensName);
+    CHECK(item_tex(kShell) == lensTex);
+
+    // Controles de toque e botões rápidos: item na mão (slot 5) e gancho.
+    Il2CppObject* player = TLMod_GetLocalPlayer();
+    modItem(TLMod_ItemSlot(player, TLMOD_ITEMS_INVENTORY, 0, 5));
+    vanilla(TLMod_ItemSlot(player, TLMOD_ITEMS_INVENTORY, 0, 6), kShell);
+    void* hook = vanilla(new_item(), 84);  // Gancho
+    void* hookTex = item_tex(84);
+    void *use = nullptr, *grapple = nullptr;
+    set_hands(5, hook, nullptr);
+    controls(&use, &grapple);
+    CHECK(use == modTex && grapple == hookTex);
+    set_hands(6, hook, nullptr);
+    controls(&use, &grapple);
+    CHECK(use == lensTex && grapple == hookTex);
+    set_hands(6, ruby, nullptr);  // gancho de mod no botão rápido
+    CHECK(quick(4) == modTex && quick(22) == modTex && quick(0) == item_tex(28) && item_tex(kShell) == lensTex);
+    // Ícone do cursor: item na mão + munição; o arco original com munição de mod.
+    void* arrow = vanilla(new_item(), 40);
+    void* bow = vanilla(TLMod_ItemSlot(player, TLMOD_ITEMS_INVENTORY, 0, 7), 39);
+    void *held = nullptr, *ammo = nullptr;
+    set_hands(5, nullptr, arrow);
+    interact(&held, &ammo);
+    CHECK(held == modTex && ammo == item_tex(40));
+    set_hands(7, nullptr, ruby);
+    interact(&held, &ammo);
+    CHECK(held == item_tex(39) && ammo == modTex && bow);
+    CHECK(item_tex(kShell) == lensTex);
+
+    // Chat [i:ID]: o snippet mede pela textura (2x2 do rubi) e desenha a dele.
+    float width = 0;
+    CHECK(chat(ruby, &width) == modTex && width == 2.0f && name() == rubyName);
+    CHECK(chat(lens, &width) == lensTex && name() == lensName && item_tex(kShell) == lensTex);
+
+    // Nome de NPC: o de mod (slot marcado pelo runtime) e o original da mesma casca.
+    char buf[128];
+    int32_t eye = new_npc(0, 0, 4);
+    npc_name(g_modNpcIndex, buf, sizeof(buf));
+    CHECK(std::string(buf) == "Tit\xc3\xa3 de Brasa");
+    npc_net_name(g_modNpcIndex, buf, sizeof(buf));
+    CHECK(std::string(buf) == "literal:Tit\xc3\xa3 de Brasa");
+    npc_name(eye, buf, sizeof(buf));
+    CHECK(std::string(buf) == "npc:4");
+    npc_net_name(eye, buf, sizeof(buf));
+    CHECK(std::string(buf) == "key:NPCName.4");
+
+    // Runtime desligado: tudo como o jogo original.
+    TLMod_SetDrawCallbacks(nullptr);
+    CHECK(transaction(ruby) == lensTex && last_animated());
+    npc_name(g_modNpcIndex, buf, sizeof(buf));
+    CHECK(std::string(buf) == "npc:4");
+    set_animated(kShell, false);
+    TLMod_SetItemCallbacks(nullptr);
+    for (int32_t slot : {5, 6, 7}) set_defaults(TLMod_ItemSlot(player, TLMOD_ITEMS_INVENTORY, 0, slot), 0);
+    return 0;
+}
+
+// --- Propriedades de casca (ItemID.Sets + SetDefaults de uma sonda) -----------------------
+int TestTraits(void* lib) {
+    auto frame = reinterpret_cast<int (*)()>(dlsym(lib, "mock_game_frame"));
+    TLModItemTraits t{};
+    bool offThread = true;
+    std::thread([&] { offThread = TLMod_ReadItemTraits(40, &t); }).join();
+    CHECK(!offThread);  // só na thread do Main.DoUpdate
+    frame();
+    CHECK(!TLMod_ReadItemTraits(0, &t) && !TLMod_ReadItemTraits(kItemCount, &t));
+    CHECK(TLMod_ReadItemTraits(40, &t) && t.ammo == 40 && t.consumable && t.shoot == 1 && !t.can_get_prefixes &&
+          t.damage == 5 && t.ranged && t.create_tile == -1);
+    CHECK(TLMod_ReadItemTraits(39, &t) && t.use_ammo == 40 && t.shoot == 1 && t.use_style == 5 && t.ammo == 0);
+    CHECK(TLMod_ReadItemTraits(216, &t) && t.accessory && t.defense == 1 && t.can_get_prefixes);
+    CHECK(TLMod_ReadItemTraits(58, &t) && t.is_a_pickup && !t.accessory);
+    CHECK(TLMod_ReadItemTraits(kShell, &t) && t.is_a_material && t.ammo == 0 && t.shimmer_transform_to_item == -1 &&
+          t.extractinator_mode == -1 && t.tooltip_damage_multiplier == 1.0f && t.head_slot == -1);
+    CHECK(TLMod_ReadItemTraits(8, &t) && t.create_tile == 4 && t.consumable);
+    CHECK(TLMod_ReadItemTraits(2334, &t) && t.fishing_crate && TLMod_ReadItemTraits(71, &t) && t.common_coin);
     return 0;
 }
 
@@ -555,6 +710,8 @@ int main(int argc, char** argv) {
 
     if (int rc = TestItems(lib)) return rc;
     if (int rc = TestDraw(lib)) return rc;
+    if (int rc = TestScreens(lib)) return rc;
+    if (int rc = TestTraits(lib)) return rc;
     if (int rc = TestSaves(lib)) return rc;
 
     std::printf("TODOS OS TESTES PASSARAM\n");

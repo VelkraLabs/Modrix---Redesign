@@ -43,6 +43,7 @@ struct Il2CppClass {
     std::vector<FieldInfo*> fields;
     std::vector<MethodInfo*> methods;
     size_t size = 0x200;  // il2cpp_object_new
+    std::vector<Il2CppClass*> nested = {};  // il2cpp_class_get_nested_types
 };
 
 struct Il2CppImage {
@@ -267,6 +268,11 @@ FieldInfo g_fLocalUserInstance{"Instance", 0, nullptr, sizeof(void*), &LocalUser
 FieldInfo g_fGameMenu{"gameMenu", 0x320, nullptr};
 
 // Main.DoUpdate: o "frame" do jogo.
+// Telas que leem TextureAssets.Item sozinhas (fim do arquivo).
+bool PatchScreens(void* target, void* replacement);
+bool InvokeScreens(const MethodInfo* m, void* obj, void** params, Il2CppObject** result);
+void InitScreens();
+
 int g_framesRun = 0;
 void MockMainDoUpdate(Il2CppObject*, Il2CppObject*, const MethodInfo*) { ++g_framesRun; }
 using DoUpdateFn = decltype(&MockMainDoUpdate);
@@ -471,6 +477,96 @@ void MockItemRebuildTooltip(Il2CppObject* self, const MethodInfo*) {
     At<Il2CppObject*>(self, kItemToolTip) = g_vanillaTooltip;
 }
 
+// ---- Propriedades de alguns itens originais (ItemID.Sets + campos do SetDefaults) ----
+// Offsets do dump (terraria_offsets.h: item_off, item_id_sets_static_off).
+constexpr size_t kItemAccessory = 0x6B, kItemConsumable = 0x6D, kItemRanged = 0x7F, kItemCreateTile = 0xE4,
+                 kItemCreateWall = 0xE8, kItemDefense = 0x118, kItemHeadSlot = 0x11C, kItemBodySlot = 0x120,
+                 kItemLegSlot = 0x124, kItemShoot = 0x158, kItemAmmo = 0x160, kItemUseAmmo = 0x164,
+                 kItemMountType = 0x184;
+const char* const kTraitFieldNames[] = {"accessory", "potion",   "consumable", "channel",    "vanity",    "magic",
+                                        "ranged",    "summon",   "sentry",     "fishingPole", "bait",     "makeNPC",
+                                        "pick",      "axe",      "hammer",     "createTile", "createWall", "healLife",
+                                        "healMana",  "defense",  "headSlot",   "bodySlot",   "legSlot",   "shoot",
+                                        "ammo",      "useAmmo",  "mana",       "buffType",   "mountType"};
+const size_t kTraitFieldOffsets[] = {0x6B, 0x6C, 0x6D, 0x6A, 0x77, 0x7E, 0x7F, 0x80, 0x81, 0x9C,
+                                     0xA0, 0xA4, 0xD4, 0xD8, 0xDC, 0xE4, 0xE8, 0xF8, 0xFC, 0x118,
+                                     0x11C, 0x120, 0x124, 0x158, 0x160, 0x164, 0x170, 0x17C, 0x184};
+FieldInfo g_fItemTraits[sizeof(kTraitFieldOffsets) / sizeof(size_t)];
+MethodInfo g_mItemCtor{nullptr, ".ctor", 0};
+
+// ItemID.Sets: alguns arrays por type, preenchidos para os itens dos testes.
+Il2CppClass g_itemId{"Terraria.ID", "ItemID", {}, {}};
+Il2CppClass g_itemIdSets{"", "Sets", {}, {}};
+struct SetArray {
+    const char* name;
+    size_t offset;
+    Il2CppArray* array;
+    FieldInfo field;
+};
+SetArray g_sets[] = {{"ItemsThatShouldNotBeInInventory", 0x28, nullptr, {}}, {"ShimmerTransformToItem", 0x50, nullptr, {}},
+                     {"CanGetPrefixes", 0xA8, nullptr, {}},  {"IsAMaterial", 0xC8, nullptr, {}},
+                     {"ToolTipDamageMultiplier", 0xF0, nullptr, {}}, {"IsAPickup", 0xF8, nullptr, {}},
+                     {"IsFishingCrate", 0x180, nullptr, {}}, {"CommonCoin", 0x1B8, nullptr, {}},
+                     {"ExtractinatorMode", 0x1D0, nullptr, {}}, {"BossBag", 0x2A0, nullptr, {}}};
+template <typename T>
+T& SetAt(const char* name, int32_t type) {
+    for (SetArray& s : g_sets)
+        if (!std::strcmp(s.name, name)) return reinterpret_cast<T*>(s.array + 1)[type];
+    std::abort();
+}
+void InitItemSets() {
+    for (SetArray& s : g_sets) {
+        s.array = NewArray(kItemCount);  // 8 bytes por elemento: cabe bool, int e float
+        s.field = FieldInfo{s.name, s.offset, &s.array};
+        g_itemIdSets.fields.push_back(&s.field);
+    }
+    for (int32_t i = 0; i < kItemCount; ++i) {
+        SetAt<bool>("CanGetPrefixes", i) = true;
+        SetAt<int32_t>("ShimmerTransformToItem", i) = -1;
+        SetAt<int32_t>("ExtractinatorMode", i) = -1;
+        SetAt<float>("ToolTipDamageMultiplier", i) = 1.0f;
+    }
+    SetAt<bool>("IsAMaterial", 38) = true;        // Lente
+    SetAt<bool>("CanGetPrefixes", 40) = false;    // Flecha de Madeira
+    SetAt<bool>("IsAPickup", 58) = true;          // Coração
+    SetAt<bool>("CommonCoin", 71) = true;         // Moeda de Cobre
+    SetAt<bool>("IsFishingCrate", 2334) = true;   // Caixa de Madeira
+    SetAt<bool>("BossBag", 3319) = true;          // Bolsa do Olho de Cthulhu
+    SetAt<int32_t>("ShimmerTransformToItem", 3507) = 3508;
+    SetAt<int32_t>("ExtractinatorMode", 3347) = 1;  // Fóssil Sólido... qualquer um
+    g_itemId.nested = {&g_itemIdSets};
+    g_csharp.classes.push_back(&g_itemId);
+}
+// O que o SetDefaults do jogo põe nesses campos para os mesmos itens.
+void ApplyMockTraits(Il2CppObject* self, int32_t type) {
+    for (size_t off : kTraitFieldOffsets) {
+        if (off == kItemCreateTile || off == kItemCreateWall || off == kItemHeadSlot || off == kItemBodySlot ||
+            off == kItemLegSlot || off == kItemMountType)
+            At<int32_t>(self, off) = -1;
+        else if (off < 0x90)
+            At<bool>(self, off) = false;
+        else if (off == 0xA4)
+            At<int16_t>(self, off) = 0;
+        else
+            At<int32_t>(self, off) = 0;
+    }
+    switch (type) {
+        case 8: At<int32_t>(self, kItemCreateTile) = 4, At<bool>(self, kItemConsumable) = true; break;  // Tocha
+        case 24: At<int32_t>(self, kItemDamage) = 7, At<uint8_t>(self, kItemUseStyle) = 1, At<bool>(self, kItemMelee) = true; break;
+        case 39:  // Arco de Madeira: consome flechas e dispara
+            At<int32_t>(self, kItemDamage) = 4, At<uint8_t>(self, kItemUseStyle) = 5, At<int32_t>(self, kItemUseAmmo) = 40;
+            At<int32_t>(self, kItemShoot) = 1, At<bool>(self, kItemRanged) = true;
+            break;
+        case 40:  // Flecha de Madeira: é munição
+            At<int32_t>(self, kItemDamage) = 5, At<int32_t>(self, kItemAmmo) = 40, At<int32_t>(self, kItemShoot) = 1;
+            At<bool>(self, kItemConsumable) = true, At<bool>(self, kItemRanged) = true;
+            break;
+        case 216: At<bool>(self, kItemAccessory) = true, At<int32_t>(self, kItemDefense) = 1; break;  // Algema
+        case 729: At<int32_t>(self, kItemCreateWall) = 4, At<bool>(self, kItemConsumable) = true; break;
+        default: break;
+    }
+}
+
 // Item.SetDefaults(int, bool, ItemVariant): zera, indexa tabelas por type e
 // termina em RebuildTooltip, como o do jogo.
 void MockItemSetDefaults(Il2CppObject* self, int32_t type, bool, Il2CppObject*, const MethodInfo*) {
@@ -485,6 +581,7 @@ void MockItemSetDefaults(Il2CppObject* self, int32_t type, bool, Il2CppObject*, 
     At<int32_t>(self, kItemHeight) = 20;
     At<uint8_t>(self, kItemPrefix) = 0;
     At<Il2CppObject*>(self, kItemNameOverride) = nullptr;
+    ApplyMockTraits(self, type);
     g_rebuildEntry(self, &g_mRebuildTooltip);
 }
 using ItemSetDefaultsFn = decltype(&MockItemSetDefaults);
@@ -495,7 +592,12 @@ MethodInfo g_mItemPrefix{nullptr, "Prefix", 1};
 
 void InitItems() {
     for (FieldInfo& f : g_fItemStats) g_item.fields.push_back(&f);
-    g_item.methods = {&g_mItemSetDefaults3, &g_mItemSetDefaults1, &g_mRebuildTooltip, &g_mItemPrefix};
+    g_item.methods = {&g_mItemSetDefaults3, &g_mItemSetDefaults1, &g_mRebuildTooltip, &g_mItemPrefix, &g_mItemCtor};
+    for (size_t i = 0; i < sizeof(kTraitFieldOffsets) / sizeof(size_t); ++i) {
+        g_fItemTraits[i] = FieldInfo{kTraitFieldNames[i], kTraitFieldOffsets[i], nullptr};
+        g_item.fields.push_back(&g_fItemTraits[i]);
+    }
+    InitItemSets();
     g_item.size = kItemSize;
     g_itemTooltip.fields = {&g_fTooltip[0], &g_fTooltip[1], &g_fTooltipNone, &g_fTooltipKey};
     g_localizedText.methods = {&g_mTextCtor};
@@ -574,6 +676,9 @@ struct XnaVector2 { float x, y; };
 struct XnaColor { uint32_t packed; };
 struct XnaRect { int32_t x, y, w, h; };
 Il2CppObject* g_lastDrawn = nullptr;
+bool g_lastAnimated = false;              // Main.itemAnimations[type] existia no desenho
+Il2CppArray* g_itemAnimations = nullptr;  // DrawAnimation[] Main.itemAnimations
+FieldInfo g_fItemAnimations{"itemAnimations", 0x10E8, &g_itemAnimations};
 int32_t g_lastFrameCount = 0;
 XnaRect g_lastFrame{};
 std::vector<Il2CppObject*> g_drawLog;
@@ -585,6 +690,7 @@ Il2CppObject* ReadItemTexture(void* item) {  // TextureAssets.Item[item.type].Va
 }
 void DrewItem(void* item) {
     g_lastDrawn = ReadItemTexture(item);
+    g_lastAnimated = Elem(g_itemAnimations, static_cast<uint32_t>(At<int32_t>(item, kItemType))) != nullptr;
     g_drawLog.push_back(g_lastDrawn);
 }
 
@@ -651,6 +757,8 @@ void InitDraw() {
     for (FieldInfo& f : g_fAsset) g_assetClass.fields.push_back(&f);
     g_textureAssets.fields = {&g_fItemAssets, &g_fNpcAssets};
     g_main.fields.push_back(&g_fNpcFrameCount);
+    g_main.fields.push_back(&g_fItemAnimations);
+    g_itemAnimations = NewArray(static_cast<uint32_t>(kItemCount));
     g_npc.fields.push_back(&g_fNpcFrame);
     g_playerDrawSet.fields = {&g_fHeldItem};
     g_guiInventory.methods = {&g_mInvDraw};
@@ -764,10 +872,12 @@ __attribute__((visibility("default"))) void mock_il2cpp_init() {
     InitSaveWorld();
     InitItems();
     InitDraw();
+    InitScreens();
     g_initialized = true;
 }
 __attribute__((visibility("default"))) void* mock_local_player() { return g_localPlayer; }
 __attribute__((visibility("default"))) bool mock_patch_function(void* target, void* replacement) {
+    if (PatchScreens(target, replacement)) return true;
     if (target == reinterpret_cast<void*>(&MockPlayerHurt)) g_hurtEntry = reinterpret_cast<HurtFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockNewNPC)) g_newNpcEntry = reinterpret_cast<NewNpcFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockNpcSetDefaults)) g_setDefaultsEntry = reinterpret_cast<SetDefaultsFn>(replacement);
@@ -1033,6 +1143,8 @@ Il2CppObject* il2cpp_runtime_invoke(const MethodInfo* m, void* obj, void** param
                                &g_mItemSetDefaults3);
         return nullptr;
     }
+    if (m == &g_mItemCtor) return nullptr;
+    if (Il2CppObject* r = nullptr; InvokeScreens(m, obj, params, &r)) return r;
     if (m == &g_mItemPrefix) {
         At<uint8_t>(obj, kItemPrefix) = static_cast<uint8_t>(*static_cast<int32_t*>(params[0]));
         g_box.value = 1;
@@ -1108,6 +1220,13 @@ const MethodInfo* il2cpp_class_get_methods(Il2CppClass* k, void** iter) {
     return k->methods[i];
 }
 const char* il2cpp_method_get_name(const MethodInfo* m) { return m->name; }
+Il2CppClass* il2cpp_class_get_nested_types(Il2CppClass* k, void** iter) {
+    auto i = reinterpret_cast<uintptr_t>(*iter);
+    if (i >= k->nested.size()) return nullptr;
+    *iter = reinterpret_cast<void*>(i + 1);
+    return k->nested[i];
+}
+const char* il2cpp_class_get_name(Il2CppClass* k) { return k->name; }
 uint32_t il2cpp_method_get_param_count(const MethodInfo* m) { return static_cast<uint32_t>(m->argc); }
 const Il2CppType* il2cpp_method_get_param(const MethodInfo* m, uint32_t) {
     return reinterpret_cast<const Il2CppType*>(m->param0);
@@ -1127,4 +1246,391 @@ void il2cpp_format_exception(const Il2CppException*, char* msg, int size) {
     std::strncpy(msg, "mock exception", size);
 }
 
+}  // extern "C"
+
+// ---- Telas que leem TextureAssets.Item sozinhas (screen_hooks.cpp) ------------------
+// Cada "tela" acha o item como o jogo (ver os relatórios no README) e registra a
+// textura lida de TextureAssets.Item[type] e o nome que mostraria (Item.Name).
+namespace {
+std::string g_lastName;
+void DrewNamed(void* item) {
+    DrewItem(item);
+    Il2CppObject* over = At<Il2CppObject*>(item, kItemNameOverride);
+    g_lastName = over ? Utf8Of(over) : "vanilla:" + std::to_string(At<int32_t>(item, kItemType));
+}
+Il2CppObject* NewMockItem() {
+    Il2CppObject* it = NewObject(kItemSize);
+    it->klass = &g_item;
+    return it;
+}
+
+// GUIInstance.Active com GUIReforge (+0x1A8) e GUICraftGuide (+0xB0).
+Il2CppClass g_guiInstance{"", "GUIInstance", {}, {}};
+Il2CppObject* g_guiActive = nullptr;
+FieldInfo g_fGuiActive{"Active", 0x0, &g_guiActive};
+FieldInfo g_fGuiFields[] = {{"GUIReforge", 0x1A8, nullptr}, {"GUICraftGuide", 0xB0, nullptr}};
+Il2CppClass g_guiReforge{"", "GUIReforge", {}, {}};
+Il2CppClass g_guiCraftGuide{"", "GUICraftGuide", {}, {}};
+MethodInfo g_mGuiReforgeItem{nullptr, "get_ReforgeItem", 0};
+MethodInfo g_mGuiGuideItem{nullptr, "get_guideItem", 0};
+Il2CppObject* g_reforgeItem = nullptr;
+Il2CppObject* g_guideItem = nullptr;
+
+// Receitas: Main.recipe, Main.availableRecipe / focusRecipe (getters estáticos).
+Il2CppClass g_recipe{"Terraria", "Recipe", {}, {}};
+FieldInfo g_fRecipe[] = {{"createItem", 0x10, nullptr}, {"requiredItem", 0x18, nullptr}};
+Il2CppArray* g_recipes = nullptr;
+FieldInfo g_fMainRecipe{"recipe", 0x668, &g_recipes};
+Il2CppArray* g_availableRecipe = nullptr;  // int[]
+int32_t g_focusRecipe = 0;
+MethodInfo g_mGetAvailableRecipe{nullptr, "get_availableRecipe", 0};
+MethodInfo g_mGetFocusRecipe{nullptr, "get_focusRecipe", 0};
+
+// Botão de transação: GUITransactionButton.Draw(layout, Item, label, disabled, ref scale, 4 bools).
+int32_t MockTransactionDraw(Il2CppObject*, Il2CppObject* item, Il2CppObject*, bool, float*, bool, bool, bool, bool,
+                            const MethodInfo*) {
+    if (item && At<int32_t>(item, kItemType) >= 1 && At<int32_t>(item, kItemStack) >= 1) DrewNamed(item);
+    return 0;
+}
+using TransactionFn = decltype(&MockTransactionDraw);
+TransactionFn g_transactionEntry = &MockTransactionDraw;
+Il2CppClass g_guiTransaction{"", "GUITransactionButton", {}, {}};
+MethodInfo g_mTransactionDraw{reinterpret_cast<Il2CppMethodPointer>(&MockTransactionDraw), "Draw", 9};
+
+// Reforja: GUIInstance.Active.GUIReforge.get_ReforgeItem().
+void MockReforgePopupDrawItem(Il2CppObject*, const MethodInfo*) {
+    if (g_reforgeItem) DrewNamed(g_reforgeItem);
+}
+using InstanceFn = decltype(&MockReforgePopupDrawItem);
+InstanceFn g_reforgePopupEntry = &MockReforgePopupDrawItem;
+Il2CppClass g_guiReforgePopup{"", "GUIReforgePopup", {}, {}};
+MethodInfo g_mReforgePopupDrawItem{reinterpret_cast<Il2CppMethodPointer>(&MockReforgePopupDrawItem), "DrawItem", 0};
+
+// Pesquisa da Jornada: GetResearchItem(); CanBeResearched olha só o type.
+Il2CppObject* g_researchItem = nullptr;
+void MockDrawResearchItem(Il2CppObject*, const MethodInfo*) {
+    if (g_researchItem) DrewNamed(g_researchItem);
+}
+InstanceFn g_researchEntry = &MockDrawResearchItem;
+int32_t MockCanBeResearched(Il2CppObject*, Il2CppObject* item, int32_t* percent, const MethodInfo*) {
+    *percent = 50;
+    return item && At<int32_t>(item, kItemType) > 0 ? 1 : 0;  // Valid / Invalid
+}
+using CanResearchFn = decltype(&MockCanBeResearched);
+CanResearchFn g_canResearchEntry = &MockCanBeResearched;
+Il2CppClass g_guiResearch{"", "GUIResearch", {}, {}};
+MethodInfo g_mDrawResearchItem{reinterpret_cast<Il2CppMethodPointer>(&MockDrawResearchItem), "DrawResearchItem", 0};
+MethodInfo g_mCanBeResearched{reinterpret_cast<Il2CppMethodPointer>(&MockCanBeResearched), "CanBeResearched", 2};
+MethodInfo g_mGetResearchItem{nullptr, "GetResearchItem", 0};
+
+// Guia: focusGuideRecipe (+0xCC) >= 0 ? Main.recipe[availableGuideRecipe[focus]].createItem : guideItem.
+constexpr size_t kPopupFocus = 0xCC, kPopupAvailable = 0xD0;
+Il2CppObject* g_guidePopup = nullptr;
+void MockGuidePopupDrawItem(Il2CppObject* self, const MethodInfo*) {
+    int32_t focus = At<int32_t>(self, kPopupFocus);
+    Il2CppObject* item = g_guideItem;
+    if (focus >= 0) {
+        int32_t r = reinterpret_cast<int32_t*>(At<Il2CppArray*>(self, kPopupAvailable) + 1)[focus];
+        item = At<Il2CppObject*>(Elem(g_recipes, static_cast<uint32_t>(r)), 0x10);
+    }
+    if (item) DrewNamed(item);
+}
+InstanceFn g_guidePopupEntry = &MockGuidePopupDrawItem;
+Il2CppClass g_guiCraftGuidePopup{"", "GUICraftGuidePopup", {}, {}};
+FieldInfo g_fPopup[] = {{"focusGuideRecipe", kPopupFocus, nullptr}, {"availableGuideRecipe", kPopupAvailable, nullptr}};
+MethodInfo g_mGuidePopupDrawItem{reinterpret_cast<Il2CppMethodPointer>(&MockGuidePopupDrawItem), "DrawItem", 0};
+
+// Receitas: ingrediente da receita em foco / do tooltip (CraftHover +0x88).
+constexpr size_t kCraftHover = 0x88;
+Il2CppObject* g_crafting = nullptr;
+Il2CppObject* RequiredItem(Il2CppObject* recipe, int32_t index) {
+    return static_cast<Il2CppObject*>(Elem(At<Il2CppArray*>(recipe, 0x18), static_cast<uint32_t>(index)));
+}
+void MockMaterialItemDraw(Il2CppObject*, Il2CppObject*, int32_t index, XnaVector2, float, const MethodInfo*) {
+    int32_t r = reinterpret_cast<int32_t*>(g_availableRecipe + 1)[g_focusRecipe];
+    Il2CppObject* item = RequiredItem(static_cast<Il2CppObject*>(Elem(g_recipes, static_cast<uint32_t>(r))), index);
+    if (At<int32_t>(item, kItemType) != 0) DrewNamed(item);
+}
+using MaterialFn = decltype(&MockMaterialItemDraw);
+MaterialFn g_materialEntry = &MockMaterialItemDraw;
+void MockMaterialTooltipDraw(Il2CppObject* self, Il2CppObject*, int32_t index, XnaVector2, float, const MethodInfo*) {
+    Il2CppObject* item = RequiredItem(At<Il2CppObject*>(self, kCraftHover), index);
+    if (At<int32_t>(item, kItemType) != 0) DrewNamed(item);
+}
+MaterialFn g_materialTooltipEntry = &MockMaterialTooltipDraw;
+Il2CppClass g_guiCrafting{"", "GUICrafting", {}, {}};
+FieldInfo g_fCraftHover{"CraftHover", kCraftHover, nullptr};
+MethodInfo g_mMaterialDraw{reinterpret_cast<Il2CppMethodPointer>(&MockMaterialItemDraw), "MaterialItemDraw", 4};
+MethodInfo g_mMaterialTooltipDraw{reinterpret_cast<Il2CppMethodPointer>(&MockMaterialTooltipDraw),
+                                  "MaterialItemTooltipDraw", 4};
+
+// Controles de toque, botões rápidos e ícone do cursor: item na mão
+// (inventory[selectedItem], +0x3F0), gancho (QuickGrapple_GetItemToUse), munição (TryGetAmmo).
+constexpr size_t kPSelectedItem = 0x3F0;
+Il2CppObject* g_grappleItem = nullptr;
+Il2CppObject* g_ammoItem = nullptr;
+Il2CppObject* g_drawnFirst = nullptr;   // 1ª textura do desenho (botão de uso / item no cursor)
+Il2CppObject* g_drawnSecond = nullptr;  // 2ª (gancho / munição)
+Il2CppObject* HeldItem() {
+    return static_cast<Il2CppObject*>(Elem(At<Il2CppArray*>(g_localPlayer, kPInventory),
+                                           static_cast<uint32_t>(At<int32_t>(g_localPlayer, kPSelectedItem))));
+}
+void MockDrawControls(Il2CppObject*, const MethodInfo*) {
+    g_drawnFirst = g_drawnSecond = nullptr;
+    if (At<int32_t>(HeldItem(), kItemType) > 0) DrewItem(HeldItem()), g_drawnFirst = g_lastDrawn;
+    if (g_grappleItem) DrewItem(g_grappleItem), g_drawnSecond = g_lastDrawn;
+}
+InstanceFn g_controlsEntry = &MockDrawControls;
+Il2CppClass g_guiVirtualInput{"", "GUIVirtualInputController", {}, {}};
+MethodInfo g_mDrawControls{reinterpret_cast<Il2CppMethodPointer>(&MockDrawControls), "DrawControls", 0};
+MethodInfo g_mQuickGrapple{nullptr, "QuickGrapple_GetItemToUse", 0};
+
+void MockQuickActionDraw(int32_t action, Il2CppObject*, bool, float*, const MethodInfo*) {
+    if ((action == 4 || action == 22) && g_grappleItem) {
+        DrewItem(g_grappleItem);
+    } else {  // Heal: ícone fixo (ItemID 28)
+        g_lastDrawn = At<Il2CppObject*>(Elem(g_itemAssets, 28), kAssetValue);
+    }
+}
+using QuickFn = decltype(&MockQuickActionDraw);
+QuickFn g_quickEntry = &MockQuickActionDraw;
+void MockQuickActionDrawTexture(Il2CppObject*, Il2CppObject*, int32_t, float*, const MethodInfo*) { std::abort(); }
+Il2CppClass g_guiQuickAction{"", "GUIQuickActionButton", {}, {}};
+MethodInfo g_mQuickDrawTexture{reinterpret_cast<Il2CppMethodPointer>(&MockQuickActionDrawTexture), "Draw", 4,
+                               "QuickActionButton_Layout"};
+MethodInfo g_mQuickDraw{reinterpret_cast<Il2CppMethodPointer>(&MockQuickActionDraw), "Draw", 4,
+                        "QuickActionButton_Layout.QuickActionControl"};
+
+void MockInteractItemIcon(Il2CppObject*, const MethodInfo*) {
+    g_drawnFirst = g_drawnSecond = nullptr;
+    if (At<int32_t>(HeldItem(), kItemType) > 0) DrewItem(HeldItem()), g_drawnFirst = g_lastDrawn;
+    if (g_ammoItem) DrewItem(g_ammoItem), g_drawnSecond = g_lastDrawn;
+}
+InstanceFn g_interactEntry = &MockInteractItemIcon;
+MethodInfo g_mInteractIcon{reinterpret_cast<Il2CppMethodPointer>(&MockInteractItemIcon),
+                           "DrawInterface_40_InteractItemIcon", 0};
+MethodInfo g_mTryGetAmmo{nullptr, "TryGetAmmo", 5};
+
+// Chat: ItemTagHandler.ItemSnippet (aninhada), _item +0x30; UniqueDraw mede pela textura.
+constexpr size_t kSnippetItem = 0x30;
+bool MockUniqueDraw(Il2CppObject* self, bool, XnaVector2* size, Il2CppObject*, XnaVector2, XnaColor, float,
+                    const MethodInfo*) {
+    DrewNamed(At<Il2CppObject*>(self, kSnippetItem));
+    *size = XnaVector2{static_cast<float>(At<int32_t>(g_lastDrawn, kXnaWidth)),
+                       static_cast<float>(At<int32_t>(g_lastDrawn, kXnaHeight))};
+    return true;
+}
+using UniqueFn = decltype(&MockUniqueDraw);
+UniqueFn g_uniqueEntry = &MockUniqueDraw;
+Il2CppClass g_itemTagHandler{"Terraria.GameContent.UI.Chat", "ItemTagHandler", {}, {}};
+Il2CppClass g_itemSnippet{"", "ItemSnippet", {}, {}, 0x40};
+FieldInfo g_fSnippetItem{"_item", kSnippetItem, nullptr};
+MethodInfo g_mUniqueDraw{reinterpret_cast<Il2CppMethodPointer>(&MockUniqueDraw), "UniqueDraw", 6};
+
+// Nome de NPC: TypeName = Lang.GetNPCNameValue(netID); GetTypeNetName = NetworkText.FromKey.
+constexpr size_t kNetworkTextValue = 0x10, kNetworkTextLiteral = 0x18;
+Il2CppClass g_networkText{"Terraria.Localization", "NetworkText", {}, {}, 0x20};
+MethodInfo g_mFromLiteral{nullptr, "FromLiteral", 1};
+Il2CppObject* MockNpcTypeName(Il2CppObject* self, const MethodInfo*) {
+    return il2cpp_string_new(("npc:" + std::to_string(At<int32_t>(self, kNpcType))).c_str());
+}
+using NpcNameFn = decltype(&MockNpcTypeName);
+NpcNameFn g_typeNameEntry = &MockNpcTypeName;
+Il2CppObject* MockNpcTypeNetName(Il2CppObject* self, const MethodInfo*) {
+    Il2CppObject* t = il2cpp_object_new(&g_networkText);
+    At<Il2CppObject*>(t, kNetworkTextValue) =
+        il2cpp_string_new(("NPCName." + std::to_string(At<int32_t>(self, kNpcType))).c_str());
+    return t;
+}
+NpcNameFn g_typeNetNameEntry = &MockNpcTypeNetName;
+MethodInfo g_mTypeName{reinterpret_cast<Il2CppMethodPointer>(&MockNpcTypeName), "get_TypeName", 0};
+MethodInfo g_mTypeNetName{reinterpret_cast<Il2CppMethodPointer>(&MockNpcTypeNetName), "GetTypeNetName", 0};
+
+// runtime_invoke dos métodos das telas (nullptr = não é um deles).
+bool InvokeScreens(const MethodInfo* m, void* obj, void** params, Il2CppObject** result) {
+    if (m == &g_mGuiReforgeItem) return *result = g_reforgeItem, true;
+    if (m == &g_mGuiGuideItem) return *result = g_guideItem, true;
+    if (m == &g_mGetResearchItem) return *result = g_researchItem, true;
+    if (m == &g_mGetAvailableRecipe) return *result = reinterpret_cast<Il2CppObject*>(g_availableRecipe), true;
+    if (m == &g_mGetFocusRecipe) {
+        g_box.value = g_focusRecipe;
+        return *result = &g_box.header, true;
+    }
+    if (m == &g_mQuickGrapple) return *result = g_grappleItem, true;
+    if (m == &g_mTryGetAmmo) {
+        *static_cast<Il2CppObject**>(params[1]) = g_ammoItem;
+        g_box.value = g_ammoItem != nullptr;
+        return *result = &g_box.header, true;
+    }
+    if (m == &g_mFromLiteral) {
+        Il2CppObject* t = il2cpp_object_new(&g_networkText);
+        At<Il2CppObject*>(t, kNetworkTextLiteral) = static_cast<Il2CppObject*>(params[0]);
+        return *result = t, true;
+    }
+    (void)obj;
+    return false;
+}
+
+bool PatchScreens(void* target, void* r) {
+    if (target == reinterpret_cast<void*>(&MockTransactionDraw)) g_transactionEntry = reinterpret_cast<TransactionFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockReforgePopupDrawItem)) g_reforgePopupEntry = reinterpret_cast<InstanceFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockDrawResearchItem)) g_researchEntry = reinterpret_cast<InstanceFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockCanBeResearched)) g_canResearchEntry = reinterpret_cast<CanResearchFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockGuidePopupDrawItem)) g_guidePopupEntry = reinterpret_cast<InstanceFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockMaterialItemDraw)) g_materialEntry = reinterpret_cast<MaterialFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockMaterialTooltipDraw)) g_materialTooltipEntry = reinterpret_cast<MaterialFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockDrawControls)) g_controlsEntry = reinterpret_cast<InstanceFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockQuickActionDraw)) g_quickEntry = reinterpret_cast<QuickFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockInteractItemIcon)) g_interactEntry = reinterpret_cast<InstanceFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockUniqueDraw)) g_uniqueEntry = reinterpret_cast<UniqueFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockNpcTypeName)) g_typeNameEntry = reinterpret_cast<NpcNameFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockNpcTypeNetName)) g_typeNetNameEntry = reinterpret_cast<NpcNameFn>(r);
+    else return false;
+    return true;
+}
+
+void InitScreens() {
+    g_guiActive = NewObject(0x400);
+    At<Il2CppObject*>(g_guiActive, 0x1A8) = NewObject(0x40);  // GUIReforge
+    At<Il2CppObject*>(g_guiActive, 0xB0) = NewObject(0x40);   // GUICraftGuide
+    g_guiInstance.fields = {&g_fGuiActive, &g_fGuiFields[0], &g_fGuiFields[1]};
+    g_guiReforge.methods = {&g_mGuiReforgeItem};
+    g_guiCraftGuide.methods = {&g_mGuiGuideItem};
+    g_recipe.fields = {&g_fRecipe[0], &g_fRecipe[1]};
+    g_recipes = NewArray(8);
+    for (uint32_t i = 0; i < 8; ++i) {
+        Il2CppObject* r = NewObject(0x40);
+        At<Il2CppObject*>(r, 0x10) = NewMockItem();
+        Il2CppArray* req = NewArray(15);
+        for (uint32_t k = 0; k < 15; ++k) Elem(req, k) = NewMockItem();
+        At<Il2CppArray*>(r, 0x18) = req;
+        Elem(g_recipes, i) = r;
+    }
+    g_availableRecipe = NewArray(8);
+    g_main.fields.push_back(&g_fMainRecipe);
+    g_main.methods.insert(g_main.methods.end(), {&g_mGetAvailableRecipe, &g_mGetFocusRecipe, &g_mInteractIcon,
+                                                 &g_mTryGetAmmo});
+    g_guiTransaction.methods = {&g_mTransactionDraw};
+    g_guiReforgePopup.methods = {&g_mReforgePopupDrawItem};
+    g_guiResearch.methods = {&g_mDrawResearchItem, &g_mCanBeResearched, &g_mGetResearchItem};
+    g_guidePopup = NewObject(0x100);
+    At<int32_t>(g_guidePopup, kPopupFocus) = -1;
+    At<Il2CppArray*>(g_guidePopup, kPopupAvailable) = NewArray(8);
+    g_guiCraftGuidePopup.fields = {&g_fPopup[0], &g_fPopup[1]};
+    g_guiCraftGuidePopup.methods = {&g_mGuidePopupDrawItem};
+    g_crafting = NewObject(0x100);
+    g_guiCrafting.fields = {&g_fCraftHover};
+    g_guiCrafting.methods = {&g_mMaterialDraw, &g_mMaterialTooltipDraw};
+    g_guiVirtualInput.methods = {&g_mDrawControls};
+    g_player.methods.push_back(&g_mQuickGrapple);
+    g_guiQuickAction.methods = {&g_mQuickDrawTexture, &g_mQuickDraw};  // o errado primeiro
+    g_itemSnippet.fields = {&g_fSnippetItem};
+    g_itemSnippet.methods = {&g_mUniqueDraw};
+    g_itemTagHandler.nested = {&g_itemSnippet};
+    g_networkText.methods = {&g_mFromLiteral};
+    g_npc.methods.insert(g_npc.methods.end(), {&g_mTypeName, &g_mTypeNetName});
+    g_csharp.classes.insert(g_csharp.classes.end(),
+                            {&g_guiInstance, &g_guiReforge, &g_guiCraftGuide, &g_recipe, &g_guiTransaction,
+                             &g_guiReforgePopup, &g_guiResearch, &g_guiCraftGuidePopup, &g_guiCrafting,
+                             &g_guiVirtualInput, &g_guiQuickAction, &g_itemTagHandler, &g_networkText});
+}
+
+}  // namespace
+
+// ---- exports das telas (o "jogo" chamando pelo endereço, com hook) ---------------------
+extern "C" {
+__attribute__((visibility("default"))) size_t mock_last_name(char* buf, size_t size) {
+    std::snprintf(buf, size, "%s", g_lastName.c_str());
+    return g_lastName.size();
+}
+__attribute__((visibility("default"))) bool mock_last_animated() { return g_lastAnimated; }
+__attribute__((visibility("default"))) void mock_set_item_animated(int32_t type, bool animated) {
+    Elem(g_itemAnimations, static_cast<uint32_t>(type)) = animated ? NewObject(0x20) : nullptr;
+}
+__attribute__((visibility("default"))) void* mock_game_transaction(void* item) {
+    g_lastDrawn = nullptr;
+    float scale = 1.0f;
+    g_transactionEntry(nullptr, static_cast<Il2CppObject*>(item), nullptr, false, &scale, false, false, false, false,
+                       &g_mTransactionDraw);
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) void* mock_game_reforge(void* item) {
+    g_reforgeItem = static_cast<Il2CppObject*>(item);
+    g_reforgePopupEntry(nullptr, &g_mReforgePopupDrawItem);
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) void* mock_game_research(void* item) {
+    g_researchItem = static_cast<Il2CppObject*>(item);
+    g_researchEntry(NewObject(0x40), &g_mDrawResearchItem);
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) int32_t mock_game_can_research(void* item, int32_t* percent) {
+    return g_canResearchEntry(nullptr, static_cast<Il2CppObject*>(item), percent, &g_mCanBeResearched);
+}
+// Guia: focus -1 = o item da guia; senão a receita availableGuideRecipe[focus] = recipe.
+__attribute__((visibility("default"))) void* mock_game_guide(void* guideItem, int32_t focus, int32_t recipe) {
+    g_guideItem = static_cast<Il2CppObject*>(guideItem);
+    At<int32_t>(g_guidePopup, kPopupFocus) = focus;
+    if (focus >= 0)
+        reinterpret_cast<int32_t*>(At<Il2CppArray*>(g_guidePopup, kPopupAvailable) + 1)[focus] = recipe;
+    g_guidePopupEntry(g_guidePopup, &g_mGuidePopupDrawItem);
+    return g_lastDrawn;
+}
+// Main.recipe[r]: createItem e requiredItem[k] (para montar com SetDefaults pelo teste).
+__attribute__((visibility("default"))) void* mock_recipe_item(int32_t r, int32_t k) {
+    Il2CppObject* recipe = static_cast<Il2CppObject*>(Elem(g_recipes, static_cast<uint32_t>(r)));
+    return k < 0 ? At<Il2CppObject*>(recipe, 0x10) : RequiredItem(recipe, k);
+}
+__attribute__((visibility("default"))) void* mock_game_material(int32_t recipe, int32_t index) {
+    g_focusRecipe = 3;
+    reinterpret_cast<int32_t*>(g_availableRecipe + 1)[3] = recipe;
+    g_materialEntry(g_crafting, nullptr, index, {}, 1.0f, &g_mMaterialDraw);
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) void* mock_game_material_tooltip(int32_t recipe, int32_t index) {
+    At<Il2CppObject*>(g_crafting, kCraftHover) = static_cast<Il2CppObject*>(Elem(g_recipes, static_cast<uint32_t>(recipe)));
+    g_materialTooltipEntry(g_crafting, nullptr, index, {}, 1.0f, &g_mMaterialTooltipDraw);
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) void mock_set_hands(int32_t selected, void* grapple, void* ammo) {
+    At<int32_t>(g_localPlayer, kPSelectedItem) = selected;
+    g_grappleItem = static_cast<Il2CppObject*>(grapple);
+    g_ammoItem = static_cast<Il2CppObject*>(ammo);
+}
+__attribute__((visibility("default"))) void mock_game_controls(void** use, void** grapple) {
+    g_controlsEntry(nullptr, &g_mDrawControls);
+    *use = g_drawnFirst, *grapple = g_drawnSecond;
+}
+__attribute__((visibility("default"))) void* mock_game_quick_action(int32_t action) {
+    float scale = 1.0f;
+    g_quickEntry(action, nullptr, false, &scale, &g_mQuickDraw);
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) void mock_game_interact_icon(void** held, void** ammo) {
+    static Il2CppObject* mainInstance = NewObject(0x40);  // Main.instance (DrawInterface_40 é de instância)
+    g_interactEntry(mainInstance, &g_mInteractIcon);
+    *held = g_drawnFirst, *ammo = g_drawnSecond;
+}
+// [i:ID] no chat: um ItemSnippet com o item; devolve a textura e a largura medida.
+__attribute__((visibility("default"))) void* mock_game_chat_item(void* item, float* width) {
+    Il2CppObject* snippet = il2cpp_object_new(&g_itemSnippet);
+    At<void*>(snippet, kSnippetItem) = item;
+    XnaVector2 size{};
+    g_uniqueEntry(snippet, false, &size, nullptr, {}, {}, 1.0f, &g_mUniqueDraw);
+    *width = size.x;
+    return g_lastDrawn;
+}
+// NPC.TypeName e GetTypeNetName de Main.npc[index]; o NetworkText vira "literal:..." ou "key:...".
+__attribute__((visibility("default"))) size_t mock_npc_type_name(int32_t index, char* buf, size_t size) {
+    std::string s = Utf8Of(g_typeNameEntry(reinterpret_cast<Il2CppObject*>(g_npcs[index]), &g_mTypeName));
+    std::snprintf(buf, size, "%s", s.c_str());
+    return s.size();
+}
+__attribute__((visibility("default"))) size_t mock_npc_type_net_name(int32_t index, char* buf, size_t size) {
+    Il2CppObject* t = g_typeNetNameEntry(reinterpret_cast<Il2CppObject*>(g_npcs[index]), &g_mTypeNetName);
+    Il2CppObject* lit = At<Il2CppObject*>(t, kNetworkTextLiteral);
+    std::string s = lit ? "literal:" + Utf8Of(lit) : "key:" + Utf8Of(At<Il2CppObject*>(t, kNetworkTextValue));
+    std::snprintf(buf, size, "%s", s.c_str());
+    return s.size();
+}
 }  // extern "C"

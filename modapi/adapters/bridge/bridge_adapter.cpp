@@ -194,6 +194,17 @@ bool OnNpcTexture(Il2CppObject*, int32_t index, TLModNpcDraw* out) {
     }
 }
 
+const char* OnNpcName(Il2CppObject*, int32_t index) {
+    GameAdapter::DrawHooks* h = g_drawHooks.load(std::memory_order_acquire);
+    if (!h || !h->npcName) return nullptr;
+    try {
+        const std::string* name = h->npcName(index);
+        return name ? name->c_str() : nullptr;
+    } catch (...) {
+        return nullptr;
+    }
+}
+
 void OnFrame() {
     static TLModStaticField* fields[TLMOD_PROGRESS_COUNT] = {};
     static bool resolved = false;
@@ -409,9 +420,9 @@ void BridgeGameAdapter::SetFrameHandler(std::function<void()> handler) {
 
 // Antigos ficam vazados de propósito: um desenho em andamento pode estar com eles.
 void BridgeGameAdapter::SetDrawHooks(DrawHooks hooks) {
-    bool any = hooks.itemTexture || hooks.npcTexture;
+    bool any = hooks.itemTexture || hooks.npcTexture || hooks.npcName;
     g_drawHooks.store(any ? new DrawHooks(std::move(hooks)) : nullptr, std::memory_order_release);
-    TLModDrawCallbacks cb{&OnItemTexture, &OnNpcTexture};
+    TLModDrawCallbacks cb{&OnItemTexture, &OnNpcTexture, &OnNpcName};
     TLMod_SetDrawCallbacks(any ? &cb : nullptr);
 }
 
@@ -420,6 +431,67 @@ int32_t BridgeGameAdapter::CreateTexture(const Image& image, const std::string& 
         image.rgba.size() != static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 4)
         return 0;
     return TLMod_CreateTexture(image.rgba.data(), image.width, image.height, name.c_str());
+}
+
+std::optional<ItemTraits> BridgeGameAdapter::ItemShellTraits(int32_t type) {
+    TLModItemTraits r{};
+    if (!TLMod_ReadItemTraits(type, &r)) return std::nullopt;  // fora da thread do jogo / antes do 1º frame
+    ItemTraits t;
+    t.shouldNotBeInInventory = r.should_not_be_in_inventory;
+    t.isAPickup = r.is_a_pickup;
+    t.nebulaPickup = r.nebula_pickup;
+    t.commonCoin = r.common_coin;
+    t.bossBag = r.boss_bag;
+    t.openableBag = r.openable_bag;
+    t.fishingCrate = r.fishing_crate;
+    t.deprecated = r.deprecated;
+    t.isFood = r.is_food;
+    t.canGetPrefixes = r.can_get_prefixes;
+    t.isAMaterial = r.is_a_material;
+    t.isAKite = r.is_a_kite;
+    t.yoyo = r.yoyo;
+    t.isDrill = r.is_drill;
+    t.isChainsaw = r.is_chainsaw;
+    t.gunProj = r.gun_proj;
+    t.summonerScalesWithAttackSpeed = r.summoner_scales_with_attack_speed;
+    t.shimmerTransformToItem = r.shimmer_transform_to_item;
+    t.extractinatorMode = r.extractinator_mode;
+    t.staffMinionSlotsRequired = r.staff_minion_slots_required;
+    t.tooltipDamageMultiplier = r.tooltip_damage_multiplier;
+    t.damage = r.damage;
+    t.useStyle = r.use_style;
+    t.maxStack = r.max_stack;
+    t.shoot = r.shoot;
+    t.ammo = r.ammo;
+    t.useAmmo = r.use_ammo;
+    t.mana = r.mana;
+    t.createTile = r.create_tile;
+    t.createWall = r.create_wall;
+    t.pick = r.pick;
+    t.axe = r.axe;
+    t.hammer = r.hammer;
+    t.defense = r.defense;
+    t.headSlot = r.head_slot;
+    t.bodySlot = r.body_slot;
+    t.legSlot = r.leg_slot;
+    t.buffType = r.buff_type;
+    t.healLife = r.heal_life;
+    t.healMana = r.heal_mana;
+    t.bait = r.bait;
+    t.fishingPole = r.fishing_pole;
+    t.makeNpc = r.make_npc;
+    t.mountType = r.mount_type;
+    t.accessory = r.accessory;
+    t.consumable = r.consumable;
+    t.potion = r.potion;
+    t.vanity = r.vanity;
+    t.channel = r.channel;
+    t.melee = r.melee;
+    t.ranged = r.ranged;
+    t.magic = r.magic;
+    t.summon = r.summon;
+    t.sentry = r.sentry;
+    return t;
 }
 
 int32_t BridgeGameAdapter::GiveItem(int32_t type, int32_t stack) {

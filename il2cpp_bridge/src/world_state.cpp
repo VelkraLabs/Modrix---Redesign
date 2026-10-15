@@ -5,6 +5,8 @@
 // jogo enxerga a instância; em qualquer outra thread o getter lança
 // NullReferenceException. A camada de UI precisa então de uma "fotografia"
 // tirada na thread do jogo, que é o que o TLModFrameCallback permite.
+#include <pthread.h>
+
 #include <atomic>
 #include <cstring>
 
@@ -28,6 +30,9 @@ WorldResolved w;
 
 void* g_origDoUpdateSlot = nullptr;
 std::atomic<TLModFrameCallback> g_frameCallback{nullptr};
+// Thread que roda Main.DoUpdate (a principal do Unity), gravada a cada frame.
+std::atomic<pthread_t> g_gameThread{};
+std::atomic<bool> g_gameThreadKnown{false};
 
 }  // namespace
 
@@ -47,6 +52,11 @@ bool ResolveWorldState() {
     }
     if (!w.localUserInstance) LOGW("LocalUserGameState.Instance não encontrado; TLMod_IsGameMenu devolve -1");
     return true;
+}
+
+bool OnGameThread() {
+    return g_gameThreadKnown.load(std::memory_order_acquire) &&
+           pthread_equal(g_gameThread.load(std::memory_order_relaxed), pthread_self());
 }
 
 void InstallWorldStateHooks() {
@@ -92,6 +102,8 @@ bool TLMod_ReadStaticBool(const TLModStaticField* field, bool* out) {
 // anterior já aplicado), depois o frame do jogo.
 void TLMod_Hooked_MainDoUpdate(Il2CppObject* self, Il2CppObject* gameTime, const MethodInfo* method) {
     auto orig = reinterpret_cast<MainDoUpdateFn>(__atomic_load_n(&g_origDoUpdateSlot, __ATOMIC_ACQUIRE));
+    g_gameThread.store(pthread_self(), std::memory_order_relaxed);
+    g_gameThreadKnown.store(true, std::memory_order_release);
     if (TLModFrameCallback cb = g_frameCallback.load(std::memory_order_acquire)) cb();
     if (orig) orig(self, gameTime, method);
 }

@@ -249,6 +249,47 @@ class OffsetDiffTest(unittest.TestCase):
                                encoding="utf-8")
         self.assertEqual(self.run_diff(dump)["Terraria.IO.WorldFile.SaveWorld"].status, od.OK)
 
+    def test_same_argc_overloads_and_nested_class(self):
+        # GUIQuickActionButton.Draw: dois overloads de 4 parâmetros; o RVA desempata.
+        # ItemID.Sets: classe aninhada, listada no dump.cs com namespace vazio.
+        header = HEADER.replace("namespace rva {", textwrap.dedent("""\
+            namespace item_id_sets_static_off {
+            constexpr size_t CanGetPrefixes = 0xA8;  // bool[] aceita prefixo
+            }  // namespace item_id_sets_static_off
+            namespace rva {
+            constexpr uintptr_t GUIQuickActionButton_Draw = 0x10604EC;"""))
+        header = header.replace("namespace argc {", "namespace argc {\nconstexpr int GUIQuickActionButton_Draw = 4;")
+        self.header.write_text(header, encoding="utf-8")
+        dump = DUMP + textwrap.dedent("""\
+
+            // Namespace: 
+            public class ItemID.Sets // TypeDefIndex: 9
+            {
+            \t// Fields
+            \tpublic static bool[] CanGetPrefixes; // 0xA8
+            }
+
+            // Namespace: 
+            public class GUIQuickActionButton // TypeDefIndex: 10
+            {
+            \t// Methods
+
+            \t// RVA: 0x10604EC Offset: 0x10604EC VA: 0x10604EC
+            \tpublic static void Draw(QuickActionButton_Layout.QuickActionControl actionType, QuickActionButton_Layout layout, bool pressed, ref float scale) { }
+
+            \t// RVA: 0x105DB68 Offset: 0x105DB68 VA: 0x105DB68
+            \tpublic static void Draw(QuickActionButton_Layout layout, Texture2D buttonTexture, GUIQuickActionButton.InteractionState state, ref float scale) { }
+            }
+            """)
+        od.FIELD_GROUPS.setdefault("item_id_sets_static_off", ("Terraria.ID", "ItemID.Sets", "static"))
+        r = self.run_diff(dump)
+        self.assertEqual(r["Terraria.ID.ItemID.Sets.CanGetPrefixes"].status, od.OK)
+        self.assertEqual(r[".GUIQuickActionButton.Draw"].status, od.OK)
+        # O overload do RVA sumiu: nenhum dos dois bate.
+        r = self.run_diff(dump.replace("RVA: 0x10604EC", "RVA: 0x1060500"))
+        self.assertEqual(r[".GUIQuickActionButton.Draw"].status, od.CHANGED)
+        self.assertIn("nenhum no RVA esperado", r[".GUIQuickActionButton.Draw"].note)
+
     def test_real_header_parses(self):
         consts = od.parse_header(od.DEFAULT_HEADER)
         groups = {c.namespace for c in consts}

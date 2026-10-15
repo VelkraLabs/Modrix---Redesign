@@ -6,6 +6,7 @@
 #include <string>
 
 #include "tlmod/runtime/content_registry.h"
+#include "tlmod/runtime/item_shell.h"
 #include "tlmod/runtime/png.h"
 #include "tlmod/tlmod_api.h"
 
@@ -147,6 +148,11 @@ public:
     // depois usa slots livres do inventário principal. Só na thread do jogo.
     // Devolve quantas unidades entraram.
     virtual int32_t GiveItem(int32_t type, int32_t stack) = 0;
+    // O que um item original `type` passa para quem o usa como casca (ItemID.Sets
+    // e o SetDefaults dele). nullopt = o jogo ainda não pode responder (no
+    // Terraria: fora da thread do jogo ou antes do primeiro frame); o runtime
+    // tenta de novo no frame handler.
+    virtual std::optional<ItemTraits> ItemShellTraits(int32_t type) = 0;
     // Uma vez por frame, na thread do jogo (menu e mundo). Nulo desliga.
     // No Terraria mobile é a thread principal do Unity (Main.DoUpdate): a única
     // em que a API do Unity (CreateTexture) pode ser chamada.
@@ -168,6 +174,9 @@ public:
         std::function<int32_t(int32_t itemType)> itemTexture;
         // NPC no slot `index`: true + out = a textura do mod.
         std::function<bool(int32_t npcIndex, NpcDraw& out)> npcTexture;
+        // Nome exibido do NPC no slot `index` (nulo = o da casca). O ponteiro
+        // vale enquanto o runtime existir. Qualquer thread.
+        std::function<const std::string*(int32_t npcIndex)> npcName;
     };
     virtual void SetDrawHooks(DrawHooks hooks) = 0;
 

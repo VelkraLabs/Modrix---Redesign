@@ -19,12 +19,15 @@ python3 tools/offset_diff.py --dump novo/dump.cs --script novo/script.json
 
 | origem no TLMod | regra |
 |---|---|
-| `terraria_offsets.h` `player_off`, `npc_off`, `main_static_off`, `local_user_off`, `item_off`, `chest_off`, `loadout_off`, `file_data_off`, `player_file_data_off`, `world_gen_static_off`, `item_tooltip_off`, `item_tooltip_static_off`, `texture_assets_static_off`, `xna_texture2d_off`, `player_draw_set_off` | offset do campo (com herança) e tipo, comparado com a 1ª palavra do comentário |
-| `terraria_offsets.h` `rva::Classe_Metodo` | RVA; desambigua overloads com `argc::` |
+| `terraria_offsets.h` `player_off`, `npc_off`, `main_static_off`, `local_user_off`, `item_off`, `chest_off`, `loadout_off`, `file_data_off`, `player_file_data_off`, `world_gen_static_off`, `item_tooltip_off`, `item_tooltip_static_off`, `texture_assets_static_off`, `xna_texture2d_off`, `player_draw_set_off`, `item_id_sets_static_off`, `gui_instance_off`, `gui_instance_static_off`, `gui_crafting_off`, `gui_craft_guide_popup_off`, `recipe_off`, `item_snippet_off` | offset do campo (com herança) e tipo, comparado com a 1ª palavra do comentário |
+| `terraria_offsets.h` `rva::Classe_Metodo` | RVA; desambigua overloads com `argc::` e, se dois overloads têm o mesmo número de parâmetros, pelo próprio RVA |
 | `terraria_offsets.h` `argc::` | número de parâmetros (mudou = o typedef do hook precisa mudar) |
 | `terraria_offsets.h` `kMaxNPCs`, `kNpcVanillaCount`, `kMaxChests`, `kItemVanillaCount`, `kDefaultItemShell`, `k*Class`, `kAssembly` | const do jogo, existência da classe e da imagem |
 | `bridge_adapter.cpp` (flags do Boss Checklist) | `static bool` resolvido por nome em runtime |
 | `content_registry.cpp` (`DefaultRanges`) | `ItemID.Count` etc.; alerta se passar do 1º ID de mod |
+
+Classes aninhadas (`ItemID.Sets`, `ItemTagHandler.ItemSnippet`) aparecem no `dump.cs` com namespace vazio; a
+regra usa o namespace do tipo externo e o script acha as duas formas.
 
 As regras de mapeamento ficam no topo do script (`FIELD_GROUPS`, `METHOD_CLASSES`, `CONST_CHECKS`...).
 Ao criar um namespace novo em `terraria_offsets.h`, acrescente a regra lá.

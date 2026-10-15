@@ -221,7 +221,10 @@ int main(int argc, char** argv) {
     CHECK(frame && load_assets && draw_inv && draw_hotbar && draw_npc && new_npc && update_npcs && item_tex &&
           npc_tex && tex_info && tex_pixel);
     CHECK(loader.PendingTextures() == 2);
+    // A casca só é avaliada na thread do jogo: o LoadAll deixou os dois itens na fila.
+    CHECK(loader.PendingShellChecks() == 2);
     frame();  // TextureAssets ainda vazio: a ponte devolve -1, a fila espera
+    CHECK(loader.PendingShellChecks() == 0);  // Lente: nada a avisar
     CHECK(loader.PendingTextures() == 2 && loader.TexturesCreated() == 0);
     load_assets();
     frame();
@@ -256,6 +259,13 @@ int main(int argc, char** argv) {
     for (int t = 0; t < 25; ++t) update_npcs();  // 25 ticks / 10 por quadro = quadro 2
     CHECK(draw_npc(boss, &frames, rect) == sheet && rect[1] == 128);
     CHECK(draw_npc(eye, &frames, rect) == npc_tex(4) && frames != 4);
+    // Nome: NPC.TypeName e GetTypeNetName (anúncios) do NPC de mod; o original fica.
+    auto npc_name = reinterpret_cast<size_t (*)(int32_t, char*, size_t)>(sym("mock_npc_type_name"));
+    auto npc_net_name = reinterpret_cast<size_t (*)(int32_t, char*, size_t)>(sym("mock_npc_type_net_name"));
+    char buf[64];
+    CHECK(npc_name && npc_net_name && npc_name(boss, buf, sizeof(buf)) && std::string(buf) == "golem");
+    CHECK(npc_net_name(boss, buf, sizeof(buf)) && std::string(buf) == "literal:golem");
+    CHECK(npc_name(eye, buf, sizeof(buf)) && std::string(buf) == "npc:4");
 
     fs::remove_all(dir);
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,

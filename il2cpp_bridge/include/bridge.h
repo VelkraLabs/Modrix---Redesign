@@ -334,6 +334,28 @@ bool TLMod_SetItemDefaults(Il2CppObject* item, int32_t type);
 // Item.Prefix(prefix): aplica o prefixo como o load do jogo faz.
 bool TLMod_ApplyItemPrefix(Il2CppObject* item, int32_t prefix);
 
+// Propriedades de um item original (para avaliar uma casca). O item de mod
+// herda da casca tudo o que a definição não sobrescreve: os arrays de
+// ItemID.Sets (por type) e os campos que o SetDefaults da casca preenche.
+typedef struct TLModItemTraits {
+    // ItemID.Sets[type]
+    bool should_not_be_in_inventory, is_a_pickup, nebula_pickup, common_coin, boss_bag, openable_bag,
+        fishing_crate, deprecated, is_food, can_get_prefixes, is_a_material, is_a_kite, yoyo, is_drill,
+        is_chainsaw, gun_proj, summoner_scales_with_attack_speed;
+    int32_t shimmer_transform_to_item;  // -1 = não muda no Shimmer
+    int32_t extractinator_mode;         // -1 = o Extrator não aceita
+    int32_t staff_minion_slots_required;
+    float tooltip_damage_multiplier;
+    // Item depois de SetDefaults(type)
+    int32_t damage, use_style, max_stack, shoot, ammo, use_ammo, mana, create_tile, create_wall, pick, axe,
+        hammer, defense, head_slot, body_slot, leg_slot, buff_type, heal_life, heal_mana, bait, fishing_pole,
+        make_npc, mount_type;
+    bool accessory, consumable, potion, vanity, channel, melee, ranged, magic, summon, sentry;
+} TLModItemTraits;
+// Só na thread do jogo (Main.DoUpdate), depois do primeiro frame: monta um
+// Item de sonda com o SetDefaults do jogo. false fora dela ou se não resolveu.
+bool TLMod_ReadItemTraits(int32_t type, TLModItemTraits* out);
+
 // ===========================================================================
 // Texturas de mod
 // ===========================================================================
@@ -375,6 +397,9 @@ typedef struct TLModDrawCallbacks {
     // NPC prestes a ser desenhado (index em Main.npc; -1 se não for um deles).
     // true + out preenchido = desenhar com a textura do mod.
     bool (*npc_texture)(Il2CppObject* npc, int32_t index, TLModNpcDraw* out);
+    // Nome exibido de um NPC de mod (UTF-8, ponteiro estável), ou nulo para o
+    // da casca. Usado por NPC.TypeName e NPC.GetTypeNetName (qualquer thread).
+    const char* (*npc_name)(Il2CppObject* npc, int32_t index);
 } TLModDrawCallbacks;
 void TLMod_SetDrawCallbacks(const TLModDrawCallbacks* callbacks);  // copia; nulo desliga
 
@@ -397,6 +422,29 @@ void TLMod_Hooked_DrawPlayerHeldItem(void* drawinfo, const MethodInfo* method);
 void TLMod_Hooked_MainDrawNPCDirect(Il2CppObject* self, Il2CppObject* spriteBatch, Il2CppObject* npc, bool behindTiles,
                                     TLModXnaVector2 screenPos, Il2CppObject* lightMap, TLModXnaRectangle* lightRegion,
                                     const MethodInfo* method);
+// Telas que leem TextureAssets.Item por conta própria (screen_hooks.cpp).
+int32_t TLMod_Hooked_GUITransactionButtonDraw(Il2CppObject* layout, Il2CppObject* item, Il2CppObject* label,
+                                              bool disabled, float* scale, bool forcedPressed,
+                                              bool hasControllerFocus, bool forceOver, bool disablePressedState,
+                                              const MethodInfo* method);
+void TLMod_Hooked_GUIReforgePopupDrawItem(Il2CppObject* self, const MethodInfo* method);
+void TLMod_Hooked_GUIResearchDrawResearchItem(Il2CppObject* self, const MethodInfo* method);
+int32_t TLMod_Hooked_GUIResearchCanBeResearched(Il2CppObject* self, Il2CppObject* item, int32_t* percent,
+                                                const MethodInfo* method);
+void TLMod_Hooked_GUICraftGuidePopupDrawItem(Il2CppObject* self, const MethodInfo* method);
+void TLMod_Hooked_GUICraftingMaterialItemDraw(Il2CppObject* self, Il2CppObject* layout, int32_t index,
+                                              TLModXnaVector2 position, float scale, const MethodInfo* method);
+void TLMod_Hooked_GUICraftingMaterialItemTooltipDraw(Il2CppObject* self, Il2CppObject* layout, int32_t index,
+                                                     TLModXnaVector2 position, float scale, const MethodInfo* method);
+void TLMod_Hooked_GUIVirtualInputControllerDrawControls(Il2CppObject* self, const MethodInfo* method);
+void TLMod_Hooked_GUIQuickActionButtonDraw(int32_t actionType, Il2CppObject* layout, bool pressed, float* scale,
+                                           const MethodInfo* method);
+void TLMod_Hooked_MainDrawInterfaceInteractItemIcon(Il2CppObject* self, const MethodInfo* method);
+bool TLMod_Hooked_ItemSnippetUniqueDraw(Il2CppObject* self, bool justCheckingString, TLModXnaVector2* size,
+                                        Il2CppObject* spriteBatch, TLModXnaVector2 position, TLModXnaColor color,
+                                        float scale, const MethodInfo* method);
+Il2CppObject* TLMod_Hooked_NpcGetTypeName(Il2CppObject* self, const MethodInfo* method);
+Il2CppObject* TLMod_Hooked_NpcGetTypeNetName(Il2CppObject* self, const MethodInfo* method);
 
 // Handlers que os hooks apontam (exportados como TLMod_Hooked_PlayerHurt).
 void TLMod_Hooked_ItemSetDefaults(Il2CppObject* self, int32_t type, bool noMatCheck, Il2CppObject* variant,

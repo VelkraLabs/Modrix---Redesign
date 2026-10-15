@@ -91,8 +91,12 @@ textura, hitbox, sons e, se o mod quiser, a própria AI. O jogo indexa arrays po
 Estado por NPC: `ai[0..3]` são do jogo, e a AI da casca usa esses campos quando roda. `local[8]` é
 privado do mod, fica guardado no runtime e o jogo não toca. Veja `mods/example_boss`.
 
-Ainda falta: nome exibido, barra e música de boss (`boss`), sincronizar a tabela de slots e o
-`local[]` em multiplayer, e confirmar no jogo que `NewNPC` aceita `source` nulo. Textura própria:
+O nome exibido (`display_name`) aparece no hover, na barra de vida, no mapa e nos anúncios ("X
+despertou!"), por hooks em `NPC.TypeName` e `NPC.GetTypeNetName` (ver [Texturas de mod](#texturas-de-mod)).
+O bestiário não tem entrada para NPC de mod: o abate conta para a casca.
+
+Ainda falta: barra e música de boss (`boss`), sincronizar a tabela de slots e o `local[]` em
+multiplayer, e confirmar no jogo que `NewNPC` aceita `source` nulo. Textura própria:
 ver [Texturas de mod](#texturas-de-mod).
 
 ## Itens de mod no jogo (casca)
@@ -116,7 +120,7 @@ Item.RebuildTooltip           netID de mod: o tooltip vem da definição (Lang.G
 **Por que casca e não aumentar as tabelas** (o que o tModLoader faz no PC, reescrevendo o IL do jogo):
 
 - **Tabelas por tipo no dump.**
-  - 77 arrays em `ItemID.Sets`;
+  - 79 arrays em `ItemID.Sets`;
   - `TextureAssets.Item` e `ItemFlame`;
   - `Lang._itemNameCache` e `_itemTooltipCache`;
   - `Item.headType/bodyType/legType/staff/claw/cachedItemSpawnsByType` e `Main.itemAnimations`;
@@ -149,6 +153,95 @@ O que ainda não está aqui:
 - receitas e loja;
 - sincronizar a tabela de IDs em multiplayer;
 - telas que leem o nome direto de `Lang` por `type` em vez de `Item.Name` mostrariam o nome da casca.
+
+### Escolhendo a casca
+
+O item de mod herda da casca tudo que a definição não sobrescreve. A definição sobrescreve só
+largura, altura, pilha máxima, valor, raridade, dano e tempo de uso (e `useStyle`/`melee` quando
+`damage > 0` numa casca que não se usa). O resto vem de dois lugares:
+
+**1. `ItemID.Sets` (79 arrays estáticos indexados pelo type, no `.cctor` de `ItemID.Sets`).**
+
+Mudam o comportamento, e o `register_item` avisa:
+
+| conjunto | efeito no item de mod |
+|---|---|
+| `ItemsThatShouldNotBeInInventory` | some do inventário |
+| `IsAPickup`, `NebulaPickup` | é coletado ao encostar (coração, estrela, buff) e nunca entra no inventário |
+| `CommonCoin` | vira dinheiro |
+| `BossBag`, `OpenableBag`, `IsFishingCrate` | botão direito abre e solta o loot da casca |
+| `ShimmerTransformToItem` | no Shimmer vira outro item |
+| `ExtractinatorMode` | o Extrator aceita e troca por loot |
+| `CanGetPrefixes` | `false` = sem prefixo e sem reforja |
+| `ToolTipDamageMultiplier` | o tooltip mostra o dano multiplicado |
+| `Deprecated` | item obsoleto |
+| `IsAKite`, `Yoyo`, `IsDrill`, `IsChainsaw`, `StaffMinionSlotsRequired` | uso especial (pipa, ioiô, broca, lacaio) |
+
+Mudam o comportamento só em situações específicas (sem aviso):
+- `IsAMaterial`: linha "Material" e pesquisa.
+- `IsFood`, `FoodParticleColors`, `DrinkParticleColors`: partículas ao comer.
+- `KillsToBanner`, `BannerStrength`: estandartes.
+- `CanBePlacedOnWeaponRacks`, `WorksInVoidBag`.
+- `ItemsThatCountAsBombsForDemolitionistToSpawn`.
+- `CanFishInLava`, `IsLavaBait`, `GrassSeeds`, `Torches`, `WaterTorches`, `Workbenches`,
+  `AlsoABuildingItem`.
+- `ExoticPlantsForDyeTrade`: o Comerciante de Tintas aceita.
+- `ColorfulDyeValues`, `flowerPacketInfo`, `IsCrafted*`, `ShimmerCountsAsItem`, `ItemsForStuffCannon`.
+- `IgnoresEncumberingStone`, `IsLavaImmuneRegardlessOfRarity`, `ItemNoGravity`,
+  `ItemSpawnDecaySpeed`, `OverflowProtectionTimeOffset`.
+- `ItemsThatAllowRepeatedRightClick`, `HasAProjectileThatHasAUsabilityCheck`, `ForceConsumption`,
+  `ForcesBreaksSleeping`, `SkipsInitialUseSound`.
+- `UsesBetterMeleeItemLocation`, `BonusMeleeSpeedMultiplier`,
+  `SummonerWeaponThatScalesWithAttackSpeed`, `gunProj`, `IsPaintScraper`, `TrapSigned`,
+  `UsesCursedByPlanteraTooltip`.
+
+Só aparência, ordem ou controle:
+- `Sorting*`, `Gamepad*`, `LockOn*`;
+- `SingleUseInGamepad`, `CanBeQuickusedOnGamepad`;
+- `NeverAppearsAsNewInInventory`, `ItemIconPulse`, `AnimatesAsSoul`, `DrawUnsafeIndicator`,
+  `TextureCopyLoad`.
+
+**2. Os campos que o `SetDefaults` da casca preenche.** "É munição" e "é um arco" não são
+`ItemID.Sets` nesta build; são campos do `Item`:
+
+| campo | efeito no item de mod |
+|---|---|
+| `ammo` | é munição: armas da casca consomem o item |
+| `useAmmo` + `shoot` | consome munição e dispara (arco: `useAmmo` = `AmmoID.Arrow` = 40; arma de fogo: `AmmoID.Bullet` = 97, valores do `.cctor` de `AmmoID`) |
+| `accessory`, `defense`, `*Slot` | equipa como acessório ou armadura, com a defesa e o visual da casca. O efeito especial de acessório é por type em `Player.ApplyEquipFunctional` |
+| `consumable`, `buffType`, `healLife`/`healMana`, `potion` | usar gasta uma unidade e aplica o efeito da casca |
+| `createTile`, `createWall` | usar coloca o bloco ou a parede da casca |
+| `pick`, `axe`, `hammer` | também é ferramenta |
+| `mana`, `magic`, `summon`, `sentry`, `channel` | gasta mana, invoca, canaliza |
+| `makeNPC`, `mountType`, `bait`, `fishingPole` | solta criatura, invoca montaria, isca, vara de pesca |
+
+**Casca recomendada por categoria** (`RecommendedShells()` em `item_shell.h`):
+
+| categoria | casca | por quê |
+|---|---|---|
+| material | 38 Lente (padrão) | sem uso, sem tile, sem tiro; já tem a linha "Material" |
+| arma corpo a corpo | 24 Espada de Madeira | golpe simples, sem projétil, aceita prefixos |
+| arco | 39 Arco de Madeira | consome flechas e dispara a flecha usada |
+| arma de fogo | 95 Pistola de Pederneira | consome balas e dispara a bala usada |
+| munição | 40 Flecha de Madeira (flecha), 97 Bala de Mosquete (bala) | `ammo` da categoria, consumível, pilha grande |
+| acessório | 216 Algema | só `defense = 1`. Em `ApplyEquipFunctional`/`UpdateEquips` não há comparação com 216 nem tabela de salto que a cubra |
+
+**Aviso no `register_item`.** O runtime lê as propriedades da casca no próprio jogo:
+- `ItemID.Sets` pelo nome do campo;
+- os campos de um `Item` de sonda montado com o `SetDefaults` do jogo (`TLMod_ReadItemTraits`).
+
+Ele deduz a categoria pelo dano da definição e pelo que a casca é, e avisa no log cada propriedade
+que provavelmente não combina, com a casca recomendada. Exemplo:
+
+```
+[mod.x] register_item: "mod.x:gema" na casca 58: é coletada ao encostar, como coração/estrela, e nunca entra no inventário (ItemID.Sets.IsAPickup)
+[mod.x] register_item: "mod.x:gema" na casca 58: para material, a casca recomendada é 38 (Lente): ...
+```
+
+As propriedades só podem ser lidas na thread do jogo, e os mods carregam numa thread própria antes
+do primeiro frame. Por isso, no aparelho os avisos saem no primeiro frame (`Main.DoUpdate`), com o
+mesmo texto. Como a avaliação usa os valores reais do jogo, ela também confere as recomendações
+acima no aparelho: uma casca recomendada que avise alguma coisa indica uma diferença da build.
 
 ## Texturas de mod
 
@@ -190,24 +283,97 @@ textura é escolhida por item e por slot, então um item ou NPC original da mesm
 textura dele. Para NPCs, durante o desenho, a ponte também troca `Main.npcFrameCount[casca]` e
 `NPC.frame` (o retângulo do quadro na folha do mod) e os devolve depois.
 
-| hook | RVA | o que desenha |
-|---|---|---|
-| `GUIInventory.DrawItem` | `0x95E6E4` | inventário, baús, bancos |
-| `GUIHotbar.DrawHotbarItem` | `0x83BD64` | barra rápida |
-| `Main.DrawItem` | `0xCFA928` | item no chão |
-| `ItemSlot.DrawItemIcon` | `0x1632310` | ícone genérico (`ItemSlot.Draw`, `UIItemIcon`) |
-| `PlayerDrawLayers.DrawPlayer_27_HeldItem` | `0x15C0EDC` | item na mão / em uso |
-| `Main.DrawNPCDirect` | `0xBFC154` | NPCs do mundo (`Main.DrawNPC` termina nele) |
+A troca vale para `TextureAssets.Item[casca]` e também tira `Main.itemAnimations[casca]` durante o
+desenho, para uma casca animada não fatiar o PNG do mod em quadros.
 
-**Ainda mostram a casca.** Telas que leem `TextureAssets.Item` por conta própria, fora dos hooks
-acima (lista tirada das leituras de `TextureAssets.Item` no binário): receitas (`GUICrafting.MaterialItemDraw`, `GUICraftGuidePopup.DrawItem`), loja
-(`GUIShop.DrawPurchaseButton`, `GUITransactionButton.Draw`), reforja (`GUIReforgePopup.DrawItem`),
-pesquisa da Jornada (`GUIResearch.DrawResearchItem`, `UIDynamicItemCollection`), item no chat
-(`ItemTagHandler`), botões rápidos (`GUIQuickActionButton`) e o ícone de interação
-(`Main.DrawInterface_40_InteractItemIcon`). Também ficam com a casca o bestiário e os créditos, que
-usam a outra sobrecarga de `DrawNPCDirect` (`0xBCB734`) com NPCs que não são de `Main.npc`.
-`Item.GetDrawHitbox` e `Player.GetItemDrawFrame` também medem a textura da casca fora do desenho;
-o tamanho do PNG não muda essas medidas, então escolha uma casca de tamanho parecido.
+### Telas (todas as leituras de `TextureAssets.Item` no binário)
+
+A lista sai das 112 leituras de `TextureAssets.Item` (estático `+0x560`) em 49 métodos, mais as
+leituras de nome (`Lang.GetItemName*`, `NPC.TypeName`). Para cada tela, o hook acha o item do mesmo
+jeito que o jogo, troca a textura da casca só durante a chamada e devolve no fim.
+
+| hook | RVA | tela | de onde vem o item |
+|---|---|---|---|
+| `GUIInventory.DrawItem` | `0x95E6E4` | inventário, baús, bancos | `inv[slot]` |
+| `GUIHotbar.DrawHotbarItem` | `0x83BD64` | barra rápida | `inv[slot]` |
+| `Main.DrawItem` | `0xCFA928` | item no chão | parâmetro |
+| `ItemSlot.DrawItemIcon` | `0x1632310` | ícone de `ItemSlot.Draw`: itens da loja, receitas e ingredientes da guia, resultado das receitas, duplicação da Jornada, molduras | parâmetro |
+| `PlayerDrawLayers.DrawPlayer_27_HeldItem` | `0x15C0EDC` | item na mão / em uso | `drawinfo.heldItem` |
+| `Main.DrawNPCDirect` | `0xBFC154` | NPCs do mundo | o NPC |
+| `GUITransactionButton.Draw(Item)` | `0x12220F8` | botão de compra da loja, botão da pesquisa e outros botões com item | parâmetro |
+| `GUIReforgePopup.DrawItem` | `0x9D2984` | reforja | `GUIInstance.Active.GUIReforge.get_ReforgeItem()` |
+| `GUIResearch.DrawResearchItem` | `0x9D7164` | pesquisa da Jornada | `GetResearchItem()` |
+| `GUICraftGuidePopup.DrawItem` | `0x15A5384` | guia de receitas | receita em foco (`createItem`) ou o item da guia |
+| `GUICrafting.MaterialItemDraw` | `0x73AD78` | ingredientes da receita em foco | `Main.recipe[availableRecipe[focusRecipe]].requiredItem[i]` |
+| `GUICrafting.MaterialItemTooltipDraw` | `0x73A3AC` | ingredientes no tooltip de uma receita | `CraftHover.requiredItem[i]` |
+| `GUIVirtualInputController.DrawControls` | `0x9EF6D0` | controles de toque: botão de uso e botão do gancho | `inventory[selectedItem]`, `QuickGrapple_GetItemToUse()` |
+| `GUIQuickActionButton.Draw(QuickActionControl)` | `0x10604EC` | botão rápido do gancho (`Grapple`, `GrappleFire`) | `QuickGrapple_GetItemToUse()` |
+| `Main.DrawInterface_40_InteractItemIcon` | `0xD0F8B8` | ícone junto do cursor (item e munição) | `inventory[selectedItem]`, `Main.TryGetAmmo(item)` |
+| `ItemTagHandler.ItemSnippet.UniqueDraw` | `0x97F0D8` | `[i:ID]` no chat (mede pela textura) | `_item` |
+
+Quando um desenho mostra dois itens (item na mão e munição, item e gancho) e os dois têm o mesmo
+`type`, só o primeiro troca: a textura é uma por `type`.
+
+**Pesquisa da Jornada (`GUIResearch.CanBeResearched`, `0x9D4C10`).** A pesquisa só olha o `type`.
+Um item de mod seria consumido e desbloquearia a casca para duplicação. O hook responde "não pode
+ser pesquisado".
+
+**Nomes de item.** As telas usam `Item.Name`, `AffixName` ou `HoverName`, que leem o
+`_nameOverride` do item de mod. Isso vale para hover, tooltip, loja, reforja, título da pesquisa,
+título da guia e tag do chat. Fora de `Item.Name`, há 13 chamadas a `Lang.GetItemName(Value)` no
+binário. A maioria usa ids constantes ou derivados do tile:
+- nome do Baú (48) e da Forja do Defensor (3813), na interface do baú e ao renomear;
+- placas e lápides;
+- pilones no mapa;
+- o item consumido por uma varinha (`tileWand`), no tooltip.
+
+Duas mostram o nome da casca:
+- **Rótulos "Qualquer X" das receitas.** Saem da casca quando ela é 9, 22, 169, 3458 ou 542 e a
+  receita tem o grupo correspondente. Evite essas cascas.
+- **Mensagem de morte no PvP** (`Lang.CreateDeathMessage`). "Morto por X com <item>" usa o
+  `plrItemType` do assassino; só existe no multiplayer.
+
+**Nome de NPC.** `NPC.TypeName` (`0xED9240`) é `Lang.GetNPCNameValue(netID)`, e `NPC.GetTypeNetName`
+(`0xEDB0BC`) é `NetworkText.FromKey(...)`. Os dois têm hook:
+- o primeiro devolve o nome do mod, usado no hover sobre o NPC, na barra de vida, no mapa e em
+  `FullName`;
+- o segundo devolve `NetworkText.FromLiteral(nome)`, usado em "X despertou!", "X foi derrotado" e nas
+  mensagens de morte.
+
+**Não cobertas (mostram a casca):**
+- **Expositor de armas e prato de comida** (`TileDrawing.DrawSpecialTilesLegacy`, `0x8CE4A0`). É um
+  laço sobre todos os tiles especiais; uma troca por chamada pegaria todos os itens da mesma casca.
+  Esses tile entities também não passam pelo arquivo paralelo do save. As molduras usam
+  `DrawItemIcon` e estão cobertas.
+- **Botão de interagir** (`GUIQuickActionButton.CanInteract`): ícones vindos do tile (constantes) e
+  o item de uma moldura.
+- **`[i:ID]` em texto inline** (`ItemTagHandler.PrintInline`): mede pela casca, mas o ícone sai por
+  `ItemSlot.Draw` e fica certo.
+- **Medidas pela casca:** `Item.GetDrawHitbox`, `Main.GetItemDrawFrame` e `Player.GetItemDrawFrame`
+  medem a textura da casca fora do desenho, então escolha uma casca de tamanho parecido com o PNG.
+
+**Item de mod não chega lá (sem hook):**
+- duplicação da Jornada (`UIDynamicItemCollection`: lista de IDs de `ContentSamples.ItemsByType`);
+- `GUIShop.DrawPurchaseButton`, que lê o índice constante 3817 (moeda Medalha do Defensor); o item
+  vendido vai pelo `GUITransactionButton`;
+- placas e lápides (`GUINPCDialogue.DrawSign`, type vindo do tile);
+- ícones fixos de controles e fios (`GUIQuickActionButton.GetIconFrame`);
+- moedas (`ItemSlot.DrawMoney`/`DrawSavings`, `CustomCurrency*`);
+- projéteis que usam textura de item (`DrawProjDirect`, por type de projétil);
+- tela de carregamento e créditos.
+
+### Bestiário e créditos: um NPC de mod não aparece neles
+
+- **Bestiário.** As entradas são por `netID` (NPCs originais). O ícone (`UnlockableNPCEntryIcon`)
+  cria um NPC próprio com `SetDefaults(npcNetId)`. O abate é registrado por
+  `NPCKillsTracker.RegisterKill` → `NPC.GetBestiaryCreditId` =
+  `ContentSamples.NpcBestiaryCreditIdsByNpcNetIds[npc.netID]`, e o `netID` de um NPC de mod é o da
+  casca. Matar o boss de mod conta como matar a casca e desbloqueia a entrada dela. O mod não tem
+  entrada própria.
+- **Créditos.** `CreditsRollComposer` monta as cenas com NPCIDs fixos, e `NPCSegment.Draw` desenha
+  esses NPCs pela sobrecarga de `DrawNPCDirect` de 4 parâmetros (`0xBCB734`).
+
+Nenhum dos dois precisa de hook.
 
 ### Mods de exemplo
 

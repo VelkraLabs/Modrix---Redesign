@@ -37,6 +37,8 @@ void InstallNpcHooks();
 // Frame / estado do mundo (world_state.cpp).
 bool ResolveWorldState();
 void InstallWorldStateHooks();
+// true se quem chama é a thread do Main.DoUpdate (depois do primeiro frame).
+bool OnGameThread();
 
 // Itens de mod: SetDefaults/RebuildTooltip (item_hooks.cpp).
 bool ResolveItems();
@@ -45,6 +47,11 @@ void InstallItemHooks();
 // Texturas de mod e hooks de desenho (draw_hooks.cpp).
 bool ResolveDraw();
 void InstallDrawHooks();
+// Telas que leem TextureAssets.Item sozinhas e nome de NPC (screen_hooks.cpp).
+void InstallScreenHooks();
+
+// Propriedades de um item original para avaliar uma casca (item_traits.cpp).
+bool ResolveItemTraits();
 
 // Save/load de personagem e mundo (save_hooks.cpp).
 bool ResolveSaves();

@@ -232,8 +232,14 @@ bool TLMod_Init(int timeoutMs) {
         // NPCs são opcionais: se algo não resolver, o resto da ponte segue.
         if (bridge::ResolveNpc()) bridge::InstallNpcHooks();
         if (bridge::ResolveWorldState()) bridge::InstallWorldStateHooks();
-        if (bridge::ResolveItems()) bridge::InstallItemHooks();
-        if (bridge::ResolveDraw()) bridge::InstallDrawHooks();
+        if (bridge::ResolveItems()) {
+            bridge::InstallItemHooks();
+            bridge::ResolveItemTraits();
+        }
+        if (bridge::ResolveDraw()) {
+            bridge::InstallDrawHooks();
+            bridge::InstallScreenHooks();
+        }
         if (bridge::ResolveSaves()) bridge::InstallSaveHooks();
         g_ready.store(true);
     } else {

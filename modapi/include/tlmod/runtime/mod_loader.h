@@ -72,6 +72,8 @@ public:
     // Texturas de mod: PNGs lidos no LoadAll, esperando a vez no frame handler
     // (thread principal), e quantas o jogo já criou.
     size_t PendingTextures() const;
+    // Itens cuja casca ainda não foi avaliada (o jogo ainda não respondeu).
+    size_t PendingShellChecks() const;
     int32_t TexturesCreated() const;
 
     // Itens de mod fora do arquivo do jogo (arquivo paralelo). Os ganchos de

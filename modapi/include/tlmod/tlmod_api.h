@@ -100,7 +100,10 @@ typedef struct TLModItemDef {
      * Item original usado como "casca": o jogo só vê este tipo (textura,
      * tabelas por tipo), e o runtime aplica por cima os atributos, o nome e o
      * tooltip acima. 0 = padrão (Lente, um material sem uso). Precisa ser um
-     * item original (1..ItemID.Count-1). */
+     * item original (1..ItemID.Count-1). Recomendadas: 38 material, 24 arma
+     * corpo a corpo, 39 arco, 95 arma de fogo, 40/97 munição, 216 acessório.
+     * O runtime avisa no log as propriedades da casca (ItemID.Sets, munição,
+     * acessório, bloco...) que provavelmente não combinam com a definição. */
     TLModId shell_type;
 } TLModItemDef;
 

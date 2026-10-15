@@ -198,6 +198,12 @@ public:
         int32_t frameY = 0, frameHeight = 0;
     };
     static constexpr int32_t kShellNpcFrames = 6, kShellNpcFrameHeight = 40;
+    // NPC.TypeName: com o TLMod, o nome do NPC de mod; senão o da casca (Lang).
+    std::string NpcName(int32_t i) {
+        if (drawHooks.npcName)
+            if (const std::string* name = drawHooks.npcName(i)) return *name;
+        return "npc " + std::to_string(npcs[static_cast<size_t>(i)].s.shell_type);
+    }
     NpcSprite DrawNpc(int32_t i) {
         NpcSprite sp;
         const TLModNpcState& s = npcs[static_cast<size_t>(i)].s;
@@ -315,6 +321,37 @@ public:
 
     // Jogador local: empilha com o que já tem (IsTheSameAs) e depois usa os
     // slots livres do inventário principal (0..49).
+    // O que alguns itens originais passam para quem os usa como casca (ItemID.Sets
+    // + SetDefaults). traitsReady = false simula "o jogo ainda não responde"
+    // (no Terraria: thread do loader, antes do primeiro frame).
+    bool traitsReady = true;
+    int traitQueries = 0;
+    std::optional<tlmod::rt::ItemTraits> ItemShellTraits(int32_t type) override {
+        ++traitQueries;
+        if (!traitsReady || type <= 0 || type >= kItemCount) return std::nullopt;
+        tlmod::rt::ItemTraits t;
+        switch (type) {
+            case 8: t.createTile = 4, t.consumable = true, t.useStyle = 1, t.maxStack = 9999; break;  // Tocha
+            case 24: t.damage = 7, t.useStyle = 1, t.melee = true; break;                                // Espada de Madeira
+            case 38: t.isAMaterial = true, t.maxStack = 9999; break;                                     // Lente
+            case 39: t.damage = 4, t.useStyle = 5, t.useAmmo = 40, t.shoot = 1, t.ranged = true; break;  // Arco de Madeira
+            case 40:  // Flecha de Madeira
+                t.damage = 5, t.ammo = 40, t.shoot = 1, t.consumable = true, t.ranged = true, t.canGetPrefixes = false;
+                t.maxStack = 9999;
+                break;
+            case 58: t.isAPickup = true; break;                                        // Coração
+            case 71: t.commonCoin = true, t.maxStack = 100; break;                     // Moeda de Cobre
+            case 95: t.damage = 10, t.useStyle = 5, t.useAmmo = 97, t.shoot = 10, t.ranged = true; break;
+            case 97: t.damage = 7, t.ammo = 97, t.consumable = true, t.canGetPrefixes = false, t.maxStack = 9999; break;
+            case 216: t.accessory = true, t.defense = 1; break;                         // Algema
+            case 739: t.damage = 14, t.useStyle = 5, t.magic = true, t.mana = 5, t.shoot = 121; break;  // Cajado de Ametista
+            case 2334: t.fishingCrate = true, t.maxStack = 9999; break;                // Caixa de Madeira
+            case 3507: t.damage = 5, t.useStyle = 13, t.melee = true, t.shimmerTransformToItem = 3508; break;
+            default: break;
+        }
+        return t;
+    }
+
     int32_t GiveItem(int32_t type, int32_t stack) override {
         Item proto = NewItem(type, 1);
         if (proto.IsAir()) return 0;

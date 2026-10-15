@@ -64,6 +64,8 @@ struct MethodInfo {
     X(uint32_t, il2cpp_method_get_param_count, (const MethodInfo*))                         \
     X(const Il2CppType*, il2cpp_method_get_param, (const MethodInfo*, uint32_t))            \
     X(char*, il2cpp_type_get_name, (const Il2CppType*))                                     \
+    X(Il2CppClass*, il2cpp_class_get_nested_types, (Il2CppClass*, void**))                  \
+    X(const char*, il2cpp_class_get_name, (Il2CppClass*))                                   \
     X(void, il2cpp_free, (void*))
 
 namespace il2cpp {

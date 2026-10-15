@@ -61,6 +61,7 @@ constexpr size_t Loadouts = 0xD60;     // EquipmentLoadout[] (3)
 // Item[] (4): o que LoadPlayer leu da seção "temporária" (mouse, sacrifício
 // da Jornada, Guia, Reforja). No save o jogo grava Main.mouseItem etc.
 constexpr size_t _temporaryItemSlots = 0xD78;
+constexpr size_t selectedItem = 0x3F0;  // int   slot do inventário na mão
 }  // namespace player_off
 
 // --- Terraria.Item / Chest / EquipmentLoadout --------------------------------
@@ -83,6 +84,37 @@ constexpr size_t rare = 0x14C;           // int
 constexpr size_t value = 0x178;          // int
 constexpr size_t netID = 0x198;          // int  <-- o que vai para o arquivo
 constexpr size_t prefix = 0x1A0;         // byte
+// O que a casca define no SetDefaults e a definição do mod não sobrescreve
+// (lidos de um Item de sonda para avaliar a casca: TLMod_ReadItemTraits).
+constexpr size_t accessory = 0x6B;       // bool
+constexpr size_t potion = 0x6C;          // bool
+constexpr size_t consumable = 0x6D;      // bool
+constexpr size_t channel = 0x6A;         // bool
+constexpr size_t vanity = 0x77;          // bool
+constexpr size_t magic = 0x7E;           // bool
+constexpr size_t ranged = 0x7F;          // bool
+constexpr size_t summon = 0x80;          // bool
+constexpr size_t sentry = 0x81;          // bool
+constexpr size_t fishingPole = 0x9C;     // int
+constexpr size_t bait = 0xA0;            // int
+constexpr size_t makeNPC = 0xA4;         // short
+constexpr size_t pick = 0xD4;            // int
+constexpr size_t axe = 0xD8;             // int
+constexpr size_t hammer = 0xDC;          // int
+constexpr size_t createTile = 0xE4;      // int   (-1 = não coloca bloco)
+constexpr size_t createWall = 0xE8;      // int   (-1 = não coloca parede)
+constexpr size_t healLife = 0xF8;        // int
+constexpr size_t healMana = 0xFC;        // int
+constexpr size_t defense = 0x118;        // int
+constexpr size_t headSlot = 0x11C;       // int   (-1 = não é armadura de cabeça)
+constexpr size_t bodySlot = 0x120;       // int
+constexpr size_t legSlot = 0x124;        // int
+constexpr size_t shoot = 0x158;          // int   projétil disparado ao usar
+constexpr size_t ammo = 0x160;           // int   AmmoID: este item É munição
+constexpr size_t useAmmo = 0x164;        // int   AmmoID que este item CONSOME (arco, arma)
+constexpr size_t mana = 0x170;           // int
+constexpr size_t buffType = 0x17C;       // int
+constexpr size_t mountType = 0x184;      // int   (-1 = não é montaria)
 }  // namespace item_off
 namespace chest_off {
 constexpr size_t item = 0x10;  // Item[] (40)
@@ -188,6 +220,35 @@ constexpr int32_t kMaxChests = 8000;
 // ItemID.Sets.ItemsThatShouldNotBeInInventory[type] estoura com type >= 5456.
 constexpr int32_t kItemVanillaCount = 5456;
 
+// Terraria.ID.ItemID.Sets (classe aninhada): arrays estáticos indexados pelo
+// type, criados no .cctor com o tamanho ItemID.Count. Um item de mod herda da
+// casca todos eles; estes são os que mudam o comportamento (TLMod_ReadItemTraits).
+constexpr const char* kItemIdClass = "ItemID";      // Terraria.ID
+constexpr const char* kItemIdSetsClass = "Sets";    // aninhada em ItemID
+namespace item_id_sets_static_off {
+constexpr size_t ItemsThatShouldNotBeInInventory = 0x28;  // bool[] some do inventário
+constexpr size_t ShimmerTransformToItem = 0x50;  // int[]  no Shimmer vira este item (-1 = não)
+constexpr size_t IsAKite = 0x90;                 // bool[]
+constexpr size_t CanGetPrefixes = 0xA8;          // bool[] aceita prefixo (reforja)
+constexpr size_t IsAMaterial = 0xC8;             // bool[] linha "Material" no tooltip
+constexpr size_t ToolTipDamageMultiplier = 0xF0; // float[] dano mostrado no tooltip
+constexpr size_t IsAPickup = 0xF8;               // bool[] coração/estrela: coletado, nunca no inventário
+constexpr size_t IsDrill = 0x100;                // bool[]
+constexpr size_t IsChainsaw = 0x108;             // bool[]
+constexpr size_t SummonerWeaponThatScalesWithAttackSpeed = 0x118;  // bool[]
+constexpr size_t IsFood = 0x120;                 // bool[]
+constexpr size_t IsFishingCrate = 0x180;         // bool[] botão direito abre
+constexpr size_t Deprecated = 0x1A8;             // bool[]
+constexpr size_t CommonCoin = 0x1B8;             // bool[] moeda: junta com o dinheiro
+constexpr size_t ExtractinatorMode = 0x1D0;      // int[]  o Extrator aceita (-1 = não)
+constexpr size_t StaffMinionSlotsRequired = 0x1D8;  // int[]
+constexpr size_t NebulaPickup = 0x1E8;           // bool[]
+constexpr size_t gunProj = 0x1F8;                // bool[]
+constexpr size_t Yoyo = 0x258;                   // bool[]
+constexpr size_t BossBag = 0x2A0;                // bool[] botão direito abre
+constexpr size_t OpenableBag = 0x2A8;            // bool[] botão direito abre
+}  // namespace item_id_sets_static_off
+
 // --- Campos de instância de Terraria.NPC -----------------------------------
 // Os de Entity são os mesmos de Player (whoAmI 0x10, active 0x14, ...).
 namespace npc_off {
@@ -216,7 +277,34 @@ constexpr size_t chest = 0x5F8;    // Chest[] Main.chest (8000 slots; nulo = sem
 constexpr size_t ActiveWorldFileData = 0x730;  // WorldFileData Main.ActiveWorldFileData
 constexpr size_t CreativeMenu = 0x50;          // CreativeUI Main.CreativeMenu
 constexpr size_t npcFrameCount = 0x1138;       // int[] Main.npcFrameCount (quadros na folha, por tipo)
+constexpr size_t itemAnimations = 0x10E8;      // DrawAnimation[] Main.itemAnimations (por type; nulo = sem animação)
+constexpr size_t recipe = 0x668;               // Recipe[] Main.recipe
 }  // namespace main_static_off
+
+// --- Telas que leem TextureAssets.Item por conta própria (screen_hooks.cpp) -------
+// GUIInstance.Active: a instância da interface do mobile, com uma tela por campo.
+constexpr const char* kGuiInstanceClass = "GUIInstance";  // namespace global
+namespace gui_instance_static_off {
+constexpr size_t Active = 0x0;  // GUIInstance
+}  // namespace gui_instance_static_off
+namespace gui_instance_off {
+constexpr size_t GUICraftGuide = 0xB0;  // GUICraftGuide (guia: o item vem de get_guideItem)
+constexpr size_t GUIReforge = 0x1A8;    // GUIReforge (o item vem de get_ReforgeItem)
+}  // namespace gui_instance_off
+namespace gui_crafting_off {
+constexpr size_t CraftHover = 0x88;  // Recipe: a receita sob o dedo (ingredientes do tooltip)
+}  // namespace gui_crafting_off
+namespace gui_craft_guide_popup_off {
+constexpr size_t focusGuideRecipe = 0xCC;      // int   (-1 = mostra o item da guia)
+constexpr size_t availableGuideRecipe = 0xD0;  // int[] índices em Main.recipe
+}  // namespace gui_craft_guide_popup_off
+namespace recipe_off {
+constexpr size_t createItem = 0x10;    // Item
+constexpr size_t requiredItem = 0x18;  // Item[]
+}  // namespace recipe_off
+namespace item_snippet_off {
+constexpr size_t _item = 0x30;  // Item  (ItemTagHandler.ItemSnippet: [i:ID] no chat)
+}  // namespace item_snippet_off
 
 // --- Estado do mundo -------------------------------------------------------
 // LocalUserGameState (namespace global, TypeDefIndex 695):
@@ -335,6 +423,23 @@ constexpr uintptr_t PlayerDrawLayers_DrawPlayer_27_HeldItem = 0x15C0EDC;
 // só pelo bestiário (UnlockableNPCEntryIcon.Draw) e pelos créditos
 // (NPCSegment.Draw), com NPCs próprios fora de Main.npc: ficam com a casca.
 constexpr uintptr_t Main_DrawNPCDirect = 0xBFC154;
+// Telas que leem TextureAssets.Item[item.type] direto (não passam pelos hooks acima).
+// Botão de transação com o item (loja: item à venda; pesquisa: item selecionado...).
+constexpr uintptr_t GUITransactionButton_Draw = 0x12220F8;
+constexpr uintptr_t GUIReforgePopup_DrawItem = 0x9D2984;        // item da reforja
+constexpr uintptr_t GUIResearch_DrawResearchItem = 0x9D7164;    // item na pesquisa da Jornada
+constexpr uintptr_t GUIResearch_CanBeResearched = 0x9D4C10;     // só olha o type: item de mod bloqueado
+constexpr uintptr_t GUICraftGuidePopup_DrawItem = 0x15A5384;    // item da guia / resultado da receita
+constexpr uintptr_t GUICrafting_MaterialItemDraw = 0x73AD78;    // ingrediente da receita em foco
+constexpr uintptr_t GUICrafting_MaterialItemTooltipDraw = 0x73A3AC;  // ingrediente no tooltip da receita
+// Controles de toque: botão de uso com o item selecionado e o botão do gancho.
+constexpr uintptr_t GUIVirtualInputController_DrawControls = 0x9EF6D0;
+constexpr uintptr_t GUIQuickActionButton_Draw = 0x10604EC;      // botões rápidos (gancho: Grapple, GrappleFire)
+constexpr uintptr_t Main_DrawInterface_40_InteractItemIcon = 0xD0F8B8;  // ícone do item (e munição) junto do cursor
+constexpr uintptr_t ItemSnippet_UniqueDraw = 0x97F0D8;           // [i:ID] no chat (mede pela textura)
+// Nome de NPC: o jogo só lê Lang pelo netID (o da casca).
+constexpr uintptr_t NPC_get_TypeName = 0xED9240;   // Lang.GetNPCNameValue(netID): hover, barra, mapa, morte
+constexpr uintptr_t NPC_GetTypeNetName = 0xEDB0BC; // NetworkText.FromKey(...): "X despertou!", "X foi derrotado"
 }  // namespace rva
 
 // Número de parâmetros C# (sem contar `this`), usado em
@@ -370,6 +475,19 @@ constexpr int Main_DrawItem = 2;
 constexpr int ItemSlot_DrawItemIcon = 7;
 constexpr int PlayerDrawLayers_DrawPlayer_27_HeldItem = 1;
 constexpr int Main_DrawNPCDirect = 6;
+constexpr int GUITransactionButton_Draw = 9;    // o overload com Item (os outros têm 10, 11 e 13)
+constexpr int GUIReforgePopup_DrawItem = 0;
+constexpr int GUIResearch_DrawResearchItem = 0;
+constexpr int GUIResearch_CanBeResearched = 2;
+constexpr int GUICraftGuidePopup_DrawItem = 0;
+constexpr int GUICrafting_MaterialItemDraw = 4;
+constexpr int GUICrafting_MaterialItemTooltipDraw = 4;
+constexpr int GUIVirtualInputController_DrawControls = 0;
+constexpr int GUIQuickActionButton_Draw = 4;    // 2 overloads de 4: o do QuickActionControl
+constexpr int Main_DrawInterface_40_InteractItemIcon = 0;
+constexpr int ItemSnippet_UniqueDraw = 6;
+constexpr int NPC_get_TypeName = 0;
+constexpr int NPC_GetTypeNetName = 0;
 }  // namespace argc
 
 }  // namespace terraria

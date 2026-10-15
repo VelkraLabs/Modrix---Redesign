@@ -58,6 +58,13 @@ FIELD_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "texture_assets_static_off": ("Terraria.GameContent", "TextureAssets", "static"),
     "xna_texture2d_off": ("Microsoft.Xna.Framework.Graphics", "Texture2D", "instance"),
     "player_draw_set_off": ("Terraria.DataStructures", "PlayerDrawSet", "instance"),
+    "item_id_sets_static_off": ("Terraria.ID", "ItemID.Sets", "static"),
+    "gui_instance_static_off": ("", "GUIInstance", "static"),
+    "gui_instance_off": ("", "GUIInstance", "instance"),
+    "gui_crafting_off": ("", "GUICrafting", "instance"),
+    "gui_craft_guide_popup_off": ("", "GUICraftGuidePopup", "instance"),
+    "recipe_off": ("Terraria", "Recipe", "instance"),
+    "item_snippet_off": ("Terraria.GameContent.UI.Chat", "ItemTagHandler.ItemSnippet", "instance"),
 }
 
 # Prefixo de rva::/argc:: (antes do primeiro "_") -> (namespace C#, classe).
@@ -74,6 +81,14 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
     "GUIHotbar": ("", "GUIHotbar"),
     "ItemSlot": ("Terraria.UI", "ItemSlot"),
     "PlayerDrawLayers": ("Terraria.DataStructures", "PlayerDrawLayers"),
+    "GUITransactionButton": ("", "GUITransactionButton"),
+    "GUIReforgePopup": ("", "GUIReforgePopup"),
+    "GUIResearch": ("", "GUIResearch"),
+    "GUICraftGuidePopup": ("", "GUICraftGuidePopup"),
+    "GUICrafting": ("", "GUICrafting"),
+    "GUIVirtualInputController": ("", "GUIVirtualInputController"),
+    "GUIQuickActionButton": ("", "GUIQuickActionButton"),
+    "ItemSnippet": ("Terraria.GameContent.UI.Chat", "ItemTagHandler.ItemSnippet"),
 }
 
 # Constantes do header que espelham uma const do jogo.
@@ -102,6 +117,8 @@ CLASS_NAME_CONSTANTS: Dict[str, str] = {
     "kLocalizedTextClass": "Terraria.Localization",
     "kTextureAssetsClass": "Terraria.GameContent",
     "kXnaTexture2DClass": "Microsoft.Xna.Framework.Graphics",
+    "kItemIdClass": "Terraria.ID",
+    "kGuiInstanceClass": "",
 }
 
 # content_registry.cpp DefaultRanges: tipo -> const com a contagem original.
@@ -164,7 +181,11 @@ class Dump:
         return t
 
     def get(self, namespace: str, name: str) -> Optional[TypeDef]:
-        return self.types.get((namespace, name))
+        t = self.types.get((namespace, name))
+        if t is None and "." in name:
+            # Classe aninhada ("ItemID.Sets"): o dump.cs a lista com namespace vazio.
+            t = self.types.get(("", name))
+        return t
 
     def base_of(self, t: TypeDef) -> Optional[TypeDef]:
         """Classe-base: a primeira da lista de bases que não seja interface."""
@@ -550,16 +571,21 @@ def compare(dump: Dump, header_path: Path, header: List[HeaderConst],
                 out.append(Finding("métodos", CHANGED, sym, f"{ac.int_value} parâm.", f"{got} parâm.",
                                    where(ac), "assinatura mudou: reconferir o typedef do hook"))
                 continue
-        if len(cands) > 1:
-            notes.append(f"{len(cands)} overloads com esse nome; adicione argc::{key}")
+        if len(cands) > 1 and (ac is None or rc is None):
+            notes.append(f"{len(cands)} overloads com esse nome; adicione argc::{key}" if ac is None
+                         else f"{len(cands)} overloads com {ac.int_value} parâm.; o RVA desempata (rva::{key})")
         if rc is None:  # só argc: confere existência e número de parâmetros
             out.append(Finding("métodos", WARN if notes else OK, sym, f"{ac.int_value} parâm.",
                                f"{cands[0].params} parâm.", where(ac), "; ".join(notes)))
             continue
         found = cands[0]
         if len(cands) > 1:
+            # Mesmo nome e mesmo nº de parâmetros (ex.: Draw(int, ...) e Draw(Layout, ...)):
+            # o RVA diz qual é; se nenhum bate, a ponte precisa reconferir o overload.
             match = [o for o in cands if o.rva == rc.int_value]
             found = match[0] if match else found
+            if not match and ac is not None:
+                notes.append(f"{len(cands)} overloads com {ac.int_value} parâm. e nenhum no RVA esperado")
         status = OK if found.rva == rc.int_value else CHANGED
         if found.rva is None:
             notes.append("sem corpo (abstrato/RVA -1)")

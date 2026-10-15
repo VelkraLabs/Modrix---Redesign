@@ -35,6 +35,9 @@ public:
     // via TLMod_SetItemCallbacks. GiveItem e o frame rodam na thread do jogo.
     void SetItemHooks(ItemHooks hooks) override;
     int32_t GiveItem(int32_t type, int32_t stack) override;
+    // ItemID.Sets + um Item de sonda com o SetDefaults do jogo (TLMod_ReadItemTraits):
+    // só responde na thread do jogo, no frame handler.
+    std::optional<ItemTraits> ItemShellTraits(int32_t type) override;
     void SetFrameHandler(std::function<void()> handler) override;
 
     // Texturas: TLMod_CreateTexture (UnityEngine.Texture2D embrulhada numa

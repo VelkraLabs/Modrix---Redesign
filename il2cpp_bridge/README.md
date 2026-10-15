@@ -38,6 +38,18 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
    `PlayerDrawLayers.DrawPlayer_27_HeldItem` e `Main.DrawNPCDirect`: se o item (netID de mod) ou o NPC é
    de mod e tem textura (`TLMod_SetDrawCallbacks`), o elemento da casca em `TextureAssets.Item`/`.Npc` é
    trocado pelo Asset do mod só durante o desenho; para NPCs também `Main.npcFrameCount[casca]` e `NPC.frame`.
+10. Telas que leem `TextureAssets.Item` por conta própria (`src/screen_hooks.cpp`). Cada hook acha o item como o
+   jogo e troca a textura (e tira `Main.itemAnimations[casca]`) só durante a chamada:
+   - `GUITransactionButton.Draw(Item)`, `GUIReforgePopup.DrawItem`, `GUIResearch.DrawResearchItem`;
+   - `GUICraftGuidePopup.DrawItem`, `GUICrafting.MaterialItemDraw`/`MaterialItemTooltipDraw`;
+   - controles de toque (`GUIVirtualInputController.DrawControls`, `GUIQuickActionButton.Draw`);
+   - ícone do cursor (`Main.DrawInterface_40_InteractItemIcon`) e `[i:ID]` no chat (`ItemSnippet.UniqueDraw`).
+
+   `GUIResearch.CanBeResearched` recusa item de mod. `NPC.TypeName` e `NPC.GetTypeNetName` devolvem o nome
+   do NPC de mod (callback `npc_name`). Lista completa, com o que fica de fora: `modapi/README.md`, "Texturas de mod".
+11. Propriedades de um item original para avaliar uma casca (`src/item_traits.cpp`, `TLMod_ReadItemTraits`).
+   Lê os arrays de `ItemID.Sets` pelo nome (classe aninhada, via `il2cpp_class_get_nested_types`) e os campos de
+   um `Item` de sonda montado com o `SetDefaults` do jogo. Só na thread do `Main.DoUpdate`.
 
 ## Build
 
