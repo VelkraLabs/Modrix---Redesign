@@ -1,0 +1,19 @@
+{
+  "modrix_api": 1,
+  "id": "modrix.example_item",
+  "name": "Exemplo: Rubi Fictício",
+  "version": "0.1.0",
+  "authors": ["Modrix"],
+  "description": "Mod mínimo: registra um único item que não existe no jogo original.",
+  "dependencies": {},
+  "content": {
+    "items": ["fictional_ruby"]
+  },
+  "entry": {
+    "android-arm64": "lib/android-arm64/libexample_item.so",
+    "linux-x86_64": "lib/linux-x86_64/libexample_item.so",
+    "linux-arm64": "lib/linux-arm64/libexample_item.so",
+    "windows-x86_64": "lib/windows-x86_64/example_item.dll",
+    "macos-arm64": "lib/macos-arm64/libexample_item.dylib"
+  }
+}

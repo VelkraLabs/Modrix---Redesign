@@ -65,6 +65,19 @@ int32_t Modrix_GetStatLife(Il2CppObject* player);
 // Precisa rodar numa thread anexada ao IL2CPP.
 Il2CppObject* Modrix_GetLocalPlayer(void);
 
+// Main.player[index]; nulo se fora da faixa ou se a ponte não está pronta.
+Il2CppObject* Modrix_GetPlayerByIndex(int32_t index);
+
+// Entity.whoAmI do player (índice em Main.player); -1 para nulo.
+int32_t Modrix_GetPlayerIndex(Il2CppObject* player);
+
+// Espera, sem iniciar nada, até outra thread concluir Modrix_Init.
+bool Modrix_WaitReady(int timeoutMs);
+
+// Anexa a thread atual ao IL2CPP (necessário antes de runtime_invoke fora
+// das threads do jogo). Não faz nada se já estiver anexada.
+bool Modrix_AttachCurrentThread(void);
+
 // Chama Player.Heal(amount) via il2cpp_runtime_invoke.
 bool Modrix_Heal(Il2CppObject* player, int32_t amount);
 

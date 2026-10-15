@@ -25,6 +25,8 @@ struct Resolved {
     // Offset de Player.statLife. Começa no valor do dump (0x704) e é
     // sobrescrito pelo il2cpp_field_get_offset quando a classe é resolvida.
     size_t statLifeOffset = terraria::player_off::statLife;
+    // Entity.whoAmI (índice do player em Main.player). Dump: 0x10.
+    size_t whoAmIOffset = terraria::player_off::whoAmI;
 
     FieldInfo* mainPlayerField = nullptr;       // static Player[] Main.player
     const MethodInfo* mainGetMyPlayer = nullptr;  // static int Main.get_myPlayer()
@@ -102,6 +104,14 @@ bool ResolveTerraria() {
         g.statLifeOffset = off;
     } else {
         LOGW("campo statLife não encontrado; usando offset do dump 0x%zx", g.statLifeOffset);
+    }
+
+    // --- Entity.whoAmI: il2cpp_class_get_field_from_name também procura nas
+    // classes-base, então funciona a partir de Terraria.Player.
+    if (FieldInfo* f = api.il2cpp_class_get_field_from_name(g.playerClass, "whoAmI")) {
+        g.whoAmIOffset = api.il2cpp_field_get_offset(f);
+    } else {
+        LOGW("campo whoAmI não encontrado; usando offset do dump 0x%zx", g.whoAmIOffset);
     }
 
     // --- Main.player (static Player[]) e Main.get_myPlayer -----------------
@@ -218,8 +228,35 @@ int32_t Modrix_GetStatLife(Il2CppObject* player) {
     return FieldAt<int32_t>(player, g.statLifeOffset);
 }
 
+Il2CppObject* Modrix_GetPlayerByIndex(int32_t index) {
+    if (!g_ready.load() || !g.mainPlayerField || index < 0) return nullptr;
+    // static Player[] Main.player
+    Il2CppArray* players = nullptr;
+    api.il2cpp_field_static_get_value(g.mainPlayerField, &players);
+    if (!players || static_cast<uint32_t>(index) >= api.il2cpp_array_length(players)) {
+        return nullptr;
+    }
+    return ArrayData<Il2CppObject*>(players)[index];
+}
+
+int32_t Modrix_GetPlayerIndex(Il2CppObject* player) {
+    if (!player) return -1;
+    return FieldAt<int32_t>(player, g.whoAmIOffset);
+}
+
+bool Modrix_WaitReady(int timeoutMs) {
+    int remaining = timeoutMs;
+    return WaitFor([] { return g_ready.load(); }, remaining);
+}
+
+bool Modrix_AttachCurrentThread(void) {
+    if (!g_ready.load()) return false;
+    if (!api.il2cpp_thread_current()) api.il2cpp_thread_attach(g.domain);
+    return true;
+}
+
 Il2CppObject* Modrix_GetLocalPlayer(void) {
-    if (!g_ready.load() || !g.mainPlayerField || !g.mainGetMyPlayer) return nullptr;
+    if (!g_ready.load() || !g.mainGetMyPlayer) return nullptr;
 
     // static int Main.myPlayer { get; } -> runtime_invoke devolve int "boxed".
     Il2CppException* exc = nullptr;
@@ -229,15 +266,7 @@ Il2CppObject* Modrix_GetLocalPlayer(void) {
         return nullptr;
     }
     int32_t myPlayer = *static_cast<int32_t*>(api.il2cpp_object_unbox(boxed));
-
-    // static Player[] Main.player
-    Il2CppArray* players = nullptr;
-    api.il2cpp_field_static_get_value(g.mainPlayerField, &players);
-    if (!players || myPlayer < 0 ||
-        static_cast<uint32_t>(myPlayer) >= api.il2cpp_array_length(players)) {
-        return nullptr;
-    }
-    return ArrayData<Il2CppObject*>(players)[myPlayer];
+    return Modrix_GetPlayerByIndex(myPlayer);
 }
 
 bool Modrix_Heal(Il2CppObject* player, int32_t amount) {

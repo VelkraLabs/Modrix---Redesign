@@ -82,6 +82,7 @@ thread_local Il2CppThread* t_current = nullptr;
 Il2CppClass g_player{"Terraria", "Player", {}, {}};
 Il2CppClass g_main{"Terraria", "Main", {}, {}};
 FieldInfo g_fStatLife{"statLife", kStatLife, nullptr};
+FieldInfo g_fWhoAmI{"whoAmI", 0x10, nullptr};  // de Entity; o IL2CPP real busca nas classes-base
 
 alignas(16) uint8_t g_localPlayer[kPlayerSize];
 alignas(16) uint8_t g_playersArray[sizeof(Il2CppArray) + 255 * sizeof(void*)];
@@ -126,7 +127,7 @@ extern "C" {
 // ---- controle do teste ------------------------------------------------------
 __attribute__((visibility("default"))) void mock_il2cpp_init() {
     g_csharp.classes = {&g_player, &g_main};
-    g_player.fields = {&g_fStatLife};
+    g_player.fields = {&g_fStatLife, &g_fWhoAmI};
     g_player.methods = {&g_mHurt, &g_mHeal};
     g_main.fields = {&g_fMainPlayer};
     g_main.methods = {&g_mGetMyPlayer};

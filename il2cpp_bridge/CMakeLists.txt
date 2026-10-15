@@ -68,7 +68,7 @@ if(ANDROID)
 
   # --- Ponte -------------------------------------------------------------------
   add_library(modrix_bridge SHARED ${BRIDGE_SOURCES} src/hook_shadowhook.cpp src/entry.cpp)
-  target_include_directories(modrix_bridge PRIVATE include)
+  target_include_directories(modrix_bridge PUBLIC include)
   target_compile_options(modrix_bridge PRIVATE ${BRIDGE_WARNINGS} -ffunction-sections -fdata-sections)
   target_link_libraries(modrix_bridge PRIVATE shadowhook_static dl log)
   # Exporta só Modrix_* (nada do ShadowHook vaza), descarta código morto e

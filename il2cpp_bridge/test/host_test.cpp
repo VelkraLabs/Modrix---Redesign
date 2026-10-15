@@ -74,6 +74,11 @@ int main(int argc, char** argv) {
     Il2CppObject* player = Modrix_GetLocalPlayer();
     CHECK(player == mock_local());
     CHECK(Modrix_GetStatLife(player) == 400);
+    CHECK(Modrix_GetPlayerIndex(player) == 0);
+    CHECK(Modrix_GetPlayerByIndex(0) == player);
+    CHECK(Modrix_GetPlayerByIndex(1) == nullptr);
+    CHECK(Modrix_GetPlayerByIndex(255) == nullptr);
+    CHECK(Modrix_WaitReady(0));
 
     CHECK(Modrix_Heal(player, 50));
     CHECK(Modrix_GetStatLife(player) == 450);
