@@ -53,7 +53,7 @@ Fn LoadOrig(void* const& slot) {
 
 // Callbacks publicados como cópia imutável. As antigas não são liberadas:
 // um hook pode estar no meio de uma chamada na thread do jogo.
-std::atomic<const ModrixNpcCallbacks*> g_callbacks{nullptr};
+std::atomic<const TLModNpcCallbacks*> g_callbacks{nullptr};
 
 bool Resolved() { return n.klass && n.mainNpcField; }
 
@@ -69,14 +69,14 @@ Il2CppArray* MainNpcArray() {
 int32_t IndexOf(Il2CppObject* npc) {
     if (!npc || !Resolved()) return -1;
     int32_t w = FieldAt<int32_t>(npc, n.whoAmI);
-    if (w >= 0 && w < terraria::kMaxNPCs && Modrix_GetNpcByIndex(w) == npc) return w;
-    return Modrix_FindNpcIndex(npc);
+    if (w >= 0 && w < terraria::kMaxNPCs && TLMod_GetNpcByIndex(w) == npc) return w;
+    return TLMod_FindNpcIndex(npc);
 }
 
 }  // namespace
 
 // ===========================================================================
-// Resolução e instalação (chamadas por Modrix_Init)
+// Resolução e instalação (chamadas por TLMod_Init)
 // ===========================================================================
 namespace bridge {
 
@@ -119,11 +119,11 @@ bool ResolveNpc() {
 
 void InstallNpcHooks() {
     InstallHook("NPC.SetDefaults", n.setDefaults, terraria::rva::NPC_SetDefaults,
-                reinterpret_cast<void*>(&Modrix_Hooked_NpcSetDefaults), &g_origSetDefaultsSlot);
-    InstallHook("NPC.AI", n.aiMethod, terraria::rva::NPC_AI, reinterpret_cast<void*>(&Modrix_Hooked_NpcAI),
+                reinterpret_cast<void*>(&TLMod_Hooked_NpcSetDefaults), &g_origSetDefaultsSlot);
+    InstallHook("NPC.AI", n.aiMethod, terraria::rva::NPC_AI, reinterpret_cast<void*>(&TLMod_Hooked_NpcAI),
                 &g_origAiSlot);
     InstallHook("NPC.NewNPC", n.newNpc, terraria::rva::NPC_NewNPC,
-                reinterpret_cast<void*>(&Modrix_Hooked_NpcNewNPC), &g_origNewNpcSlot);
+                reinterpret_cast<void*>(&TLMod_Hooked_NpcNewNPC), &g_origNewNpcSlot);
 }
 
 }  // namespace bridge
@@ -133,18 +133,18 @@ void InstallNpcHooks() {
 // ===========================================================================
 extern "C" {
 
-void Modrix_SetNpcCallbacks(const ModrixNpcCallbacks* callbacks) {
-    g_callbacks.store(callbacks ? new ModrixNpcCallbacks(*callbacks) : nullptr, std::memory_order_release);
+void TLMod_SetNpcCallbacks(const TLModNpcCallbacks* callbacks) {
+    g_callbacks.store(callbacks ? new TLModNpcCallbacks(*callbacks) : nullptr, std::memory_order_release);
 }
 
-Il2CppObject* Modrix_GetNpcByIndex(int32_t index) {
+Il2CppObject* TLMod_GetNpcByIndex(int32_t index) {
     if (!Resolved() || index < 0) return nullptr;
     Il2CppArray* arr = MainNpcArray();
     if (!arr || static_cast<uint32_t>(index) >= api.il2cpp_array_length(arr)) return nullptr;
     return ArrayData<Il2CppObject*>(arr)[index];
 }
 
-int32_t Modrix_FindNpcIndex(Il2CppObject* npc) {
+int32_t TLMod_FindNpcIndex(Il2CppObject* npc) {
     if (!npc || !Resolved()) return -1;
     Il2CppArray* arr = MainNpcArray();
     if (!arr) return -1;
@@ -155,7 +155,7 @@ int32_t Modrix_FindNpcIndex(Il2CppObject* npc) {
     return -1;
 }
 
-bool Modrix_ReadNpc(Il2CppObject* npc, ModrixNpcFields* out) {
+bool TLMod_ReadNpc(Il2CppObject* npc, TLModNpcFields* out) {
     if (!npc || !out || !Resolved()) return false;
     out->index = FieldAt<int32_t>(npc, n.whoAmI);
     out->active = FieldAt<bool>(npc, n.active);
@@ -175,7 +175,7 @@ bool Modrix_ReadNpc(Il2CppObject* npc, ModrixNpcFields* out) {
     return true;
 }
 
-bool Modrix_WriteNpc(Il2CppObject* npc, const ModrixNpcFields* in) {
+bool TLMod_WriteNpc(Il2CppObject* npc, const TLModNpcFields* in) {
     if (!npc || !in || !Resolved()) return false;
     FieldAt<float>(npc, n.position) = in->x;
     FieldAt<float>(npc, n.position + 4) = in->y;
@@ -192,7 +192,7 @@ bool Modrix_WriteNpc(Il2CppObject* npc, const ModrixNpcFields* in) {
     return true;
 }
 
-int32_t Modrix_SpawnNpc(int32_t x, int32_t y, int32_t type) {
+int32_t TLMod_SpawnNpc(int32_t x, int32_t y, int32_t type) {
     if (!Resolved()) return terraria::kMaxNPCs;
     // Tipos-valor vão por ponteiro; tipos-referência (IEntitySource) vão como o
     // próprio objeto: nulo aqui. TODO: confirmar no jogo que NewNPC aceita
@@ -217,12 +217,12 @@ int32_t Modrix_SpawnNpc(int32_t x, int32_t y, int32_t type) {
 // NPC.NewNPC (RVA 0xEE4630). Ponto de REGISTRO DE SPAWN: todo NPC criado no
 // mundo passa por aqui (spawn natural via NPC.SpawnNPC, invocações, itens,
 // estátuas...), exceto os que chegam pela rede no cliente.
-int32_t Modrix_Hooked_NpcNewNPC(Il2CppObject* source, int32_t x, int32_t y, int32_t type,
+int32_t TLMod_Hooked_NpcNewNPC(Il2CppObject* source, int32_t x, int32_t y, int32_t type,
                                 int32_t start, float ai0, float ai1, float ai2, float ai3,
                                 int32_t target, const MethodInfo* method) {
     auto orig = LoadOrig<NpcNewNpcFn>(g_origNewNpcSlot);
     if (!orig) return terraria::kMaxNPCs;
-    const ModrixNpcCallbacks* cb = g_callbacks.load(std::memory_order_acquire);
+    const TLModNpcCallbacks* cb = g_callbacks.load(std::memory_order_acquire);
 
     // Pré: um ID de mod vira o tipo "casca" original antes de o jogo tocar nele.
     int32_t spawnType = (cb && cb->remap_spawn_type) ? cb->remap_spawn_type(type) : type;
@@ -232,7 +232,7 @@ int32_t Modrix_Hooked_NpcNewNPC(Il2CppObject* source, int32_t x, int32_t y, int3
     // Pós: o slot já foi preenchido (SetDefaults rodou lá dentro).
     if (cb && cb->on_spawned) {
         bool ok = index >= 0 && index < terraria::kMaxNPCs;
-        cb->on_spawned(ok ? Modrix_GetNpcByIndex(index) : nullptr, index, type, spawnType);
+        cb->on_spawned(ok ? TLMod_GetNpcByIndex(index) : nullptr, index, type, spawnType);
     }
     return index;
 }
@@ -240,11 +240,11 @@ int32_t Modrix_Hooked_NpcNewNPC(Il2CppObject* source, int32_t x, int32_t y, int3
 // NPC.SetDefaults (RVA 0xDAF1BC). O NPC vai virar `type`: por spawn (dentro
 // de NewNPC), por Transform (fases de boss, slimes), ou pela rede. Quem marca
 // slots como "NPC de mod" precisa desmarcar aqui; NewNPC remarca no pós.
-void Modrix_Hooked_NpcSetDefaults(Il2CppObject* self, int32_t type, NPCSpawnParams spawnparams,
+void TLMod_Hooked_NpcSetDefaults(Il2CppObject* self, int32_t type, NPCSpawnParams spawnparams,
                                   const MethodInfo* method) {
     auto orig = LoadOrig<NpcSetDefaultsFn>(g_origSetDefaultsSlot);
     if (!orig) return;
-    const ModrixNpcCallbacks* cb = g_callbacks.load(std::memory_order_acquire);
+    const TLModNpcCallbacks* cb = g_callbacks.load(std::memory_order_acquire);
     if (cb && cb->on_set_defaults) cb->on_set_defaults(self, IndexOf(self), type);
     orig(self, type, spawnparams, method);
 }
@@ -254,10 +254,10 @@ void Modrix_Hooked_NpcSetDefaults(Il2CppObject* self, int32_t type, NPCSpawnPara
 // PONTO DE EXTENSÃO POR FRAME: o comportamento do mod roda aqui, antes da AI
 // original, e pode substituí-la. Movimento, gravidade e colisão continuam em
 // UpdateNPC depois do AI, então o mod só precisa ajustar velocity/ai[].
-void Modrix_Hooked_NpcAI(Il2CppObject* self, const MethodInfo* method) {
+void TLMod_Hooked_NpcAI(Il2CppObject* self, const MethodInfo* method) {
     auto orig = LoadOrig<NpcAiFn>(g_origAiSlot);
     if (!orig) return;
-    const ModrixNpcCallbacks* cb = g_callbacks.load(std::memory_order_acquire);
+    const TLModNpcCallbacks* cb = g_callbacks.load(std::memory_order_acquire);
     if (cb && cb->on_ai && cb->on_ai(self, IndexOf(self))) return;  // mod substituiu a AI
     orig(self, method);
 }

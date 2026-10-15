@@ -8,12 +8,12 @@
 
 #include "../../tests/fake_game.h"
 #include "json.h"
-#include "modrix/overlay/config_store.h"
-#include "modrix/overlay/panel.h"
-#include "modrix/runtime/log.h"
-#include "modrix/runtime/mod_loader.h"
+#include "tlmod/overlay/config_store.h"
+#include "tlmod/overlay/panel.h"
+#include "tlmod/runtime/log.h"
+#include "tlmod/runtime/mod_loader.h"
 
-using namespace modrix;
+using namespace tlmod;
 using overlay::ChecklistView;
 using overlay::PanelController;
 using overlay::Tab;
@@ -32,7 +32,7 @@ static int g_checks = 0;
         }                                                                    \
     } while (0)
 
-static void QuietSink(ModrixLogLevel, const std::string&, const std::string&) {}
+static void QuietSink(TLModLogLevel, const std::string&, const std::string&) {}
 
 static std::string ReadFile(const fs::path& p) {
     std::ifstream in(p, std::ios::binary);
@@ -55,8 +55,8 @@ static const overlay::BossRow* Boss(const ChecklistView& v, const std::string& n
 
 // ---------------------------------------------------------------------------
 static void TestConfigStore(const fs::path& tmp) {
-    std::printf("\n== configuração (modrix_config.json)\n");
-    fs::path file = tmp / "cfg" / "modrix_config.json";
+    std::printf("\n== configuração (tlmod_config.json)\n");
+    fs::path file = tmp / "cfg" / "tlmod_config.json";
     overlay::ConfigStore cfg(file);
     std::string err;
     CHECK(cfg.Load(&err) && cfg.Disabled().empty());  // arquivo ausente = tudo ligado
@@ -74,7 +74,7 @@ static void TestConfigStore(const fs::path& tmp) {
 
     // Não dá para gravar (o "diretório" é um arquivo): nada muda em memória.
     std::ofstream(tmp / "not_a_dir") << "x";
-    overlay::ConfigStore readonly(tmp / "not_a_dir" / "modrix_config.json");
+    overlay::ConfigStore readonly(tmp / "not_a_dir" / "tlmod_config.json");
     CHECK(!readonly.SetEnabled("a.mod", false, &err) && readonly.IsEnabled("a.mod"));
 }
 
@@ -83,29 +83,29 @@ static void TestLoaderDisabled(const fs::path& mods) {
     std::printf("\n== ModLoader respeita mods desligados\n");
     FakeGame game;
     rt::ModLoader loader(&game);
-    loader.SetDisabled({"modrix.example_item"});
+    loader.SetDisabled({"tlmod.example_item"});
     loader.DiscoverDirectory(mods);
     rt::ModManifest dep;
-    dep.apiVersion = MODRIX_API_VERSION;
+    dep.apiVersion = TLMOD_API_VERSION;
     dep.id = "test.needs_item";
     dep.name = "Precisa do item";
     dep.version = *rt::SemVer::Parse("1.0.0");
-    dep.dependencies.push_back({"modrix.example_item", *rt::VersionReq::Parse("*"), false});
-    loader.AddBuiltin(dep, [](const ModrixHostApi*, ModrixContext*) { return 0; });
+    dep.dependencies.push_back({"tlmod.example_item", *rt::VersionReq::Parse("*"), false});
+    loader.AddBuiltin(dep, [](const TLModHostApi*, TLModContext*) { return 0; });
     loader.LoadAll();
-    CHECK(loader.Find("modrix.example_item")->state == rt::ModState::Disabled);
-    CHECK(!loader.Registry().Find(MODRIX_CONTENT_ITEM, "modrix.example_item:fictional_ruby"));  // nem foi aberto
+    CHECK(loader.Find("tlmod.example_item")->state == rt::ModState::Disabled);
+    CHECK(!loader.Registry().Find(TLMOD_CONTENT_ITEM, "tlmod.example_item:fictional_ruby"));  // nem foi aberto
     CHECK(loader.Find("test.needs_item")->state == rt::ModState::Skipped &&
           loader.Find("test.needs_item")->error.find("desativada") != std::string::npos);
-    CHECK(loader.Find("modrix.boss_checklist")->state == rt::ModState::Loaded);
+    CHECK(loader.Find("tlmod.boss_checklist")->state == rt::ModState::Loaded);
 }
 
 // ---------------------------------------------------------------------------
 static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     std::printf("\n== painel: aba Mods\n");
-    overlay::ConfigStore cfg(tmp / "panel" / "modrix_config.json");
+    overlay::ConfigStore cfg(tmp / "panel" / "tlmod_config.json");
     std::string err;
-    CHECK(cfg.SetEnabled("modrix.example_boss", false, &err));  // desligado numa sessão anterior
+    CHECK(cfg.SetEnabled("tlmod.example_boss", false, &err));  // desligado numa sessão anterior
 
     FakeGame game;
     rt::ModLoader loader(&game);
@@ -120,31 +120,31 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     for (int t = 1; t <= 10; ++t) panel.Tick(t * 1000);
     CHECK(panel.ChecklistQueries() == 0);
 
-    const overlay::ModRow* item = Row(panel, "modrix.example_item");
-    const overlay::ModRow* boss = Row(panel, "modrix.example_boss");
-    const overlay::ModRow* bc = Row(panel, "modrix.boss_checklist");
+    const overlay::ModRow* item = Row(panel, "tlmod.example_item");
+    const overlay::ModRow* boss = Row(panel, "tlmod.example_boss");
+    const overlay::ModRow* bc = Row(panel, "tlmod.boss_checklist");
     CHECK(item && item->title == "Exemplo: Rubi Fictício" && item->subtitle == "v0.1.0 · Carregado" && item->enabled);
     CHECK(boss && boss->state == "disabled" && boss->subtitle == "v0.1.0 · Desativado" && !boss->enabled);
     CHECK(bc && bc->state == "loaded" && boss->pending.empty() && panel.ModsNotice().empty());
 
     // Desligar: grava, avisa que vale ao reiniciar, e NÃO descarrega nada.
     uint64_t v = panel.Version();
-    CHECK(panel.HandleAction("toggle_mod", "modrix.example_item") && panel.Version() > v);
-    item = Row(panel, "modrix.example_item");
+    CHECK(panel.HandleAction("toggle_mod", "tlmod.example_item") && panel.Version() > v);
+    item = Row(panel, "tlmod.example_item");
     CHECK(!item->enabled && item->pending == "Será desativado ao reiniciar o jogo");
     CHECK(panel.ModsNotice() == "Reinicie o jogo para aplicar as mudanças.");
-    CHECK(!cfg.IsEnabled("modrix.example_item") &&
-          ReadFile(cfg.Path()).find("modrix.example_item") != std::string::npos);
-    CHECK(loader.Find("modrix.example_item")->state == rt::ModState::Loaded);  // segue carregado
-    CHECK(loader.Registry().Find(MODRIX_CONTENT_ITEM, "modrix.example_item:fictional_ruby") == 8192);
+    CHECK(!cfg.IsEnabled("tlmod.example_item") &&
+          ReadFile(cfg.Path()).find("tlmod.example_item") != std::string::npos);
+    CHECK(loader.Find("tlmod.example_item")->state == rt::ModState::Loaded);  // segue carregado
+    CHECK(loader.Registry().Find(TLMOD_CONTENT_ITEM, "tlmod.example_item:fictional_ruby") == 8192);
 
     // Religar um desativado: vale na próxima abertura.
-    CHECK(panel.ToggleMod("modrix.example_boss"));
-    CHECK(Row(panel, "modrix.example_boss")->pending == "Será ativado ao reiniciar o jogo");
+    CHECK(panel.ToggleMod("tlmod.example_boss"));
+    CHECK(Row(panel, "tlmod.example_boss")->pending == "Será ativado ao reiniciar o jogo");
     // Voltar ao estado de origem limpa os avisos.
-    panel.ToggleMod("modrix.example_item");
-    panel.ToggleMod("modrix.example_boss");
-    CHECK(Row(panel, "modrix.example_item")->pending.empty() && panel.ModsNotice().empty());
+    panel.ToggleMod("tlmod.example_item");
+    panel.ToggleMod("tlmod.example_boss");
+    CHECK(Row(panel, "tlmod.example_item")->pending.empty() && panel.ModsNotice().empty());
     CHECK(!panel.ToggleMod("nao.existe", &err) && err.find("desconhecido") != std::string::npos);
 
     std::printf("\n== painel: aba Boss Checklist\n");
@@ -164,7 +164,7 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     // Num mundo, início de jogo.
     game.inWorld = true;
     for (auto& p : game.progress) p = false;
-    for (ModrixProgress f : {MODRIX_DOWNED_KING_SLIME, MODRIX_DOWNED_EYE_OF_CTHULHU, MODRIX_DOWNED_EVIL_BOSS})
+    for (TLModProgress f : {TLMOD_DOWNED_KING_SLIME, TLMOD_DOWNED_EYE_OF_CTHULHU, TLMOD_DOWNED_EVIL_BOSS})
         game.progress[f] = true;
     CHECK(panel.Tick(22000));
     const ChecklistView& c = panel.Checklist();
@@ -183,8 +183,8 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     CHECK(!panel.Tick(23000) && panel.Version() == before && panel.ChecklistQueries() == 4);
 
     // Um boss cai: na próxima atualização aparece.
-    game.progress[MODRIX_DOWNED_QUEEN_BEE] = true;
-    game.progress[MODRIX_DOWNED_DEERCLOPS] = std::nullopt;
+    game.progress[TLMOD_DOWNED_QUEEN_BEE] = true;
+    game.progress[TLMOD_DOWNED_DEERCLOPS] = std::nullopt;
     CHECK(panel.Tick(24000) && panel.Checklist().next == "Próximo: Skeletron");
     CHECK(Boss(panel.Checklist(), "Deerclops")->statusLabel == "Desconhecido");
 
@@ -195,7 +195,7 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     CHECK(!panel.IsOpen() && panel.ChecklistQueries() == queries);
 
     // Reabrir atualiza na hora, sem esperar o intervalo.
-    game.progress[MODRIX_PROGRESS_HARDMODE] = true;
+    game.progress[TLMOD_PROGRESS_HARDMODE] = true;
     panel.SetOpen(true);
     CHECK(panel.Tick(40001) && panel.Checklist().hardmode && panel.ChecklistQueries() == queries + 1);
 
@@ -213,9 +213,9 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
 // ---------------------------------------------------------------------------
 static void TestChecklistNotLoaded(const fs::path& mods, const fs::path& tmp) {
     std::printf("\n== painel: Boss Checklist desligado\n");
-    overlay::ConfigStore cfg(tmp / "nochk" / "modrix_config.json");
+    overlay::ConfigStore cfg(tmp / "nochk" / "tlmod_config.json");
     std::string err;
-    cfg.SetEnabled("modrix.boss_checklist", false, &err);
+    cfg.SetEnabled("tlmod.boss_checklist", false, &err);
     FakeGame game;
     game.inWorld = true;
     rt::ModLoader loader(&game);
@@ -235,8 +235,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
         return 2;
     }
-    if (!std::getenv("MODRIX_VERBOSE")) rt::SetLogSink(&QuietSink);
-    fs::path tmp = fs::temp_directory_path() / "modrix_overlay_test";
+    if (!std::getenv("TLMOD_VERBOSE")) rt::SetLogSink(&QuietSink);
+    fs::path tmp = fs::temp_directory_path() / "tlmod_overlay_test";
     fs::remove_all(tmp);
     fs::create_directories(tmp);
     // Só os três mods de exemplo, sem lixo de build.

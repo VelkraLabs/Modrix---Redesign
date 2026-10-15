@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(modrix_il2cpp_bridge C CXX)
+project(tlmod_il2cpp_bridge C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,7 +10,7 @@ set(BRIDGE_SOURCES src/il2cpp_api.cpp src/bridge.cpp src/npc_hooks.cpp src/world
 set(BRIDGE_WARNINGS -Wall -Wextra -Werror)
 
 if(ANDROID)
-  # Build para o jogo: libmodrix_bridge.so, com o ShadowHook embutido.
+  # Build para o jogo: libtlmod_bridge.so, com o ShadowHook embutido.
   # cmake -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
   #       -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 ..
   enable_language(ASM)
@@ -67,24 +67,24 @@ if(ANDROID)
             ${SH_DIR}/third_party/xdl ${SH_DIR}/third_party/bsd ${SH_DIR}/third_party/lss)
 
   # --- Ponte -------------------------------------------------------------------
-  add_library(modrix_bridge SHARED ${BRIDGE_SOURCES} src/hook_shadowhook.cpp src/entry.cpp)
-  target_include_directories(modrix_bridge PUBLIC include)
-  target_compile_options(modrix_bridge PRIVATE ${BRIDGE_WARNINGS} -ffunction-sections -fdata-sections)
-  target_link_libraries(modrix_bridge PRIVATE shadowhook_static dl log)
-  # Exporta só Modrix_* (nada do ShadowHook vaza), descarta código morto e
+  add_library(tlmod_bridge SHARED ${BRIDGE_SOURCES} src/hook_shadowhook.cpp src/entry.cpp)
+  target_include_directories(tlmod_bridge PUBLIC include)
+  target_compile_options(tlmod_bridge PRIVATE ${BRIDGE_WARNINGS} -ffunction-sections -fdata-sections)
+  target_link_libraries(tlmod_bridge PRIVATE shadowhook_static dl log)
+  # Exporta só TLMod_* (nada do ShadowHook vaza), descarta código morto e
   # alinha a 16 KB, exigido por aparelhos Android 15+ com páginas de 16 KB.
   set(EXPORTS_MAP ${CMAKE_CURRENT_SOURCE_DIR}/src/exports.map)
-  target_link_options(modrix_bridge PRIVATE
+  target_link_options(tlmod_bridge PRIVATE
     -Wl,--version-script=${EXPORTS_MAP} -Wl,--gc-sections -Wl,--exclude-libs,ALL
     -Wl,-z,max-page-size=16384)
-  set_target_properties(modrix_bridge PROPERTIES LINK_DEPENDS ${EXPORTS_MAP})
+  set_target_properties(tlmod_bridge PROPERTIES LINK_DEPENDS ${EXPORTS_MAP})
 else()
   # Build de host: só para validar a lógica contra uma libil2cpp.so falsa.
   # O ShadowHook só existe para ARM/Android; aqui o teste usa um instalador falso.
-  add_library(modrix_bridge SHARED ${BRIDGE_SOURCES})
-  target_include_directories(modrix_bridge PUBLIC include)
-  target_compile_options(modrix_bridge PRIVATE ${BRIDGE_WARNINGS})
-  target_link_libraries(modrix_bridge PRIVATE dl pthread)
+  add_library(tlmod_bridge SHARED ${BRIDGE_SOURCES})
+  target_include_directories(tlmod_bridge PUBLIC include)
+  target_compile_options(tlmod_bridge PRIVATE ${BRIDGE_WARNINGS})
+  target_link_libraries(tlmod_bridge PRIVATE dl pthread)
 
   add_library(il2cpp_mock SHARED test/mock_il2cpp.cpp)
   set_target_properties(il2cpp_mock PROPERTIES OUTPUT_NAME il2cpp CXX_VISIBILITY_PRESET default)
@@ -92,7 +92,7 @@ else()
 
   add_executable(host_test test/host_test.cpp)
   target_compile_options(host_test PRIVATE ${BRIDGE_WARNINGS})
-  target_link_libraries(host_test PRIVATE modrix_bridge dl pthread)
+  target_link_libraries(host_test PRIVATE tlmod_bridge dl pthread)
   add_dependencies(host_test il2cpp_mock)
 
   enable_testing()

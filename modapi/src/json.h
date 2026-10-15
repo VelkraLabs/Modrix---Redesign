@@ -8,7 +8,7 @@
 #include <variant>
 #include <vector>
 
-namespace modrix::rt::json {
+namespace tlmod::rt::json {
 
 struct Value;
 using Array = std::vector<Value>;
@@ -37,4 +37,4 @@ struct Value {
 // Chaves duplicadas num objeto são erro (evita manifests ambíguos).
 std::optional<Value> Parse(const std::string& text, std::string* error);
 
-}  // namespace modrix::rt::json
+}  // namespace tlmod::rt::json

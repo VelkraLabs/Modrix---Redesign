@@ -1,10 +1,10 @@
-#include "modrix/runtime/content_registry.h"
+#include "tlmod/runtime/content_registry.h"
 
-#include "modrix/runtime/game_adapter.h"
-#include "modrix/runtime/log.h"
-#include "modrix/runtime/manifest.h"
+#include "tlmod/runtime/game_adapter.h"
+#include "tlmod/runtime/log.h"
+#include "tlmod/runtime/manifest.h"
 
-namespace modrix::rt {
+namespace tlmod::rt {
 
 // Faixas do Terraria Mobile (Unity 2021.3.56f2). Contagens originais vêm de
 // Terraria.ID.*.Count no dump.cs; WallID.Count é static readonly (só existe
@@ -20,8 +20,8 @@ namespace modrix::rt {
 //
 // A folga entre o último original e o 1º ID de mod absorve itens que futuras
 // versões do jogo acrescentarem, sem mudar IDs de mods.
-const std::array<KindRange, MODRIX_CONTENT_KIND_COUNT>& ContentRegistry::DefaultRanges() {
-    static const std::array<KindRange, MODRIX_CONTENT_KIND_COUNT> kRanges = {{
+const std::array<KindRange, TLMOD_CONTENT_KIND_COUNT>& ContentRegistry::DefaultRanges() {
+    static const std::array<KindRange, TLMOD_CONTENT_KIND_COUNT> kRanges = {{
         {"item", 5456, 8192, 32767},
         {"npc", 688, 4096, 32767},
         {"projectile", 1022, 4096, 32767},
@@ -33,10 +33,10 @@ const std::array<KindRange, MODRIX_CONTENT_KIND_COUNT>& ContentRegistry::Default
 }
 
 ContentRegistry::ContentRegistry(const GameAdapter* game,
-                                 std::array<KindRange, MODRIX_CONTENT_KIND_COUNT> ranges)
+                                 std::array<KindRange, TLMOD_CONTENT_KIND_COUNT> ranges)
     : ranges_(ranges) {
-    for (int k = 0; k < MODRIX_CONTENT_KIND_COUNT; ++k) {
-        auto kind = static_cast<ModrixContentKind>(k);
+    for (int k = 0; k < TLMOD_CONTENT_KIND_COUNT; ++k) {
+        auto kind = static_cast<TLModContentKind>(k);
         const KindRange& r = ranges_[k];
         // Valor em runtime (do jogo) tem prioridade sobre o do dump.
         std::optional<int32_t> count = game ? game->VanillaCount(kind) : std::nullopt;
@@ -46,7 +46,7 @@ ContentRegistry::ContentRegistry(const GameAdapter* game,
         enabled_[k] = r.firstModId <= r.maxId;
         if (count && *count > r.firstModId) {
             // O jogo cresceu além da folga: desativar é melhor que colidir.
-            Log(MODRIX_LOG_ERROR, "registry",
+            Log(TLMOD_LOG_ERROR, "registry",
                 std::string(r.name) + ": o jogo tem " + std::to_string(*count) +
                     " IDs originais, acima do 1º ID de mod (" + std::to_string(r.firstModId) +
                     "). Conteúdo de mod desse tipo fica desativado.");
@@ -55,14 +55,14 @@ ContentRegistry::ContentRegistry(const GameAdapter* game,
     }
 }
 
-std::optional<ModrixId> ContentRegistry::Register(ModrixContentKind kind, const std::string& modId,
+std::optional<TLModId> ContentRegistry::Register(TLModContentKind kind, const std::string& modId,
                                                   const std::string& name, ContentPayload payload,
                                                   std::string* error) {
-    auto fail = [&](const std::string& msg) -> std::optional<ModrixId> {
+    auto fail = [&](const std::string& msg) -> std::optional<TLModId> {
         if (error) *error = msg;
         return std::nullopt;
     };
-    if (kind < 0 || kind >= MODRIX_CONTENT_KIND_COUNT) return fail("tipo de conteúdo inválido");
+    if (kind < 0 || kind >= TLMOD_CONTENT_KIND_COUNT) return fail("tipo de conteúdo inválido");
     const KindRange& r = ranges_[kind];
     if (!IsValidModId(modId)) return fail("id de mod inválido");
     if (!IsValidContentName(name)) return fail("nome \"" + name + "\" inválido; use [a-z0-9_]{1,64}");
@@ -76,33 +76,33 @@ std::optional<ModrixId> ContentRegistry::Register(ModrixContentKind kind, const 
         return fail(std::string(r.name) + ": faixa de IDs de mods esgotada (" +
                     std::to_string(r.firstModId) + ".." + std::to_string(r.maxId) + ")");
     }
-    auto id = static_cast<ModrixId>(next);
+    auto id = static_cast<TLModId>(next);
     entries_[kind].push_back({kind, id, key, modId, name, std::move(payload)});
     byKey_[kind][key] = id;
     return id;
 }
 
-std::optional<ModrixId> ContentRegistry::Find(ModrixContentKind kind, const std::string& key) const {
-    if (kind < 0 || kind >= MODRIX_CONTENT_KIND_COUNT) return std::nullopt;
+std::optional<TLModId> ContentRegistry::Find(TLModContentKind kind, const std::string& key) const {
+    if (kind < 0 || kind >= TLMOD_CONTENT_KIND_COUNT) return std::nullopt;
     auto it = byKey_[kind].find(key);
     if (it == byKey_[kind].end()) return std::nullopt;
     return it->second;
 }
 
-bool ContentRegistry::IsModId(ModrixContentKind kind, ModrixId id) const {
-    if (kind < 0 || kind >= MODRIX_CONTENT_KIND_COUNT) return false;
+bool ContentRegistry::IsModId(TLModContentKind kind, TLModId id) const {
+    if (kind < 0 || kind >= TLMOD_CONTENT_KIND_COUNT) return false;
     return id >= ranges_[kind].firstModId &&
            id < ranges_[kind].firstModId + static_cast<int64_t>(entries_[kind].size());
 }
 
 ContentRegistry::Checkpoint ContentRegistry::Mark() const {
     Checkpoint cp;
-    for (int k = 0; k < MODRIX_CONTENT_KIND_COUNT; ++k) cp.sizes[k] = entries_[k].size();
+    for (int k = 0; k < TLMOD_CONTENT_KIND_COUNT; ++k) cp.sizes[k] = entries_[k].size();
     return cp;
 }
 
 void ContentRegistry::Rollback(const Checkpoint& cp) {
-    for (int k = 0; k < MODRIX_CONTENT_KIND_COUNT; ++k) {
+    for (int k = 0; k < TLMOD_CONTENT_KIND_COUNT; ++k) {
         while (entries_[k].size() > cp.sizes[k]) {
             byKey_[k].erase(entries_[k].back().key);
             entries_[k].pop_back();
@@ -110,9 +110,9 @@ void ContentRegistry::Rollback(const Checkpoint& cp) {
     }
 }
 
-const ContentEntry* ContentRegistry::Get(ModrixContentKind kind, ModrixId id) const {
+const ContentEntry* ContentRegistry::Get(TLModContentKind kind, TLModId id) const {
     if (!IsModId(kind, id)) return nullptr;
     return &entries_[kind][static_cast<size_t>(id - ranges_[kind].firstModId)];
 }
 
-}  // namespace modrix::rt
+}  // namespace tlmod::rt

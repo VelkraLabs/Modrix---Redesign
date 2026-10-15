@@ -1,9 +1,9 @@
 {
-  "modrix_api": 1,
-  "id": "modrix.boss_checklist",
+  "tlmod_api": 1,
+  "id": "tlmod.boss_checklist",
   "name": "Boss Checklist",
   "version": "0.1.0",
-  "authors": ["Modrix"],
+  "authors": ["TLMod"],
   "description": "Lê quais bosses, minibosses e eventos já foram derrotados no mundo atual e expõe a lista para a interface.",
   "dependencies": {},
   "provides": ["checklist"],

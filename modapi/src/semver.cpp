@@ -1,9 +1,9 @@
-#include "modrix/runtime/semver.h"
+#include "tlmod/runtime/semver.h"
 
 #include <cctype>
 #include <sstream>
 
-namespace modrix::rt {
+namespace tlmod::rt {
 namespace {
 
 bool ParseUint(const std::string& s, size_t& i, int& out) {
@@ -136,4 +136,4 @@ bool VersionReq::Matches(const SemVer& v) const {
     return true;
 }
 
-}  // namespace modrix::rt
+}  // namespace tlmod::rt

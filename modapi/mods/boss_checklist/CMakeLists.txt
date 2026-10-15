@@ -1,13 +1,13 @@
-# Mod autocontido: só precisa do header da API (modrix_api.h / modrix.hpp).
-# Fora do repositório: -DMODRIX_SDK_INCLUDE_DIR=/caminho/modapi/include
+# Mod autocontido: só precisa do header da API (tlmod_api.h / tlmod.hpp).
+# Fora do repositório: -DTLMOD_SDK_INCLUDE_DIR=/caminho/modapi/include
 cmake_minimum_required(VERSION 3.18)
 project(boss_checklist CXX)
 
-if(NOT DEFINED MODRIX_SDK_INCLUDE_DIR)
-  set(MODRIX_SDK_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+if(NOT DEFINED TLMOD_SDK_INCLUDE_DIR)
+  set(TLMOD_SDK_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 endif()
-if(NOT DEFINED MODRIX_MODS_OUTPUT_DIR)
-  set(MODRIX_MODS_OUTPUT_DIR ${CMAKE_BINARY_DIR}/dist/mods)
+if(NOT DEFINED TLMOD_MODS_OUTPUT_DIR)
+  set(TLMOD_MODS_OUTPUT_DIR ${CMAKE_BINARY_DIR}/dist/mods)
 endif()
 
 # Chave de plataforma, igual a CurrentPlatformKey() do runtime.
@@ -26,20 +26,20 @@ elseif(APPLE)
 else()
   set(_os linux)
 endif()
-set(MODRIX_PLATFORM "${_os}-${_cpu}")
+set(TLMOD_PLATFORM "${_os}-${_cpu}")
 
-set(MOD_OUT ${MODRIX_MODS_OUTPUT_DIR}/boss_checklist)
+set(MOD_OUT ${TLMOD_MODS_OUTPUT_DIR}/boss_checklist)
 
 add_library(boss_checklist SHARED boss_checklist.cpp)
-target_include_directories(boss_checklist PRIVATE ${MODRIX_SDK_INCLUDE_DIR})
+target_include_directories(boss_checklist PRIVATE ${TLMOD_SDK_INCLUDE_DIR})
 target_compile_features(boss_checklist PRIVATE cxx_std_17)
 target_compile_options(boss_checklist PRIVATE -Wall -Wextra -Werror)
 set_target_properties(boss_checklist PROPERTIES
-  CXX_VISIBILITY_PRESET hidden            # só modrix_mod_init é exportado
-  LIBRARY_OUTPUT_DIRECTORY ${MOD_OUT}/lib/${MODRIX_PLATFORM}
-  RUNTIME_OUTPUT_DIRECTORY ${MOD_OUT}/lib/${MODRIX_PLATFORM})
+  CXX_VISIBILITY_PRESET hidden            # só tlmod_mod_init é exportado
+  LIBRARY_OUTPUT_DIRECTORY ${MOD_OUT}/lib/${TLMOD_PLATFORM}
+  RUNTIME_OUTPUT_DIRECTORY ${MOD_OUT}/lib/${TLMOD_PLATFORM})
 
-# ELF (Android/Linux): exporta só modrix_mod_init. Sem isso a libc++ estática
+# ELF (Android/Linux): exporta só tlmod_mod_init. Sem isso a libc++ estática
 # do NDK sai inteira na tabela de símbolos dinâmicos do mod.
 if(CMAKE_SYSTEM_NAME MATCHES "Android|Linux")
   set(_map ${CMAKE_CURRENT_SOURCE_DIR}/exports.map)

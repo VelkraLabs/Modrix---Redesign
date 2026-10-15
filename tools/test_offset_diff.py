@@ -164,7 +164,7 @@ class OffsetDiffTest(unittest.TestCase):
         self.assertEqual(r["Terraria.ID.NPCID.Count"].found, "700")
 
     def test_name_references(self):
-        self.progress.write_text('    {MODRIX_DOWNED_X, "Main", "hardMode"},\n', encoding="utf-8")
+        self.progress.write_text('    {TLMOD_DOWNED_X, "Main", "hardMode"},\n', encoding="utf-8")
         self.registry.write_text('        {"npc", 688, 4096, 32767},\n', encoding="utf-8")
         r = self.run_diff(DUMP)
         self.assertEqual(r["Terraria.Main.hardMode"].status, od.MISSING)

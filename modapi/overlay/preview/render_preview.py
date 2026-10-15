@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Prévia em PNG do painel do Modrix, desenhada a partir do view-model.
+"""Prévia em PNG do painel do TLMod, desenhada a partir do view-model.
 
-O painel real são Views Android (ModrixOverlay.java), que não rodam no host.
+O painel real são Views Android (TLModOverlay.java), que não rodam no host.
 Este script espelha o layout do Java (mesmas medidas em dp, paddings e ordem)
 e lê exatamente o JSON que o PanelController entrega ao Java, inclusive o
 tema. Serve para ver o resultado antes do aparelho; não é uma captura de tela.

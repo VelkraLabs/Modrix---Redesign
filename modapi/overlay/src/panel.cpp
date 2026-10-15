@@ -1,10 +1,10 @@
-#include "modrix/overlay/panel.h"
+#include "tlmod/overlay/panel.h"
 
 #include "json.h"
 #include "json_writer.h"
-#include "modrix/overlay/config_store.h"
+#include "tlmod/overlay/config_store.h"
 
-namespace modrix::overlay {
+namespace tlmod::overlay {
 
 using rt::ModState;
 namespace json = rt::json;
@@ -307,7 +307,7 @@ std::string PanelController::SnapshotJson() const {
     w.Key("version").Int(static_cast<int64_t>(version_));
     w.Key("open").Bool(open_);
     w.Key("tab").String(tab_ == Tab::Mods ? "mods" : "checklist");
-    w.Key("title").String("Modrix");
+    w.Key("title").String("TLMod");
 
     w.Key("theme").BeginObject();
     w.Key("panel_bg").String(theme::kPanelBg);
@@ -386,4 +386,4 @@ std::string PanelController::SnapshotJson() const {
     return w.str();
 }
 
-}  // namespace modrix::overlay
+}  // namespace tlmod::overlay

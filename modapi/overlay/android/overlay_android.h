@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace modrix::overlay {
+namespace tlmod::overlay {
 
 class PanelController;
 
@@ -12,4 +12,4 @@ class PanelController;
 // é usado na thread de UI do Android.
 bool StartOverlay(PanelController* panel, int timeoutMs, std::string* error);
 
-}  // namespace modrix::overlay
+}  // namespace tlmod::overlay

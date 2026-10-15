@@ -1,4 +1,4 @@
-// API pública da ponte Modrix <-> IL2CPP (Terraria Mobile).
+// API pública da ponte TLMod <-> IL2CPP (Terraria Mobile).
 #pragma once
 
 #include <cstddef>
@@ -23,7 +23,7 @@ typedef double (*PlayerHurtFn)(Il2CppObject* self, Il2CppObject* damageSource, i
                                int32_t cooldownCounter, bool dodgeable, const MethodInfo* method);
 
 // Contexto entregue ao callback do mod a cada Player.Hurt.
-struct ModrixHurtEvent {
+struct TLModHurtEvent {
     Il2CppObject* player;
     int32_t damage;         // dano pedido (antes de defesa)
     int32_t hitDirection;
@@ -37,58 +37,58 @@ struct ModrixHurtEvent {
 // Callback do mod. Chamado duas vezes por Hurt:
 //   pre  (after == false): pode alterar ev->damage; retornar false cancela o golpe.
 //   post (after == true):  só observa; o retorno é ignorado.
-typedef bool (*ModrixHurtCallback)(ModrixHurtEvent* ev, bool after);
+typedef bool (*TLModHurtCallback)(TLModHurtEvent* ev, bool after);
 
 // Função para instalar um inline hook. No Android a ponte usa o ShadowHook
 // (src/hook_shadowhook.cpp); no teste de host, um instalador falso.
 // Deve gravar em *original o endereço que chama a função original. O slot
 // `original` aponta para memória global da ponte, válida pelo processo todo:
 // a engine pode guardá-lo e reescrevê-lo depois (ShadowHook, modo multi).
-typedef bool (*ModrixHookInstaller)(void* target, void* replacement, void** original);
+typedef bool (*TLModHookInstaller)(void* target, void* replacement, void** original);
 
-// Configuração (chamar antes de Modrix_Init / Modrix_StartInitThread).
-void Modrix_SetLibraryName(const char* name);  // padrão: "libil2cpp.so"
-void Modrix_SetHookInstaller(ModrixHookInstaller installer);
-void Modrix_SetHurtCallback(ModrixHurtCallback cb);
+// Configuração (chamar antes de TLMod_Init / TLMod_StartInitThread).
+void TLMod_SetLibraryName(const char* name);  // padrão: "libil2cpp.so"
+void TLMod_SetHookInstaller(TLModHookInstaller installer);
+void TLMod_SetHurtCallback(TLModHurtCallback cb);
 
 // Inicialização síncrona: espera a libil2cpp.so e o runtime subirem (até
 // timeoutMs), resolve Terraria.Player e instala o hook em Player.Hurt.
-bool Modrix_Init(int timeoutMs);
+bool TLMod_Init(int timeoutMs);
 
-// Dispara Modrix_Init numa thread separada (usado pelo construtor da .so).
-void Modrix_StartInitThread(void);
+// Dispara TLMod_Init numa thread separada (usado pelo construtor da .so).
+void TLMod_StartInitThread(void);
 
 // Leitura de statLife pelo offset resolvido em runtime (fallback: 0x704).
-int32_t Modrix_GetStatLife(Il2CppObject* player);
+int32_t TLMod_GetStatLife(Il2CppObject* player);
 
 // Player local via Main.player[Main.myPlayer] (usa il2cpp_runtime_invoke).
 // Precisa rodar numa thread anexada ao IL2CPP.
-Il2CppObject* Modrix_GetLocalPlayer(void);
+Il2CppObject* TLMod_GetLocalPlayer(void);
 
 // Main.player[index]; nulo se fora da faixa ou se a ponte não está pronta.
-Il2CppObject* Modrix_GetPlayerByIndex(int32_t index);
+Il2CppObject* TLMod_GetPlayerByIndex(int32_t index);
 
 // Entity.whoAmI do player (índice em Main.player); -1 para nulo.
-int32_t Modrix_GetPlayerIndex(Il2CppObject* player);
+int32_t TLMod_GetPlayerIndex(Il2CppObject* player);
 
-// Espera, sem iniciar nada, até outra thread concluir Modrix_Init.
-bool Modrix_WaitReady(int timeoutMs);
+// Espera, sem iniciar nada, até outra thread concluir TLMod_Init.
+bool TLMod_WaitReady(int timeoutMs);
 
 // Anexa a thread atual ao IL2CPP (necessário antes de runtime_invoke fora
 // das threads do jogo). Não faz nada se já estiver anexada.
-bool Modrix_AttachCurrentThread(void);
+bool TLMod_AttachCurrentThread(void);
 
 // Chama Player.Heal(amount) via il2cpp_runtime_invoke.
-bool Modrix_Heal(Il2CppObject* player, int32_t amount);
+bool TLMod_Heal(Il2CppObject* player, int32_t amount);
 
 // Função que o hook de Player.Hurt aponta. Exportada para que um instalador
-// externo (ex.: script Frida, ou o loader do Modrix) possa usá-la diretamente.
-double Modrix_Hooked_PlayerHurt(Il2CppObject* self, Il2CppObject* damageSource, int32_t damage,
+// externo (ex.: script Frida, ou o loader do TLMod) possa usá-la diretamente.
+double TLMod_Hooked_PlayerHurt(Il2CppObject* self, Il2CppObject* damageSource, int32_t damage,
                                 int32_t hitDirection, bool pvp, bool quiet, bool crit,
                                 int32_t cooldownCounter, bool dodgeable, const MethodInfo* method);
 
 // Endereço da função original (trampoline) após o hook; nulo se não instalado.
-PlayerHurtFn Modrix_OriginalPlayerHurt(void);
+PlayerHurtFn TLMod_OriginalPlayerHurt(void);
 
 // ===========================================================================
 // NPCs: pontos onde um NPC/boss de mod se pluga
@@ -113,13 +113,13 @@ PlayerHurtFn Modrix_OriginalPlayerHurt(void);
 // Layout do il2cpp.h/dump.cs: 4 campos de 8 bytes. Com 32 bytes (> 16), a ABI
 // AArch64 passa um ponteiro para uma cópia; declarar o layout exato faz o
 // compilador gerar a mesma convenção no hook.
-typedef struct ModrixNullableF32 { bool hasValue; float value; } ModrixNullableF32;
-typedef struct ModrixNullableI32 { bool hasValue; int32_t value; } ModrixNullableI32;
+typedef struct TLModNullableF32 { bool hasValue; float value; } TLModNullableF32;
+typedef struct TLModNullableI32 { bool hasValue; int32_t value; } TLModNullableI32;
 typedef struct NPCSpawnParams {
-    ModrixNullableF32 sizeScaleOverride;                    // 0x00
-    ModrixNullableI32 playerCountForMultiplayerDifficultyOverride;  // 0x08
+    TLModNullableF32 sizeScaleOverride;                    // 0x00
+    TLModNullableI32 playerCountForMultiplayerDifficultyOverride;  // 0x08
     Il2CppObject* gameModeData;                             // 0x10 (GameModeData, classe)
-    ModrixNullableF32 strengthMultiplierOverride;           // 0x18
+    TLModNullableF32 strengthMultiplierOverride;           // 0x18
 } NPCSpawnParams;
 
 // Assinaturas nativas (script.json do dump). `this` primeiro em métodos de
@@ -131,7 +131,7 @@ typedef void (*NpcSetDefaultsFn)(Il2CppObject* self, int32_t type, NPCSpawnParam
                                  const MethodInfo* method);
 typedef void (*NpcAiFn)(Il2CppObject* self, const MethodInfo* method);
 
-typedef struct ModrixNpcCallbacks {
+typedef struct TLModNpcCallbacks {
     // Pré-NewNPC: devolve o tipo que o jogo deve realmente criar. Para tipos
     // originais, devolva o próprio type. Nulo = sem troca.
     int32_t (*remap_spawn_type)(int32_t requested_type);
@@ -145,13 +145,13 @@ typedef struct ModrixNpcCallbacks {
     // Pré-AI, uma vez por NPC ativo por tick (thread do jogo).
     // Retornar true pula a AI original nesse tick.
     bool (*on_ai)(Il2CppObject* npc, int32_t index);
-} ModrixNpcCallbacks;
+} TLModNpcCallbacks;
 
 // Copia os callbacks (a struct pode ser temporária). Nulo desliga todos.
-void Modrix_SetNpcCallbacks(const ModrixNpcCallbacks* callbacks);
+void TLMod_SetNpcCallbacks(const TLModNpcCallbacks* callbacks);
 
 // Visão plana dos campos de NPC que a camada de mods usa.
-typedef struct ModrixNpcFields {
+typedef struct TLModNpcFields {
     int32_t index;     // whoAmI
     bool active;
     int32_t type;
@@ -160,20 +160,20 @@ typedef struct ModrixNpcFields {
     int32_t life, lifeMax, damage, defense;
     int32_t target;    // índice do player
     float ai[4];
-} ModrixNpcFields;
+} TLModNpcFields;
 
-bool Modrix_ReadNpc(Il2CppObject* npc, ModrixNpcFields* out);
+bool TLMod_ReadNpc(Il2CppObject* npc, TLModNpcFields* out);
 // Escreve posição, velocidade, life, lifeMax, damage, defense, target e ai[].
 // Não muda index, active nem type.
-bool Modrix_WriteNpc(Il2CppObject* npc, const ModrixNpcFields* in);
+bool TLMod_WriteNpc(Il2CppObject* npc, const TLModNpcFields* in);
 
-Il2CppObject* Modrix_GetNpcByIndex(int32_t index);    // Main.npc[index]
-int32_t Modrix_FindNpcIndex(Il2CppObject* npc);       // posição em Main.npc[] ou -1
+Il2CppObject* TLMod_GetNpcByIndex(int32_t index);    // Main.npc[index]
+int32_t TLMod_FindNpcIndex(Il2CppObject* npc);       // posição em Main.npc[] ou -1
 
 // Chama NPC.NewNPC via il2cpp_runtime_invoke (passa pelos hooks acima).
 // Só na thread do jogo. Devolve o índice ou 200 se não houver slot.
 // `source` (IEntitySource) vai nulo.
-int32_t Modrix_SpawnNpc(int32_t x, int32_t y, int32_t type);
+int32_t TLMod_SpawnNpc(int32_t x, int32_t y, int32_t type);
 
 // ===========================================================================
 // Estado do mundo / frame
@@ -182,28 +182,28 @@ int32_t Modrix_SpawnNpc(int32_t x, int32_t y, int32_t type);
 // Chamado no início de Main.DoUpdate (RVA 0xCADDB8): uma vez por frame, na
 // thread do jogo, tanto no menu quanto no mundo. É o lugar para tirar
 // "fotografias" de estado que outras threads (UI) vão consultar. Nulo desliga.
-typedef void (*ModrixFrameCallback)(void);
-void Modrix_SetFrameCallback(ModrixFrameCallback cb);
+typedef void (*TLModFrameCallback)(void);
+void TLMod_SetFrameCallback(TLModFrameCallback cb);
 
-// Só na thread do jogo (ex.: dentro do ModrixFrameCallback): 1 = menu,
+// Só na thread do jogo (ex.: dentro do TLModFrameCallback): 1 = menu,
 // 0 = dentro de um mundo, -1 = indisponível. Lê LocalUserGameState.Instance
 // (ThreadStatic) .gameMenu; em outra thread Instance é nulo e o resultado é -1.
-int32_t Modrix_IsGameMenu(void);
+int32_t TLMod_IsGameMenu(void);
 
 // Campo estático comum (não ThreadStatic), resolvido uma vez e lido muitas.
 // namespaze pode ser "" (namespace global). Nulo se não existir.
-typedef struct ModrixStaticField ModrixStaticField;
-ModrixStaticField* Modrix_FindStaticField(const char* namespaze, const char* klass, const char* field);
-bool Modrix_ReadStaticBool(const ModrixStaticField* field, bool* out);
+typedef struct TLModStaticField TLModStaticField;
+TLModStaticField* TLMod_FindStaticField(const char* namespaze, const char* klass, const char* field);
+bool TLMod_ReadStaticBool(const TLModStaticField* field, bool* out);
 
-// Handlers que os hooks apontam (exportados como Modrix_Hooked_PlayerHurt).
-void Modrix_Hooked_MainDoUpdate(Il2CppObject* self, Il2CppObject* gameTime, const MethodInfo* method);
-int32_t Modrix_Hooked_NpcNewNPC(Il2CppObject* source, int32_t x, int32_t y, int32_t type,
+// Handlers que os hooks apontam (exportados como TLMod_Hooked_PlayerHurt).
+void TLMod_Hooked_MainDoUpdate(Il2CppObject* self, Il2CppObject* gameTime, const MethodInfo* method);
+int32_t TLMod_Hooked_NpcNewNPC(Il2CppObject* source, int32_t x, int32_t y, int32_t type,
                                 int32_t start, float ai0, float ai1, float ai2, float ai3,
                                 int32_t target, const MethodInfo* method);
-void Modrix_Hooked_NpcSetDefaults(Il2CppObject* self, int32_t type, NPCSpawnParams spawnparams,
+void TLMod_Hooked_NpcSetDefaults(Il2CppObject* self, int32_t type, NPCSpawnParams spawnparams,
                                   const MethodInfo* method);
-void Modrix_Hooked_NpcAI(Il2CppObject* self, const MethodInfo* method);
+void TLMod_Hooked_NpcAI(Il2CppObject* self, const MethodInfo* method);
 
 }  // extern "C"
 #pragma GCC visibility pop

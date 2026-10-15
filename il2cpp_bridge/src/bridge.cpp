@@ -37,8 +37,8 @@ struct Resolved {
 
 Resolved g;
 const char* g_libName = "libil2cpp.so";
-ModrixHookInstaller g_installer = nullptr;
-std::atomic<ModrixHurtCallback> g_hurtCallback{nullptr};
+TLModHookInstaller g_installer = nullptr;
+std::atomic<TLModHurtCallback> g_hurtCallback{nullptr};
 // Slot do endereço "original" de Player.Hurt. Precisa viver o processo
 // inteiro: o ShadowHook (modo multi) grava aqui o próximo elo da cadeia de
 // proxies e pode reescrevê-lo depois, quando outro hook no mesmo alvo sai.
@@ -117,11 +117,11 @@ bool ResolveTerraria() {
 
 bool InstallHurtHook() {
     return bridge::InstallHook("Player.Hurt", g.playerHurt, terraria::rva::Player_Hurt,
-                               reinterpret_cast<void*>(&Modrix_Hooked_PlayerHurt), &g_origHurtSlot);
+                               reinterpret_cast<void*>(&TLMod_Hooked_PlayerHurt), &g_origHurtSlot);
 }
 
 void* InitThreadMain(void*) {
-    Modrix_Init(60000);
+    TLMod_Init(60000);
     return nullptr;
 }
 
@@ -172,7 +172,7 @@ bool InstallHook(const char* name, const MethodInfo* method, uintptr_t dumpRva, 
         LOGI("%s confere com o dump: base+0x%lx", name, static_cast<unsigned long>(dumpRva));
     }
     if (!g_installer) {
-        LOGW("nenhum ModrixHookInstaller configurado; hook de %s não instalado", name);
+        LOGW("nenhum TLModHookInstaller configurado; hook de %s não instalado", name);
         return false;
     }
     void* target = reinterpret_cast<void*>(method->methodPointer);
@@ -191,11 +191,11 @@ bool InstallHook(const char* name, const MethodInfo* method, uintptr_t dumpRva, 
 // ===========================================================================
 extern "C" {
 
-void Modrix_SetLibraryName(const char* name) { g_libName = name; }
-void Modrix_SetHookInstaller(ModrixHookInstaller installer) { g_installer = installer; }
-void Modrix_SetHurtCallback(ModrixHurtCallback cb) { g_hurtCallback.store(cb); }
+void TLMod_SetLibraryName(const char* name) { g_libName = name; }
+void TLMod_SetHookInstaller(TLModHookInstaller installer) { g_installer = installer; }
+void TLMod_SetHurtCallback(TLModHurtCallback cb) { g_hurtCallback.store(cb); }
 
-bool Modrix_Init(int timeoutMs) {
+bool TLMod_Init(int timeoutMs) {
     if (g_ready.load()) return true;
     int remaining = timeoutMs;
 
@@ -239,17 +239,17 @@ bool Modrix_Init(int timeoutMs) {
     return ok;
 }
 
-void Modrix_StartInitThread(void) {
+void TLMod_StartInitThread(void) {
     pthread_t th;
     if (pthread_create(&th, nullptr, &InitThreadMain, nullptr) == 0) pthread_detach(th);
 }
 
-int32_t Modrix_GetStatLife(Il2CppObject* player) {
+int32_t TLMod_GetStatLife(Il2CppObject* player) {
     if (!player) return -1;
     return FieldAt<int32_t>(player, g.statLifeOffset);
 }
 
-Il2CppObject* Modrix_GetPlayerByIndex(int32_t index) {
+Il2CppObject* TLMod_GetPlayerByIndex(int32_t index) {
     if (!g_ready.load() || !g.mainPlayerField || index < 0) return nullptr;
     // static Player[] Main.player
     Il2CppArray* players = nullptr;
@@ -260,23 +260,23 @@ Il2CppObject* Modrix_GetPlayerByIndex(int32_t index) {
     return ArrayData<Il2CppObject*>(players)[index];
 }
 
-int32_t Modrix_GetPlayerIndex(Il2CppObject* player) {
+int32_t TLMod_GetPlayerIndex(Il2CppObject* player) {
     if (!player) return -1;
     return FieldAt<int32_t>(player, g.whoAmIOffset);
 }
 
-bool Modrix_WaitReady(int timeoutMs) {
+bool TLMod_WaitReady(int timeoutMs) {
     int remaining = timeoutMs;
     return WaitFor([] { return g_ready.load(); }, remaining);
 }
 
-bool Modrix_AttachCurrentThread(void) {
+bool TLMod_AttachCurrentThread(void) {
     if (!g_ready.load()) return false;
     if (!api.il2cpp_thread_current()) api.il2cpp_thread_attach(g.domain);
     return true;
 }
 
-Il2CppObject* Modrix_GetLocalPlayer(void) {
+Il2CppObject* TLMod_GetLocalPlayer(void) {
     if (!g_ready.load() || !g.mainGetMyPlayer) return nullptr;
 
     // static int Main.myPlayer { get; } -> runtime_invoke devolve int "boxed".
@@ -287,10 +287,10 @@ Il2CppObject* Modrix_GetLocalPlayer(void) {
         return nullptr;
     }
     int32_t myPlayer = *static_cast<int32_t*>(api.il2cpp_object_unbox(boxed));
-    return Modrix_GetPlayerByIndex(myPlayer);
+    return TLMod_GetPlayerByIndex(myPlayer);
 }
 
-bool Modrix_Heal(Il2CppObject* player, int32_t amount) {
+bool TLMod_Heal(Il2CppObject* player, int32_t amount) {
     if (!g_ready.load() || !player || !g.playerHeal) return false;
     // Tipos-valor vão como ponteiro para o valor em params[].
     void* params[] = {&amount};
@@ -303,18 +303,18 @@ bool Modrix_Heal(Il2CppObject* player, int32_t amount) {
     return true;
 }
 
-PlayerHurtFn Modrix_OriginalPlayerHurt(void) { return LoadOrigHurt(); }
+PlayerHurtFn TLMod_OriginalPlayerHurt(void) { return LoadOrigHurt(); }
 
 // ---------------------------------------------------------------------------
 // Handler do hook de Player.Hurt (RVA 0xFA15B8 nesta build).
 // Roda na thread do jogo, dentro de Main.DoUpdateInWorld -> Player.Update /
 // NPC.UpdateNPC / Projectile.Update, então já está anexada ao IL2CPP.
 // ---------------------------------------------------------------------------
-double Modrix_Hooked_PlayerHurt(Il2CppObject* self, Il2CppObject* damageSource, int32_t damage,
+double TLMod_Hooked_PlayerHurt(Il2CppObject* self, Il2CppObject* damageSource, int32_t damage,
                                 int32_t hitDirection, bool pvp, bool quiet, bool crit,
                                 int32_t cooldownCounter, bool dodgeable, const MethodInfo* method) {
     PlayerHurtFn orig = LoadOrigHurt();
-    ModrixHurtCallback cb = g_hurtCallback.load();
+    TLModHurtCallback cb = g_hurtCallback.load();
     if (!orig) return 0.0;  // não deveria acontecer: o hook só existe com trampoline
     if (!cb || t_hurtDepth > 0) {
         return orig(self, damageSource, damage, hitDirection, pvp, quiet, crit, cooldownCounter,
@@ -322,20 +322,20 @@ double Modrix_Hooked_PlayerHurt(Il2CppObject* self, Il2CppObject* damageSource, 
     }
 
     ++t_hurtDepth;
-    ModrixHurtEvent ev{};
+    TLModHurtEvent ev{};
     ev.player = self;
     ev.damage = damage;
     ev.hitDirection = hitDirection;
     ev.pvp = pvp;
     ev.crit = crit;
-    ev.lifeBefore = Modrix_GetStatLife(self);
+    ev.lifeBefore = TLMod_GetStatLife(self);
 
     double result = 0.0;
     if (cb(&ev, /*after=*/false)) {
         result = orig(self, damageSource, ev.damage, hitDirection, pvp, quiet, crit,
                       cooldownCounter, dodgeable, method);
         ev.result = result;
-        ev.lifeAfter = Modrix_GetStatLife(self);
+        ev.lifeAfter = TLMod_GetStatLife(self);
         cb(&ev, /*after=*/true);
     }
     // Golpe cancelado: retorna 0.0, que o jogo trata como "sem dano".

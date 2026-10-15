@@ -1,7 +1,7 @@
 // Configuração do usuário: quais mods estão desligados.
 //
-// Arquivo JSON (modrix_config.json, ao lado da pasta mods/):
-//   { "schema": 1, "disabled_mods": ["modrix.example_boss"] }
+// Arquivo JSON (tlmod_config.json, ao lado da pasta mods/):
+//   { "schema": 1, "disabled_mods": ["tlmod.example_boss"] }
 //
 // Ligar/desligar vale na PRÓXIMA abertura do jogo: o runtime lê este arquivo
 // antes de ModLoader::LoadAll e nunca descarrega um mod com o jogo rodando.
@@ -11,7 +11,7 @@
 #include <set>
 #include <string>
 
-namespace modrix::overlay {
+namespace tlmod::overlay {
 
 class ConfigStore {
 public:
@@ -37,4 +37,4 @@ private:
     std::set<std::string> disabled_;
 };
 
-}  // namespace modrix::overlay
+}  // namespace tlmod::overlay

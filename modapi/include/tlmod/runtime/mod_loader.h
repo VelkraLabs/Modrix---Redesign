@@ -6,11 +6,11 @@
 #include <string>
 #include <vector>
 
-#include "modrix/modrix_api.h"
-#include "modrix/runtime/content_registry.h"
-#include "modrix/runtime/manifest.h"
+#include "tlmod/tlmod_api.h"
+#include "tlmod/runtime/content_registry.h"
+#include "tlmod/runtime/manifest.h"
 
-namespace modrix::rt {
+namespace tlmod::rt {
 
 class GameAdapter;
 
@@ -28,11 +28,11 @@ struct ModRecord {
     ModManifest manifest;
     ModState state = ModState::Discovered;
     std::string error;
-    ModrixModInitFn builtinInit = nullptr;  // mods embutidos no runtime (sem biblioteca)
+    TLModModInitFn builtinInit = nullptr;  // mods embutidos no runtime (sem biblioteca)
 };
 
 // Descobre, valida, ordena e carrega mods; dono do ContentRegistry e da
-// tabela ModrixHostApi entregue aos mods.
+// tabela TLModHostApi entregue aos mods.
 class ModLoader {
 public:
     explicit ModLoader(GameAdapter* game);
@@ -45,7 +45,7 @@ public:
     void DiscoverDirectory(const std::filesystem::path& modsDir);
 
     // Mod compilado junto com o runtime (sem biblioteca externa).
-    void AddBuiltin(ModManifest manifest, ModrixModInitFn init);
+    void AddBuiltin(ModManifest manifest, TLModModInitFn init);
 
     // Mods desligados pelo usuário (lidos da configuração antes de LoadAll).
     // Não são abertos; quem depende deles (obrigatoriamente) fica Skipped.
@@ -63,10 +63,10 @@ public:
     const std::vector<std::string>& LoadOrder() const { return order_; }
     ContentRegistry& Registry() { return registry_; }
     const ContentRegistry& Registry() const { return registry_; }
-    const ModrixHostApi& HostApi() const;
+    const TLModHostApi& HostApi() const;
 
-    // NPC de mod que ocupa o slot de Main.npc (MODRIX_INVALID_ID = original).
-    ModrixId NpcInSlot(int32_t index) const;
+    // NPC de mod que ocupa o slot de Main.npc (TLMOD_INVALID_ID = original).
+    TLModId NpcInSlot(int32_t index) const;
 
     // --- Camada de interface ---------------------------------------------------
     // Canais registrados, como "mod_id/channel".
@@ -93,4 +93,4 @@ private:
     std::set<std::string> disabled_;
 };
 
-}  // namespace modrix::rt
+}  // namespace tlmod::rt

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace modrix::overlay {
+namespace tlmod::overlay {
 
 class JsonWriter {
 public:
@@ -67,4 +67,4 @@ private:
     bool afterKey_ = false;
 };
 
-}  // namespace modrix::overlay
+}  // namespace tlmod::overlay

@@ -1,4 +1,4 @@
-#include "modrix/runtime/manifest.h"
+#include "tlmod/runtime/manifest.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,10 +8,10 @@
 
 #include "json.h"
 
-namespace modrix::rt {
+namespace tlmod::rt {
 namespace {
 
-const char* const kKindKeys[MODRIX_CONTENT_KIND_COUNT] = {"items", "npcs",  "projectiles",
+const char* const kKindKeys[TLMOD_CONTENT_KIND_COUNT] = {"items", "npcs",  "projectiles",
                                                          "tiles", "walls", "buffs"};
 
 bool Fail(std::string* error, const std::string& msg) {
@@ -81,8 +81,8 @@ bool IsValidContentName(const std::string& n) {
     });
 }
 
-const char* ContentKindKey(ModrixContentKind kind) {
-    return (kind >= 0 && kind < MODRIX_CONTENT_KIND_COUNT) ? kKindKeys[kind] : "?";
+const char* ContentKindKey(TLModContentKind kind) {
+    return (kind >= 0 && kind < TLMOD_CONTENT_KIND_COUNT) ? kKindKeys[kind] : "?";
 }
 
 const char* CurrentPlatformKey() {
@@ -107,7 +107,7 @@ const char* CurrentPlatformKey() {
 #endif
 }
 
-bool ModManifest::Declares(ModrixContentKind kind, const std::string& n) const {
+bool ModManifest::Declares(TLModContentKind kind, const std::string& n) const {
     const auto& list = content[kind];
     return std::find(list.begin(), list.end(), n) != list.end();
 }
@@ -121,10 +121,10 @@ std::optional<ModManifest> ParseManifest(const std::string& text, std::string* e
     }
 
     ModManifest m;
-    const json::Value* api = root->Get("modrix_api");
+    const json::Value* api = root->Get("tlmod_api");
     const double* apiNum = api ? api->AsNumber() : nullptr;
     if (!apiNum || *apiNum < 1 || *apiNum != std::floor(*apiNum) || *apiNum > 1000) {
-        Fail(error, "modrix_api: obrigatório, inteiro >= 1");
+        Fail(error, "tlmod_api: obrigatório, inteiro >= 1");
         return std::nullopt;
     }
     m.apiVersion = static_cast<uint32_t>(*apiNum);
@@ -176,7 +176,7 @@ std::optional<ModManifest> ParseManifest(const std::string& text, std::string* e
         }
         for (const auto& [kindKey, list] : *obj) {
             int kind = -1;
-            for (int k = 0; k < MODRIX_CONTENT_KIND_COUNT; ++k)
+            for (int k = 0; k < TLMOD_CONTENT_KIND_COUNT; ++k)
                 if (kindKey == kKindKeys[k]) kind = k;
             if (kind < 0) {
                 Fail(error, "content." + kindKey + ": tipo desconhecido");
@@ -253,4 +253,4 @@ std::optional<ModManifest> LoadManifest(const std::filesystem::path& modDir, std
     return m;
 }
 
-}  // namespace modrix::rt
+}  // namespace tlmod::rt

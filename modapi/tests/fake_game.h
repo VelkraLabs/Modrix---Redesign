@@ -4,20 +4,20 @@
 #include <array>
 #include <cstring>
 
-#include "modrix/runtime/game_adapter.h"
+#include "tlmod/runtime/game_adapter.h"
 
-class FakeGame final : public modrix::rt::GameAdapter {
+class FakeGame final : public tlmod::rt::GameAdapter {
 public:
-    std::array<std::optional<int32_t>, MODRIX_CONTENT_KIND_COUNT> vanilla{};
+    std::array<std::optional<int32_t>, TLMOD_CONTENT_KIND_COUNT> vanilla{};
     std::array<int32_t, 4> life{400, 300, 200, 100};
-    ModrixPlayer local = 0;
+    TLModPlayer local = 0;
     HurtHandler handler;
 
     const char* Name() const override { return "fake"; }
-    std::optional<int32_t> VanillaCount(ModrixContentKind k) const override { return vanilla[k]; }
+    std::optional<int32_t> VanillaCount(TLModContentKind k) const override { return vanilla[k]; }
     void SetPlayerHurtHandler(HurtHandler h) override { handler = std::move(h); }
-    ModrixPlayer LocalPlayer() const override { return local; }
-    int32_t PlayerLife(ModrixPlayer p) const override {
+    TLModPlayer LocalPlayer() const override { return local; }
+    int32_t PlayerLife(TLModPlayer p) const override {
         return (p >= 0 && p < static_cast<int>(life.size())) ? life[static_cast<size_t>(p)] : -1;
     }
 
@@ -26,7 +26,7 @@ public:
     static constexpr int32_t kVanillaNpcs = 688;
     struct Npc {
         bool active = false;
-        ModrixNpcState s{};  // só os campos "do jogo" (local[] não existe aqui)
+        TLModNpcState s{};  // só os campos "do jogo" (local[] não existe aqui)
     };
     std::array<Npc, kMaxNpcs> npcs{};
     NpcHooks npcHooks;
@@ -34,15 +34,15 @@ public:
 
     void SetNpcHooks(NpcHooks h) override { npcHooks = std::move(h); }
     int32_t MaxNpcs() const override { return kMaxNpcs; }
-    bool ReadNpc(int32_t i, ModrixNpcState& out) const override {
+    bool ReadNpc(int32_t i, TLModNpcState& out) const override {
         if (i < 0 || i >= kMaxNpcs || !npcs[static_cast<size_t>(i)].active) return false;
         out = npcs[static_cast<size_t>(i)].s;
         std::memset(out.local, 0, sizeof(out.local));
         return true;
     }
-    bool WriteNpc(int32_t i, const ModrixNpcState& in) override {
+    bool WriteNpc(int32_t i, const TLModNpcState& in) override {
         if (i < 0 || i >= kMaxNpcs) return false;
-        ModrixNpcState& s = npcs[static_cast<size_t>(i)].s;
+        TLModNpcState& s = npcs[static_cast<size_t>(i)].s;
         int32_t type = s.type;  // o jogo não deixa mudar type/index por aqui
         s = in;
         s.type = s.shell_type = type;
@@ -55,8 +55,8 @@ public:
     void SetDefaults(int32_t i, int32_t type) {
         if (npcHooks.onSetDefaults) npcHooks.onSetDefaults(i, type);
         if (type <= 0 || type >= kVanillaNpcs) vanillaSetDefaultsOverflow = true;
-        ModrixNpcState& s = npcs[static_cast<size_t>(i)].s;
-        s = ModrixNpcState{};
+        TLModNpcState& s = npcs[static_cast<size_t>(i)].s;
+        s = TLModNpcState{};
         s.index = i;
         s.type = s.shell_type = type;
         s.life = s.life_max = 100 + type;
@@ -89,17 +89,17 @@ public:
 
     // --- Estado do mundo -----------------------------------------------------------
     std::optional<bool> inWorld;  // nullopt = o jogo ainda não rodou um frame
-    std::array<std::optional<bool>, MODRIX_PROGRESS_COUNT> progress{};
+    std::array<std::optional<bool>, TLMOD_PROGRESS_COUNT> progress{};
     std::optional<bool> InWorld() const override { return inWorld; }
-    std::optional<bool> Progress(ModrixProgress f) const override {
-        return (f >= 0 && f < MODRIX_PROGRESS_COUNT) ? progress[static_cast<size_t>(f)] : std::nullopt;
+    std::optional<bool> Progress(TLModProgress f) const override {
+        return (f >= 0 && f < TLMOD_PROGRESS_COUNT) ? progress[static_cast<size_t>(f)] : std::nullopt;
     }
 
     // Faz o "jogo" aplicar dano: passa pelos mods (pré), aplica, avisa (pós).
     // Retorna o dano aplicado, ou 0 se algum mod cancelou.
-    int32_t Hurt(ModrixPlayer p, int32_t damage) {
+    int32_t Hurt(TLModPlayer p, int32_t damage) {
         auto& hp = life[static_cast<size_t>(p)];
-        ModrixPlayerHurt ev{p, damage, false, false, hp, 0};
+        TLModPlayerHurt ev{p, damage, false, false, hp, 0};
         if (handler && !handler(ev, false)) return 0;
         hp -= ev.damage;
         ev.life_after = hp;

@@ -1,4 +1,4 @@
-// Teste de host: carrega a libil2cpp.so falsa, roda Modrix_Init como no jogo
+// Teste de host: carrega a libil2cpp.so falsa, roda TLMod_Init como no jogo
 // (esperando o "il2cpp_init"), lê statLife, chama Heal via runtime_invoke e
 // dispara Player.Hurt pelo caminho do hook.
 #include <dlfcn.h>
@@ -22,7 +22,7 @@ namespace {
 bool (*mock_patch_function)(void*, void*);
 double (*mock_game_hurt_player)(void*, int32_t);
 
-ModrixHurtEvent g_lastPost{};
+TLModHurtEvent g_lastPost{};
 int g_preCalls = 0;
 
 // Instalador de "hook" do teste: no Android isso seria DobbyHook/ShadowHook.
@@ -32,7 +32,7 @@ bool TestInstaller(void* target, void* replacement, void** original) {
 }
 
 // Callback de mod de exemplo: corta o dano pela metade e bloqueia golpes > 1000.
-bool HalfDamage(ModrixHurtEvent* ev, bool after) {
+bool HalfDamage(TLModHurtEvent* ev, bool after) {
     if (after) {
         g_lastPost = *ev;
         return true;
@@ -59,11 +59,11 @@ void OnSetDefaults(Il2CppObject*, int32_t index, int32_t) {
 }
 bool OnAi(Il2CppObject* npc, int32_t index) {
     if (index < 0 || g_modSlot[index] < 0) return false;  // NPC original: AI original
-    ModrixNpcFields f{};
-    Modrix_ReadNpc(npc, &f);
+    TLModNpcFields f{};
+    TLMod_ReadNpc(npc, &f);
     f.ai[1] += 10.0f;  // "comportamento do mod"
     f.vx = -2.0f;
-    Modrix_WriteNpc(npc, &f);
+    TLMod_WriteNpc(npc, &f);
     return true;  // substitui a AI original
 }
 
@@ -72,7 +72,7 @@ int g_frameCalls = 0;
 int32_t g_lastGameMenu = -2;
 void OnFrame() {
     ++g_frameCalls;
-    g_lastGameMenu = Modrix_IsGameMenu();  // aqui estamos na thread do jogo
+    g_lastGameMenu = TLMod_IsGameMenu();  // aqui estamos na thread do jogo
 }
 
 }  // namespace
@@ -91,30 +91,30 @@ int main(int argc, char** argv) {
     mock_game_hurt_player = reinterpret_cast<double (*)(void*, int32_t)>(dlsym(lib, "mock_game_hurt_player"));
     CHECK(mock_init && mock_local && mock_patch_function && mock_game_hurt_player);
 
-    Modrix_SetLibraryName(argv[1]);
-    Modrix_SetHookInstaller(&TestInstaller);
-    Modrix_SetHurtCallback(&HalfDamage);
+    TLMod_SetLibraryName(argv[1]);
+    TLMod_SetHookInstaller(&TestInstaller);
+    TLMod_SetHurtCallback(&HalfDamage);
 
-    // Modrix_Init tem de esperar o il2cpp_init, que acontece 300 ms depois.
+    // TLMod_Init tem de esperar o il2cpp_init, que acontece 300 ms depois.
     bool initOk = false;
-    std::thread th([&] { initOk = Modrix_Init(5000); });
+    std::thread th([&] { initOk = TLMod_Init(5000); });
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     mock_init();
     th.join();
     CHECK(initOk);
-    CHECK(Modrix_OriginalPlayerHurt() != nullptr);
+    CHECK(TLMod_OriginalPlayerHurt() != nullptr);
 
-    Il2CppObject* player = Modrix_GetLocalPlayer();
+    Il2CppObject* player = TLMod_GetLocalPlayer();
     CHECK(player == mock_local());
-    CHECK(Modrix_GetStatLife(player) == 400);
-    CHECK(Modrix_GetPlayerIndex(player) == 0);
-    CHECK(Modrix_GetPlayerByIndex(0) == player);
-    CHECK(Modrix_GetPlayerByIndex(1) == nullptr);
-    CHECK(Modrix_GetPlayerByIndex(255) == nullptr);
-    CHECK(Modrix_WaitReady(0));
+    CHECK(TLMod_GetStatLife(player) == 400);
+    CHECK(TLMod_GetPlayerIndex(player) == 0);
+    CHECK(TLMod_GetPlayerByIndex(0) == player);
+    CHECK(TLMod_GetPlayerByIndex(1) == nullptr);
+    CHECK(TLMod_GetPlayerByIndex(255) == nullptr);
+    CHECK(TLMod_WaitReady(0));
 
-    CHECK(Modrix_Heal(player, 50));
-    CHECK(Modrix_GetStatLife(player) == 450);
+    CHECK(TLMod_Heal(player, 50));
+    CHECK(TLMod_GetStatLife(player) == 450);
 
     // Dano 100 -> callback corta para 50 -> defesa 10 tira 5 -> 45 de dano.
     double dealt = mock_game_hurt_player(player, 100);
@@ -122,11 +122,11 @@ int main(int argc, char** argv) {
     CHECK(dealt == 45.0);
     CHECK(g_lastPost.lifeBefore == 450);
     CHECK(g_lastPost.lifeAfter == 405);
-    CHECK(Modrix_GetStatLife(player) == 405);
+    CHECK(TLMod_GetStatLife(player) == 405);
 
     // Golpe cancelado pelo mod: vida inalterada, retorno 0.
     CHECK(mock_game_hurt_player(player, 5000) == 0.0);
-    CHECK(Modrix_GetStatLife(player) == 405);
+    CHECK(TLMod_GetStatLife(player) == 405);
 
     // ---- NPCs --------------------------------------------------------------
     auto mock_game_new_npc = reinterpret_cast<int32_t (*)(int32_t, int32_t, int32_t)>(dlsym(lib, "mock_game_new_npc"));
@@ -135,40 +135,40 @@ int main(int argc, char** argv) {
     auto mock_npc = reinterpret_cast<void* (*)(int32_t)>(dlsym(lib, "mock_npc"));
     CHECK(mock_game_new_npc && mock_game_update_npcs && mock_game_transform && mock_npc);
     for (int32_t& v : g_modSlot) v = -1;
-    ModrixNpcCallbacks cbs{&RemapSpawn, &OnSpawned, &OnSetDefaults, &OnAi};
-    Modrix_SetNpcCallbacks(&cbs);
+    TLModNpcCallbacks cbs{&RemapSpawn, &OnSpawned, &OnSetDefaults, &OnAi};
+    TLMod_SetNpcCallbacks(&cbs);
 
     // Spawn original: passa direto.
     CHECK(mock_game_new_npc(100, 200, 2) == 0);
-    ModrixNpcFields f{};
-    CHECK(Modrix_ReadNpc(Modrix_GetNpcByIndex(0), &f) && f.type == 2 && f.x == 100.0f && g_modSlot[0] == -1);
+    TLModNpcFields f{};
+    CHECK(TLMod_ReadNpc(TLMod_GetNpcByIndex(0), &f) && f.type == 2 && f.x == 100.0f && g_modSlot[0] == -1);
 
     // Spawn de mod: 4096 vira casca 4 antes do SetDefaults original (que
     // abortaria com 4096); o slot fica marcado como NPC de mod.
     CHECK(mock_game_new_npc(300, 400, 4096) == 1);
-    CHECK(Modrix_ReadNpc(Modrix_GetNpcByIndex(1), &f) && f.type == 4 && f.lifeMax == 104);
+    CHECK(TLMod_ReadNpc(TLMod_GetNpcByIndex(1), &f) && f.type == 4 && f.lifeMax == 104);
     CHECK(g_modSlot[1] == 4096);
     // Dentro de NewNPC o whoAmI ainda era 0: o índice veio da busca em Main.npc.
     CHECK(g_lastSetDefaultsIndex == 1);
-    CHECK(Modrix_GetNpcByIndex(1) == mock_npc(1) && Modrix_FindNpcIndex(static_cast<Il2CppObject*>(mock_npc(1))) == 1);
+    CHECK(TLMod_GetNpcByIndex(1) == mock_npc(1) && TLMod_FindNpcIndex(static_cast<Il2CppObject*>(mock_npc(1))) == 1);
 
     // Um tick: NPC original roda a AI original; o de mod roda a do mod.
     mock_game_update_npcs();
-    Modrix_ReadNpc(Modrix_GetNpcByIndex(0), &f);
+    TLMod_ReadNpc(TLMod_GetNpcByIndex(0), &f);
     CHECK(f.ai[0] == 1.0f && f.vx == 1.0f);
-    Modrix_ReadNpc(Modrix_GetNpcByIndex(1), &f);
+    TLMod_ReadNpc(TLMod_GetNpcByIndex(1), &f);
     CHECK(f.ai[0] == 0.0f && f.ai[1] == 10.0f && f.vx == -2.0f);
 
     // Transform (fase de boss, por exemplo) vira tipo original: slot desmarcado.
     mock_game_transform(1, 5);
     CHECK(g_modSlot[1] == -1);
     mock_game_update_npcs();
-    Modrix_ReadNpc(Modrix_GetNpcByIndex(1), &f);
+    TLMod_ReadNpc(TLMod_GetNpcByIndex(1), &f);
     CHECK(f.type == 5 && f.ai[0] == 1.0f);
 
     // Spawn pedido pela camada de mods (runtime_invoke -> NewNPC com hook).
-    CHECK(Modrix_SpawnNpc(10, 20, 4097) == 2);
-    CHECK(g_modSlot[2] == 4097 && Modrix_ReadNpc(Modrix_GetNpcByIndex(2), &f) && f.type == 4);
+    CHECK(TLMod_SpawnNpc(10, 20, 4097) == 2);
+    CHECK(g_modSlot[2] == 4097 && TLMod_ReadNpc(TLMod_GetNpcByIndex(2), &f) && f.type == 4);
 
     // ---- Frame e estado do mundo ------------------------------------------------
     auto mock_become_game_thread = reinterpret_cast<void (*)()>(dlsym(lib, "mock_become_game_thread"));
@@ -177,25 +177,25 @@ int main(int argc, char** argv) {
     auto mock_game_frame = reinterpret_cast<int (*)()>(dlsym(lib, "mock_game_frame"));
     CHECK(mock_become_game_thread && mock_set_game_menu && mock_set_flag && mock_game_frame);
     mock_become_game_thread();  // esta thread passa a ser a "thread do jogo"
-    Modrix_SetFrameCallback(&OnFrame);
+    TLMod_SetFrameCallback(&OnFrame);
 
     CHECK(mock_game_frame() == 1 && g_frameCalls == 1 && g_lastGameMenu == 1);  // no menu
     mock_set_game_menu(false);
     CHECK(mock_game_frame() == 2 && g_lastGameMenu == 0);                     // num mundo
     // Fora da thread do jogo a Instance ThreadStatic é nula: -1, nunca crash.
     int32_t otherThread = -2;
-    std::thread([&] { otherThread = Modrix_IsGameMenu(); }).join();
+    std::thread([&] { otherThread = TLMod_IsGameMenu(); }).join();
     CHECK(otherThread == -1);
 
-    ModrixStaticField* boss1 = Modrix_FindStaticField("Terraria", "NPC", "downedBoss1");
-    ModrixStaticField* hard = Modrix_FindStaticField("Terraria", "Main", "hardMode");
-    CHECK(boss1 && hard && !Modrix_FindStaticField("Terraria", "NPC", "downedNothing"));
+    TLModStaticField* boss1 = TLMod_FindStaticField("Terraria", "NPC", "downedBoss1");
+    TLModStaticField* hard = TLMod_FindStaticField("Terraria", "Main", "hardMode");
+    CHECK(boss1 && hard && !TLMod_FindStaticField("Terraria", "NPC", "downedNothing"));
     bool b = true;
-    CHECK(Modrix_ReadStaticBool(boss1, &b) && !b);
+    CHECK(TLMod_ReadStaticBool(boss1, &b) && !b);
     mock_set_flag("downedBoss1", true);
     mock_set_flag("hardMode", true);
-    CHECK(Modrix_ReadStaticBool(boss1, &b) && b);
-    CHECK(Modrix_ReadStaticBool(hard, &b) && b);
+    CHECK(TLMod_ReadStaticBool(boss1, &b) && b);
+    CHECK(TLMod_ReadStaticBool(hard, &b) && b);
 
     std::printf("TODOS OS TESTES PASSARAM\n");
     return 0;

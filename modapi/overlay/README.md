@@ -1,7 +1,7 @@
-# Overlay do Modrix (Fase 5)
+# Overlay do TLMod (Fase 5)
 
 Painel de mods dentro do jogo: botão flutuante "M", aba **Mods** (estado e
-liga/desliga) e aba **Boss Checklist** (JSON do mod `modrix.boss_checklist`).
+liga/desliga) e aba **Boss Checklist** (JSON do mod `tlmod.boss_checklist`).
 
 ## Técnica: Views Android sobre a Activity do jogo
 
@@ -26,7 +26,7 @@ com o C++ é feita por JNI. Não precisa de permissão de sobreposição.
 |---|---|---|
 | Estado, dados e ações (`PanelController`) | `src/panel.cpp` | sim (`tests/overlay_test.cpp`) |
 | Configuração persistente (`ConfigStore`) | `src/config_store.cpp` | sim |
-| Desenho (Views) | `java/.../ModrixOverlay.java` | não: só no aparelho |
+| Desenho (Views) | `java/.../TLModOverlay.java` | não: só no aparelho |
 | Cola JNI e carga do DEX | `android/overlay_jni.cpp` | não: só no aparelho |
 | Prévia em PNG | `preview/render_preview.py` | gera imagem |
 
@@ -36,10 +36,10 @@ ações (`toggle_open`, `close`, `tab`, `toggle_mod`). A prévia lê o mesmo JSO
 
 ## Liga/desliga
 
-A escolha é salva em `modrix_config.json`, na mesma pasta que contém `mods/`:
+A escolha é salva em `tlmod_config.json`, na mesma pasta que contém `mods/`:
 
 ```json
-{"schema":1,"disabled_mods":["modrix.example_item"]}
+{"schema":1,"disabled_mods":["tlmod.example_item"]}
 ```
 
 A gravação é atômica (`.tmp` + `rename`). A mudança vale a partir da próxima
@@ -54,7 +54,7 @@ quebra com classes anônimas do javac 21). Informe o SDK assim:
 
 ```sh
 cmake -S modapi -B build-android -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
-      -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 -DMODRIX_ANDROID_SDK=$ANDROID_SDK_ROOT
+      -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 -DTLMOD_ANDROID_SDK=$ANDROID_SDK_ROOT
 ```
 
 Para gerar a prévia no host:

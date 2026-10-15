@@ -21,13 +21,13 @@ bool EnsureShadowHookInit() {
 
 }  // namespace
 
-bool Modrix_ShadowHookInstaller(void* target, void* replacement, void** original) {
+bool TLMod_ShadowHookInstaller(void* target, void* replacement, void** original) {
     if (!EnsureShadowHookInit()) return false;
 
     // Modo multi: convive com outros hooks no mesmo alvo e tem o melhor
     // desempenho por chamada. Exige `original` não nulo e sempre gravável,
     // porque o ShadowHook encadeia os proxies por ele. A ponte já evita
-    // recursão com o contador t_hurtDepth em Modrix_Hooked_PlayerHurt.
+    // recursão com o contador t_hurtDepth em TLMod_Hooked_PlayerHurt.
     void* stub = shadowhook_hook_func_addr_2(target, replacement, original,
                                              SHADOWHOOK_HOOK_WITH_MULTI_MODE);
     if (!stub) {

@@ -16,9 +16,9 @@
 #include <string>
 #include <vector>
 
-#include "modrix/runtime/mod_loader.h"
+#include "tlmod/runtime/mod_loader.h"
 
-namespace modrix::overlay {
+namespace tlmod::overlay {
 
 class ConfigStore;
 
@@ -92,7 +92,7 @@ struct ChecklistView {
 };
 
 // Canal do Boss Checklist que o painel consome.
-constexpr const char* kChecklistMod = "modrix.boss_checklist";
+constexpr const char* kChecklistMod = "tlmod.boss_checklist";
 constexpr const char* kChecklistChannel = "checklist";
 
 class PanelController {
@@ -154,4 +154,4 @@ private:
 // Rótulos em português usados no view-model (expostos para testes).
 const char* StateLabel(rt::ModState s);
 
-}  // namespace modrix::overlay
+}  // namespace tlmod::overlay

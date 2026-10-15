@@ -1,11 +1,11 @@
-// O DEX do renderizador (com.modrix.overlay.ModrixOverlay) embutido na .so:
-// assim o overlay é um arquivo só. MODRIX_OVERLAY_DEX_PATH vem do CMake.
-    .section .rodata.modrix_overlay_dex, "a"
+// O DEX do renderizador (com.tlmod.overlay.TLModOverlay) embutido na .so:
+// assim o overlay é um arquivo só. TLMOD_OVERLAY_DEX_PATH vem do CMake.
+    .section .rodata.tlmod_overlay_dex, "a"
     .balign 8
-    .global modrix_overlay_dex
-    .hidden modrix_overlay_dex
-modrix_overlay_dex:
-    .incbin MODRIX_OVERLAY_DEX_PATH
-    .global modrix_overlay_dex_end
-    .hidden modrix_overlay_dex_end
-modrix_overlay_dex_end:
+    .global tlmod_overlay_dex
+    .hidden tlmod_overlay_dex
+tlmod_overlay_dex:
+    .incbin TLMOD_OVERLAY_DEX_PATH
+    .global tlmod_overlay_dex_end
+    .hidden tlmod_overlay_dex_end
+tlmod_overlay_dex_end:

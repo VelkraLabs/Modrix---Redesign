@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace modrix::rt::json {
+namespace tlmod::rt::json {
 
 const Value* Value::Get(const std::string& key) const {
     const Object* o = AsObject();
@@ -263,4 +263,4 @@ std::optional<Value> Parse(const std::string& text, std::string* error) {
     return Parser(text).ParseDocument(error);
 }
 
-}  // namespace modrix::rt::json
+}  // namespace tlmod::rt::json

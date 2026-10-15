@@ -1,4 +1,4 @@
-package com.modrix.overlay;
+package com.tlmod.overlay;
 
 import android.app.Activity;
 import android.graphics.Color;
@@ -23,7 +23,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * Renderizador do painel do Modrix: Views Android presas à janela da Activity
+ * Renderizador do painel do TLMod: Views Android presas à janela da Activity
  * do jogo (sem permissão de sobreposição).
  *
  * Não decide nada: lê o view-model (JSON) que o PanelController em C++ produz
@@ -33,7 +33,7 @@ import org.json.JSONObject;
  * painel seguem para a View do Unity, que está embaixo. O painel e o botão
  * consomem os toques que caem neles, e o jogo não os recebe.
  */
-public final class ModrixOverlay {
+public final class TLModOverlay {
     static native String nativeSnapshot(long handle);
     static native boolean nativeAction(long handle, String action, String arg);
     static native boolean nativeTick(long handle, long nowMs);
@@ -54,7 +54,7 @@ public final class ModrixOverlay {
     private long renderedVersion = -1;
     private JSONObject theme;
 
-    private ModrixOverlay(Activity activity, long handle) {
+    private TLModOverlay(Activity activity, long handle) {
         this.activity = activity;
         this.handle = handle;
         this.density = activity.getResources().getDisplayMetrics().density;
@@ -64,7 +64,7 @@ public final class ModrixOverlay {
     public static void install(final Activity activity, final long handle) {
         activity.runOnUiThread(new Runnable() {
             @Override public void run() {
-                new ModrixOverlay(activity, handle).attach();
+                new TLModOverlay(activity, handle).attach();
             }
         });
     }
@@ -177,7 +177,7 @@ public final class ModrixOverlay {
 
         LinearLayout header = new LinearLayout(activity);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("Modrix", "title_sp", "accent", true);
+        TextView title = text("TLMod", "title_sp", "accent", true);
         header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView close = text("✕", "title_sp", "text_dim", false);
         close.setPadding(dp(10), dp(2), dp(4), dp(2));

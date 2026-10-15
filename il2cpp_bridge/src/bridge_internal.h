@@ -20,7 +20,7 @@ void LogException(const char* where, Il2CppException* exc);
 // existir com valor diferente do dump, avisa que a build é outra.
 size_t FieldOffset(Il2CppClass* klass, const char* name, size_t fallback);
 
-// Instala um inline hook com o ModrixHookInstaller configurado.
+// Instala um inline hook com o TLModHookInstaller configurado.
 //   method: MethodInfo resolvido pela API; o alvo é method->methodPointer
 //   dumpRva: RVA do dump, só para conferir se a build é a mesma
 //   slot: variável GLOBAL onde a engine grava (e pode reescrever) o endereço
@@ -28,7 +28,7 @@ size_t FieldOffset(Il2CppClass* klass, const char* name, size_t fallback);
 bool InstallHook(const char* name, const MethodInfo* method, uintptr_t dumpRva, void* replacement,
                  void** slot);
 
-// NPCs (npc_hooks.cpp). Chamados por Modrix_Init depois de resolver Player.
+// NPCs (npc_hooks.cpp). Chamados por TLMod_Init depois de resolver Player.
 bool ResolveNpc();
 void InstallNpcHooks();
 

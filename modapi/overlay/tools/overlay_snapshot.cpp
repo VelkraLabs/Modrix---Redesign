@@ -7,10 +7,10 @@
 #include <fstream>
 #include <sstream>
 
-#include "modrix/overlay/config_store.h"
-#include "modrix/overlay/panel.h"
+#include "tlmod/overlay/config_store.h"
+#include "tlmod/overlay/panel.h"
 
-using namespace modrix;
+using namespace tlmod;
 namespace fs = std::filesystem;
 
 class StaticSource final : public overlay::PanelDataSource {
@@ -18,9 +18,9 @@ public:
     explicit StaticSource(std::string checklist) : checklist_(std::move(checklist)) {}
     std::vector<overlay::ModInfo> Mods() const override {
         return {
-            {"modrix.boss_checklist", "Boss Checklist", "0.1.0", rt::ModState::Loaded, ""},
-            {"modrix.example_item", "Exemplo: Rubi Fictício", "0.1.0", rt::ModState::Loaded, ""},
-            {"modrix.example_boss", "Exemplo: Titã de Brasa", "0.1.0", rt::ModState::Disabled,
+            {"tlmod.boss_checklist", "Boss Checklist", "0.1.0", rt::ModState::Loaded, ""},
+            {"tlmod.example_item", "Exemplo: Rubi Fictício", "0.1.0", rt::ModState::Loaded, ""},
+            {"tlmod.example_boss", "Exemplo: Titã de Brasa", "0.1.0", rt::ModState::Disabled,
              "desativado nas configurações"},
             {"acme.swords", "Espadas Lendárias", "1.4.0", rt::ModState::Rejected,
              "dependência \"acme.core\" (^2.0.0) ausente ou rejeitada"},
@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     StaticSource source(ss.str());
     overlay::ConfigStore config(out / "preview_config.json");
     std::string err;
-    config.SetEnabled("modrix.example_item", false, &err);  // mostra o aviso "ao reiniciar"
+    config.SetEnabled("tlmod.example_item", false, &err);  // mostra o aviso "ao reiniciar"
     overlay::PanelController panel(source, config);
     panel.SetOpen(true);
     panel.SelectTab(overlay::Tab::Checklist);

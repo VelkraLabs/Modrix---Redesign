@@ -1,6 +1,6 @@
 // Cola JNI do overlay: acha a VM e a Activity do jogo, carrega o DEX do
 // renderizador embutido nesta .so, registra os métodos nativos e chama
-// ModrixOverlay.install(activity, handle).
+// TLModOverlay.install(activity, handle).
 #include "overlay_android.h"
 
 #include <dlfcn.h>
@@ -13,17 +13,17 @@
 #include <fstream>
 #include <string>
 
-#include "modrix/overlay/panel.h"
-#include "modrix/runtime/log.h"
+#include "tlmod/overlay/panel.h"
+#include "tlmod/runtime/log.h"
 
-extern "C" const unsigned char modrix_overlay_dex[];      // overlay_dex.S
-extern "C" const unsigned char modrix_overlay_dex_end[];
+extern "C" const unsigned char tlmod_overlay_dex[];      // overlay_dex.S
+extern "C" const unsigned char tlmod_overlay_dex_end[];
 
-namespace modrix::overlay {
+namespace tlmod::overlay {
 namespace {
 
 JavaVM* g_vm = nullptr;
-constexpr const char* kOverlayClass = "com.modrix.overlay.ModrixOverlay";
+constexpr const char* kOverlayClass = "com.tlmod.overlay.TLModOverlay";
 
 // --- VM ------------------------------------------------------------------------
 // Se a .so veio por System.loadLibrary, o JNI_OnLoad já guardou a VM. Se veio
@@ -153,8 +153,8 @@ jobject AppClassLoader(JNIEnv* env, jobject* appOut) {
 // Carrega o DEX embutido. API 26+: direto da memória. Antes disso: arquivo
 // somente-leitura no codeCacheDir (o Android 14 recusa DEX gravável).
 jobject DexClassLoader(JNIEnv* env, jobject app, jobject parent, std::string* error) {
-    const void* data = modrix_overlay_dex;
-    auto size = static_cast<jlong>(modrix_overlay_dex_end - modrix_overlay_dex);
+    const void* data = tlmod_overlay_dex;
+    auto size = static_cast<jlong>(tlmod_overlay_dex_end - tlmod_overlay_dex);
     if (SdkInt() >= 26) {
         jobject buffer = env->NewDirectByteBuffer(const_cast<void*>(data), size);
         jclass cls = env->FindClass("dalvik/system/InMemoryDexClassLoader");
@@ -168,7 +168,7 @@ jobject DexClassLoader(JNIEnv* env, jobject app, jobject parent, std::string* er
     jclass file = env->FindClass("java/io/File");
     jmethodID getPath = env->GetMethodID(file, "getAbsolutePath", "()Ljava/lang/String;");
     std::string dirPath = ToUtf8(env, static_cast<jstring>(env->CallObjectMethod(dir, getPath)));
-    std::string dexPath = dirPath + "/modrix_overlay.dex";
+    std::string dexPath = dirPath + "/tlmod_overlay.dex";
     std::remove(dexPath.c_str());
     {
         std::ofstream out(dexPath, std::ios::binary);
@@ -221,7 +221,7 @@ bool Start(JNIEnv* env, PanelController* panel, int timeoutMs, std::string* erro
     // O controlador é entregue à thread de UI; daqui para frente só ela o usa.
     jmethodID install = env->GetStaticMethodID(overlay, "install", "(Landroid/app/Activity;J)V");
     env->CallStaticVoidMethod(overlay, install, activity, reinterpret_cast<jlong>(panel));
-    return !Failed(env, "ModrixOverlay.install", error);
+    return !Failed(env, "TLModOverlay.install", error);
 }
 
 }  // namespace
@@ -235,7 +235,7 @@ bool StartOverlay(PanelController* panel, int timeoutMs, std::string* error) {
     JNIEnv* env = nullptr;
     bool attached = false;
     if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_EDETACHED) {
-        JavaVMAttachArgs args{JNI_VERSION_1_6, "ModrixOverlay", nullptr};
+        JavaVMAttachArgs args{JNI_VERSION_1_6, "TLModOverlay", nullptr};
         if (vm->AttachCurrentThread(&env, &args) != JNI_OK) {
             if (error) *error = "AttachCurrentThread falhou";
             return false;
@@ -246,14 +246,14 @@ bool StartOverlay(PanelController* panel, int timeoutMs, std::string* error) {
     bool ok = Start(env, panel, timeoutMs, error);
     env->PopLocalFrame(nullptr);
     if (attached) vm->DetachCurrentThread();
-    if (ok) rt::Log(MODRIX_LOG_INFO, "overlay", "painel instalado na Activity do jogo");
+    if (ok) rt::Log(TLMOD_LOG_INFO, "overlay", "painel instalado na Activity do jogo");
     return ok;
 }
 
-}  // namespace modrix::overlay
+}  // namespace tlmod::overlay
 
 // Quando a .so é carregada por System.loadLibrary: guarda a VM.
 extern "C" __attribute__((visibility("default"))) jint JNI_OnLoad(JavaVM* vm, void*) {
-    modrix::overlay::g_vm = vm;
+    tlmod::overlay::g_vm = vm;
     return JNI_VERSION_1_6;
 }

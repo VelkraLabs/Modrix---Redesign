@@ -1,25 +1,25 @@
 /*
- * Modrix Mod API — contrato entre um mod e o runtime do Modrix.
+ * TLMod Mod API — contrato entre um mod e o runtime do TLMod.
  *
  * Este é o ÚNICO header de que um mod precisa. É C puro (ABI estável entre
  * compiladores e versões de libc++), não depende de nenhum outro header do
- * Modrix e não expõe nada do jogo nem do IL2CPP: players são índices,
+ * TLMod e não expõe nada do jogo nem do IL2CPP: players são índices,
  * conteúdo é identificado por chaves "mod_id:nome" e IDs numéricos.
  *
  * Um mod é uma pasta com:
  *   manifest.json           metadados, dependências, conteúdo declarado, entry por plataforma
- *   lib/<plataforma>/...    biblioteca nativa que exporta modrix_mod_init
+ *   lib/<plataforma>/...    biblioteca nativa que exporta tlmod_mod_init
  *   (assets opcionais)      texturas etc., referenciadas por caminho relativo
  *
  * Ciclo de vida:
  *   1. O runtime lê todos os manifest.json, valida, resolve dependências e
  *      define a ordem de carga (dependências antes; empates por id).
- *   2. Para cada mod, carrega a biblioteca e chama modrix_mod_init(host, ctx).
+ *   2. Para cada mod, carrega a biblioteca e chama tlmod_mod_init(host, ctx).
  *      É aqui que o mod registra conteúdo e assina eventos.
  *   3. Eventos (ex.: player_hurt) chegam na thread do jogo, na ordem de carga.
  */
-#ifndef MODRIX_API_H
-#define MODRIX_API_H
+#ifndef TLMOD_API_H
+#define TLMOD_API_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -30,17 +30,17 @@ extern "C" {
 #endif
 
 /* Versão da ABI. Muda só quando algo incompatível muda; acréscimos no fim de
- * ModrixHostApi não mudam a versão (o mod confere struct_size). */
-#define MODRIX_API_VERSION 1u
+ * TLModHostApi não mudam a versão (o mod confere struct_size). */
+#define TLMOD_API_VERSION 1u
 
 #if defined(_WIN32)
-#define MODRIX_MOD_EXPORT __declspec(dllexport)
+#define TLMOD_MOD_EXPORT __declspec(dllexport)
 #else
-#define MODRIX_MOD_EXPORT __attribute__((visibility("default")))
+#define TLMOD_MOD_EXPORT __attribute__((visibility("default")))
 #endif
 
 /* Símbolo que toda biblioteca de mod exporta. */
-#define MODRIX_ENTRY_SYMBOL "modrix_mod_init"
+#define TLMOD_ENTRY_SYMBOL "tlmod_mod_init"
 
 /* ------------------------------------------------------------------------ */
 /* Tipos básicos                                                             */
@@ -49,40 +49,40 @@ extern "C" {
 /* ID numérico de conteúdo no jogo. Conteúdo de mods recebe IDs numa faixa
  * reservada acima de todos os IDs originais (veja ContentRegistry). Os IDs
  * podem mudar quando o conjunto de mods muda: para salvar, use a chave. */
-typedef int32_t ModrixId;
-#define MODRIX_INVALID_ID ((ModrixId)-1)
+typedef int32_t TLModId;
+#define TLMOD_INVALID_ID ((TLModId)-1)
 
 /* Índice do player no mundo (0..254). -1 = nenhum. */
-typedef int32_t ModrixPlayer;
-#define MODRIX_NO_PLAYER ((ModrixPlayer)-1)
+typedef int32_t TLModPlayer;
+#define TLMOD_NO_PLAYER ((TLModPlayer)-1)
 
 /* Contexto do mod: opaco, um por mod, válido enquanto o jogo roda. */
-typedef struct ModrixContext ModrixContext;
+typedef struct TLModContext TLModContext;
 
-typedef enum ModrixContentKind {
-    MODRIX_CONTENT_ITEM = 0,
-    MODRIX_CONTENT_NPC = 1,
-    MODRIX_CONTENT_PROJECTILE = 2,
-    MODRIX_CONTENT_TILE = 3,
-    MODRIX_CONTENT_WALL = 4,
-    MODRIX_CONTENT_BUFF = 5,
-    MODRIX_CONTENT_KIND_COUNT
-} ModrixContentKind;
+typedef enum TLModContentKind {
+    TLMOD_CONTENT_ITEM = 0,
+    TLMOD_CONTENT_NPC = 1,
+    TLMOD_CONTENT_PROJECTILE = 2,
+    TLMOD_CONTENT_TILE = 3,
+    TLMOD_CONTENT_WALL = 4,
+    TLMOD_CONTENT_BUFF = 5,
+    TLMOD_CONTENT_KIND_COUNT
+} TLModContentKind;
 
-typedef enum ModrixLogLevel {
-    MODRIX_LOG_DEBUG = 0,
-    MODRIX_LOG_INFO = 1,
-    MODRIX_LOG_WARN = 2,
-    MODRIX_LOG_ERROR = 3
-} ModrixLogLevel;
+typedef enum TLModLogLevel {
+    TLMOD_LOG_DEBUG = 0,
+    TLMOD_LOG_INFO = 1,
+    TLMOD_LOG_WARN = 2,
+    TLMOD_LOG_ERROR = 3
+} TLModLogLevel;
 
 /* ------------------------------------------------------------------------ */
 /* Definições de conteúdo                                                    */
 /* ------------------------------------------------------------------------ */
 
-/* Item. Preencha struct_size = sizeof(ModrixItemDef): campos novos serão
+/* Item. Preencha struct_size = sizeof(TLModItemDef): campos novos serão
  * acrescentados no fim, e o runtime usa struct_size para saber quais existem. */
-typedef struct ModrixItemDef {
+typedef struct TLModItemDef {
     uint32_t struct_size;
     const char* name;          /* chave local [a-z0-9_]{1,64}; declarada em manifest content.items */
     const char* display_name;  /* nome exibido */
@@ -95,7 +95,7 @@ typedef struct ModrixItemDef {
     int32_t rarity;            /* -1 (cinza) .. 11 */
     int32_t damage;            /* 0 = não é arma */
     int32_t use_time;          /* em ticks (60 por segundo) */
-} ModrixItemDef;
+} TLModItemDef;
 
 /* NPC / boss.
  *
@@ -110,148 +110,148 @@ typedef struct ModrixItemDef {
  *   local[]   estado privado do mod por NPC, guardado pelo runtime. O jogo
  *             nunca toca. (Ainda não vai pela rede.)
  */
-typedef struct ModrixNpcState {
+typedef struct TLModNpcState {
     int32_t index;          /* posição em Main.npc (0..199) */
-    ModrixId type;          /* ID do NPC de mod (faixa de mods, ex.: 4096) */
-    ModrixId shell_type;    /* tipo original em uso como casca */
+    TLModId type;          /* ID do NPC de mod (faixa de mods, ex.: 4096) */
+    TLModId shell_type;    /* tipo original em uso como casca */
     float x, y;             /* posição, canto superior esquerdo, em pixels */
     float vx, vy;           /* velocidade; o jogo aplica depois da AI */
     int32_t life, life_max, damage, defense;
-    ModrixPlayer target;
+    TLModPlayer target;
     float ai[4];
     float local[8];
-} ModrixNpcState;
+} TLModNpcState;
 
-typedef void (*ModrixNpcSpawnFn)(void* user, ModrixNpcState* npc);
+typedef void (*TLModNpcSpawnFn)(void* user, TLModNpcState* npc);
 /* Roda a cada tick (60/s), na thread do jogo, antes da AI da casca.
  * true = o mod assume este tick (a AI da casca não roda);
  * false = a AI da casca roda depois. */
-typedef bool (*ModrixNpcAiFn)(void* user, ModrixNpcState* npc);
+typedef bool (*TLModNpcAiFn)(void* user, TLModNpcState* npc);
 
-typedef struct ModrixNpcDef {
+typedef struct TLModNpcDef {
     uint32_t struct_size;
     const char* name;          /* chave local; declarada em manifest content.npcs */
     const char* display_name;
-    ModrixId shell_type;       /* NPC original usado como casca (1..NPCID.Count-1) */
+    TLModId shell_type;       /* NPC original usado como casca (1..NPCID.Count-1) */
     int32_t life_max;          /* <= 0 mantém o da casca */
     int32_t damage;            /* < 0 mantém o da casca */
     int32_t defense;           /* < 0 mantém o da casca */
     bool boss;                 /* reservado: barra de vida/música de boss */
     void* user;                /* repassado aos callbacks */
-    ModrixNpcSpawnFn on_spawn; /* opcional: logo após o NPC entrar no mundo */
-    ModrixNpcAiFn on_ai;       /* opcional: comportamento por tick */
-} ModrixNpcDef;
+    TLModNpcSpawnFn on_spawn; /* opcional: logo após o NPC entrar no mundo */
+    TLModNpcAiFn on_ai;       /* opcional: comportamento por tick */
+} TLModNpcDef;
 
 /* Progresso do mundo atual. Valores só são acrescentados ao fim (ABI). */
-typedef enum ModrixProgress {
-    MODRIX_PROGRESS_HARDMODE = 0,       /* Wall of Flesh derrotado */
-    MODRIX_DOWNED_KING_SLIME,
-    MODRIX_DOWNED_EYE_OF_CTHULHU,
-    MODRIX_DOWNED_EVIL_BOSS,            /* Devorador de Mundos OU Cérebro de Cthulhu */
-    MODRIX_DOWNED_QUEEN_BEE,
-    MODRIX_DOWNED_SKELETRON,
-    MODRIX_DOWNED_DEERCLOPS,
-    MODRIX_DOWNED_QUEEN_SLIME,
-    MODRIX_DOWNED_DESTROYER,
-    MODRIX_DOWNED_TWINS,
-    MODRIX_DOWNED_SKELETRON_PRIME,
-    MODRIX_DOWNED_PLANTERA,
-    MODRIX_DOWNED_GOLEM,
-    MODRIX_DOWNED_DUKE_FISHRON,
-    MODRIX_DOWNED_EMPRESS_OF_LIGHT,
-    MODRIX_DOWNED_LUNATIC_CULTIST,
-    MODRIX_DOWNED_MOON_LORD,
-    MODRIX_DOWNED_GOBLIN_ARMY,
-    MODRIX_DOWNED_FROST_LEGION,
-    MODRIX_DOWNED_PIRATES,
-    MODRIX_DOWNED_MARTIANS,
-    MODRIX_DOWNED_MOURNING_WOOD,
-    MODRIX_DOWNED_PUMPKING,
-    MODRIX_DOWNED_EVERSCREAM,
-    MODRIX_DOWNED_SANTA_NK1,
-    MODRIX_DOWNED_ICE_QUEEN,
-    MODRIX_DOWNED_SOLAR_PILLAR,
-    MODRIX_DOWNED_VORTEX_PILLAR,
-    MODRIX_DOWNED_NEBULA_PILLAR,
-    MODRIX_DOWNED_STARDUST_PILLAR,
-    MODRIX_PROGRESS_COUNT
-} ModrixProgress;
+typedef enum TLModProgress {
+    TLMOD_PROGRESS_HARDMODE = 0,       /* Wall of Flesh derrotado */
+    TLMOD_DOWNED_KING_SLIME,
+    TLMOD_DOWNED_EYE_OF_CTHULHU,
+    TLMOD_DOWNED_EVIL_BOSS,            /* Devorador de Mundos OU Cérebro de Cthulhu */
+    TLMOD_DOWNED_QUEEN_BEE,
+    TLMOD_DOWNED_SKELETRON,
+    TLMOD_DOWNED_DEERCLOPS,
+    TLMOD_DOWNED_QUEEN_SLIME,
+    TLMOD_DOWNED_DESTROYER,
+    TLMOD_DOWNED_TWINS,
+    TLMOD_DOWNED_SKELETRON_PRIME,
+    TLMOD_DOWNED_PLANTERA,
+    TLMOD_DOWNED_GOLEM,
+    TLMOD_DOWNED_DUKE_FISHRON,
+    TLMOD_DOWNED_EMPRESS_OF_LIGHT,
+    TLMOD_DOWNED_LUNATIC_CULTIST,
+    TLMOD_DOWNED_MOON_LORD,
+    TLMOD_DOWNED_GOBLIN_ARMY,
+    TLMOD_DOWNED_FROST_LEGION,
+    TLMOD_DOWNED_PIRATES,
+    TLMOD_DOWNED_MARTIANS,
+    TLMOD_DOWNED_MOURNING_WOOD,
+    TLMOD_DOWNED_PUMPKING,
+    TLMOD_DOWNED_EVERSCREAM,
+    TLMOD_DOWNED_SANTA_NK1,
+    TLMOD_DOWNED_ICE_QUEEN,
+    TLMOD_DOWNED_SOLAR_PILLAR,
+    TLMOD_DOWNED_VORTEX_PILLAR,
+    TLMOD_DOWNED_NEBULA_PILLAR,
+    TLMOD_DOWNED_STARDUST_PILLAR,
+    TLMOD_PROGRESS_COUNT
+} TLModProgress;
 
 /* Provedor de dados para a camada de interface. O mod escreve um documento
  * JSON em `out` com host->buffer_append; o runtime valida o JSON antes de
  * entregar à interface. Pode ser chamado em QUALQUER thread (a da UI): use
  * só funções seguras para isso (progress, in_world, find_content, log). */
-typedef struct ModrixBuffer ModrixBuffer;
-typedef bool (*ModrixProviderFn)(void* user, ModrixBuffer* out);
+typedef struct TLModBuffer TLModBuffer;
+typedef bool (*TLModProviderFn)(void* user, TLModBuffer* out);
 
 /* ------------------------------------------------------------------------ */
 /* Eventos                                                                   */
 /* ------------------------------------------------------------------------ */
 
-typedef struct ModrixPlayerHurt {
-    ModrixPlayer player;
+typedef struct TLModPlayerHurt {
+    TLModPlayer player;
     int32_t damage;       /* na fase "pré" o mod pode alterar */
     bool crit;
     bool pvp;
     int32_t life_before;
     int32_t life_after;   /* só preenchido na fase "pós" */
-} ModrixPlayerHurt;
+} TLModPlayerHurt;
 
 /* Fase pré (after=false): retornar false cancela o golpe.
  * Fase pós (after=true): só observação; o retorno é ignorado. */
-typedef bool (*ModrixPlayerHurtFn)(void* user, ModrixPlayerHurt* ev, bool after);
+typedef bool (*TLModPlayerHurtFn)(void* user, TLModPlayerHurt* ev, bool after);
 
 /* ------------------------------------------------------------------------ */
 /* Tabela de funções que o runtime entrega ao mod                            */
 /* ------------------------------------------------------------------------ */
 
-typedef struct ModrixHostApi {
-    uint32_t api_version;  /* MODRIX_API_VERSION do runtime */
-    uint32_t struct_size;  /* sizeof(ModrixHostApi) do runtime */
+typedef struct TLModHostApi {
+    uint32_t api_version;  /* TLMOD_API_VERSION do runtime */
+    uint32_t struct_size;  /* sizeof(TLModHostApi) do runtime */
 
     /* Identidade e log */
-    const char* (*mod_id)(const ModrixContext* ctx);
-    const char* (*mod_version)(const ModrixContext* ctx);
-    const char* (*mod_dir)(const ModrixContext* ctx); /* pasta do mod (com assets) */
-    void (*log)(const ModrixContext* ctx, ModrixLogLevel level, const char* message);
+    const char* (*mod_id)(const TLModContext* ctx);
+    const char* (*mod_version)(const TLModContext* ctx);
+    const char* (*mod_dir)(const TLModContext* ctx); /* pasta do mod (com assets) */
+    void (*log)(const TLModContext* ctx, TLModLogLevel level, const char* message);
 
-    /* Conteúdo. Só pode ser chamado durante modrix_mod_init.
-     * register_item devolve o ID atribuído ou MODRIX_INVALID_ID (motivo no log). */
-    ModrixId (*register_item)(ModrixContext* ctx, const ModrixItemDef* def);
-    /* key = "mod_id:nome". Devolve MODRIX_INVALID_ID se não existir. */
-    ModrixId (*find_content)(const ModrixContext* ctx, ModrixContentKind kind, const char* key);
+    /* Conteúdo. Só pode ser chamado durante tlmod_mod_init.
+     * register_item devolve o ID atribuído ou TLMOD_INVALID_ID (motivo no log). */
+    TLModId (*register_item)(TLModContext* ctx, const TLModItemDef* def);
+    /* key = "mod_id:nome". Devolve TLMOD_INVALID_ID se não existir. */
+    TLModId (*find_content)(const TLModContext* ctx, TLModContentKind kind, const char* key);
 
     /* Jogo */
-    bool (*subscribe_player_hurt)(ModrixContext* ctx, ModrixPlayerHurtFn fn, void* user);
-    ModrixPlayer (*local_player)(const ModrixContext* ctx);
-    int32_t (*player_life)(const ModrixContext* ctx, ModrixPlayer player); /* -1 se inválido */
+    bool (*subscribe_player_hurt)(TLModContext* ctx, TLModPlayerHurtFn fn, void* user);
+    TLModPlayer (*local_player)(const TLModContext* ctx);
+    int32_t (*player_life)(const TLModContext* ctx, TLModPlayer player); /* -1 se inválido */
 
     /* NPCs. Campos acrescentados ao fim da tabela: um mod que os usa deve
-     * conferir struct_size (modrix.hpp já confere). */
-    ModrixId (*register_npc)(ModrixContext* ctx, const ModrixNpcDef* def); /* só no init */
+     * conferir struct_size (tlmod.hpp já confere). */
+    TLModId (*register_npc)(TLModContext* ctx, const TLModNpcDef* def); /* só no init */
     /* Cria um NPC (original ou de mod) via NPC.NewNPC. Só na thread do jogo
      * (ex.: dentro de on_ai ou de um evento). Devolve o índice ou -1. */
-    int32_t (*spawn_npc)(ModrixContext* ctx, ModrixId type, float x, float y);
+    int32_t (*spawn_npc)(TLModContext* ctx, TLModId type, float x, float y);
 
     /* Estado do mundo. Seguras em qualquer thread: leem uma fotografia que o
      * runtime atualiza a cada frame na thread do jogo.
      * Retornam 1 (sim), 0 (não) ou -1 (desconhecido: sem mundo carregado,
      * jogo ainda não rodou um frame, ou flag não mapeada nesta versão). */
-    int32_t (*in_world)(const ModrixContext* ctx);
-    int32_t (*progress)(const ModrixContext* ctx, ModrixProgress flag);
+    int32_t (*in_world)(const TLModContext* ctx);
+    int32_t (*progress)(const TLModContext* ctx, TLModProgress flag);
 
     /* Canal de dados para a interface ("mod_id/channel"). Só durante o init;
      * channel [a-z0-9_]{1,64}, declarado em manifest "provides". */
-    bool (*register_provider)(ModrixContext* ctx, const char* channel, ModrixProviderFn fn, void* user);
-    void (*buffer_append)(ModrixBuffer* out, const char* data, size_t len);
-} ModrixHostApi;
+    bool (*register_provider)(TLModContext* ctx, const char* channel, TLModProviderFn fn, void* user);
+    void (*buffer_append)(TLModBuffer* out, const char* data, size_t len);
+} TLModHostApi;
 
 /* Assinatura do ponto de entrada. Retorne 0 em sucesso; qualquer outro valor
  * marca o mod como falho e os mods que dependem dele não são carregados. */
-typedef int (*ModrixModInitFn)(const ModrixHostApi* host, ModrixContext* ctx);
+typedef int (*TLModModInitFn)(const TLModHostApi* host, TLModContext* ctx);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* MODRIX_API_H */
+#endif /* TLMOD_API_H */

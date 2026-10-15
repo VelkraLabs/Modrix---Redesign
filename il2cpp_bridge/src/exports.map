@@ -1,6 +1,6 @@
 {
     global:
-        Modrix_*;
+        TLMod_*;
     local:
         *;
 };

@@ -1,12 +1,12 @@
-# Modrix Mod API
+# TLMod Mod API
 
-API de mods do Modrix, independente de plataforma, montada sobre a ponte IL2CPP
-(`../il2cpp_bridge`). O autor do mod só vê `include/modrix/modrix_api.h` (C puro)
-e, se quiser, `include/modrix/modrix.hpp` (açúcar C++ só de header). Nenhum tipo do
+API de mods do TLMod, independente de plataforma, montada sobre a ponte IL2CPP
+(`../il2cpp_bridge`). O autor do mod só vê `include/tlmod/tlmod_api.h` (C puro)
+e, se quiser, `include/tlmod/tlmod.hpp` (açúcar C++ só de header). Nenhum tipo do
 jogo ou do IL2CPP atravessa a fronteira: players são índices, conteúdo é chave + ID.
 
 ```
-mod (C/C++) ──ModrixHostApi (C ABI)──▶ runtime ──GameAdapter──▶ BridgeGameAdapter ──▶ il2cpp_bridge ──▶ jogo
+mod (C/C++) ──TLModHostApi (C ABI)──▶ runtime ──GameAdapter──▶ BridgeGameAdapter ──▶ il2cpp_bridge ──▶ jogo
                                           │                     FakeGame (testes)
                                           └─ ContentRegistry, ModLoader, manifest/semver
 ```
@@ -23,15 +23,15 @@ example_item/
     └── linux-x86_64/libexample_item.so
 ```
 
-A biblioteca exporta `int modrix_mod_init(const ModrixHostApi*, ModrixContext*)`.
-A macro `MODRIX_MOD(fn)` gera isso a partir de `bool fn(modrix::Host&)`.
+A biblioteca exporta `int tlmod_mod_init(const TLModHostApi*, TLModContext*)`.
+A macro `TLMOD_MOD(fn)` gera isso a partir de `bool fn(tlmod::Host&)`.
 
 ### manifest.json
 
 | campo | obrigatório | descrição |
 |---|---|---|
-| `modrix_api` | sim | versão da ABI (hoje `1`) |
-| `id` | sim | `[a-z0-9]` separados por `.` `_` `-`, até 64 (ex.: `modrix.example_item`) |
+| `tlmod_api` | sim | versão da ABI (hoje `1`) |
+| `id` | sim | `[a-z0-9]` separados por `.` `_` `-`, até 64 (ex.: `tlmod.example_item`) |
 | `name` | sim | nome exibido |
 | `version` | sim | semver `MAJOR.MINOR.PATCH[-pre]` |
 | `authors`, `description` | não | metadados |
@@ -41,17 +41,17 @@ A macro `MODRIX_MOD(fn)` gera isso a partir de `bool fn(modrix::Host&)`.
 | `entry` | sim | plataforma → caminho relativo da biblioteca (`android-arm64`, `linux-x86_64`, `windows-x86_64`, `macos-arm64`…) |
 
 `content` é um contrato. Registrar algo que não foi declarado é recusado, e algo
-declarado que não foi registrado gera aviso. Assim a interface do Modrix mostra o
+declarado que não foi registrado gera aviso. Assim a interface do TLMod mostra o
 que um mod adiciona sem executar o código dele.
 
 ### Ciclo de carga
 
 1. Lê `mods/*/manifest.json`. Manifests inválidos e ids duplicados são rejeitados.
-2. Resolve dependências: ausentes, versões incompatíveis, ciclos e `modrix_api` diferente
+2. Resolve dependências: ausentes, versões incompatíveis, ciclos e `tlmod_api` diferente
    geram rejeição, que se propaga para quem depende.
 3. Ordena topologicamente, com empates resolvidos pelo id. A ordem é determinística, e por isso
    os IDs também são.
-4. Carrega a biblioteca da plataforma e chama `modrix_mod_init`. Se ela retornar algo diferente de 0, o
+4. Carrega a biblioteca da plataforma e chama `tlmod_mod_init`. Se ela retornar algo diferente de 0, o
    conteúdo que o mod registrou é desfeito e os dependentes são pulados.
 
 ## IDs de conteúdo
@@ -100,17 +100,17 @@ slots e o `local[]` em multiplayer, e confirmar no jogo que `NewNPC` aceita `sou
 # host: runtime + adaptador (contra a ponte de host) + mod de exemplo + testes
 cmake -S . -B build && cmake --build build && (cd build && ctest --output-on-failure)
 
-# Android arm64: libmodrix_runtime.so (+ libmodrix_bridge.so) e o mod
+# Android arm64: libtlmod_runtime.so (+ libtlmod_bridge.so) e o mod
 cmake -S . -B build-android -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 -DCMAKE_BUILD_TYPE=Release
 cmake --build build-android
 ```
 
 Os mods compilados saem em `<build>/dist/mods/<mod>/`, já no formato de pasta.
-Para compilar um mod fora deste repositório: `cmake -S mods/example_item -B b -DMODRIX_SDK_INCLUDE_DIR=…/modapi/include`.
+Para compilar um mod fora deste repositório: `cmake -S mods/example_item -B b -DTLMOD_SDK_INCLUDE_DIR=…/modapi/include`.
 
-No Android, o runtime procura mods em `$MODRIX_MODS_DIR`; se não houver, em
-`/storage/emulated/0/Android/data/<pacote>/files/modrix/mods`; e por último em `/data/data/<pacote>/files/modrix/mods`.
+No Android, o runtime procura mods em `$TLMOD_MODS_DIR`; se não houver, em
+`/storage/emulated/0/Android/data/<pacote>/files/tlmod/mods`; e por último em `/data/data/<pacote>/files/tlmod/mods`.
 
 ## Ainda não implementado
 

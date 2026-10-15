@@ -1,4 +1,4 @@
-#include "modrix/runtime/mod_loader.h"
+#include "tlmod/runtime/mod_loader.h"
 
 #include <algorithm>
 #include <iterator>
@@ -10,25 +10,25 @@
 
 #include "dynlib.h"
 #include "json.h"
-#include "modrix/runtime/game_adapter.h"
-#include "modrix/runtime/log.h"
+#include "tlmod/runtime/game_adapter.h"
+#include "tlmod/runtime/log.h"
 
 // Buffer em que um provedor escreve o JSON. Opaco do lado do mod.
-struct ModrixBuffer {
+struct TLModBuffer {
     std::string data;
 };
 
-// Contexto entregue ao mod. Opaco do lado do mod (modrix_api.h só declara).
-struct ModrixContext {
-    modrix::rt::ModLoader* loader;
-    modrix::rt::ModLoader::Impl* impl;
+// Contexto entregue ao mod. Opaco do lado do mod (tlmod_api.h só declara).
+struct TLModContext {
+    tlmod::rt::ModLoader* loader;
+    tlmod::rt::ModLoader::Impl* impl;
     size_t index;             // em ModLoader::Mods()
     bool initializing = false;
     std::string version;      // cache para mod_version()
     std::string dir;          // cache para mod_dir()
 };
 
-namespace modrix::rt {
+namespace tlmod::rt {
 
 const char* ToString(ModState s) {
     switch (s) {
@@ -44,31 +44,31 @@ const char* ToString(ModState s) {
 
 struct ModLoader::Impl {
     struct HurtSub {
-        ModrixContext* ctx;
-        ModrixPlayerHurtFn fn;
+        TLModContext* ctx;
+        TLModPlayerHurtFn fn;
         void* user;
     };
 
     ModLoader* self;
     GameAdapter* game;
-    ModrixHostApi api{};
-    std::vector<std::unique_ptr<ModrixContext>> contexts;
+    TLModHostApi api{};
+    std::vector<std::unique_ptr<TLModContext>> contexts;
     std::vector<void*> libraries;  // nunca fechadas: hooks/eventos podem apontar para elas
     std::vector<HurtSub> hurtSubs;
 
     // Provedores de dados para a interface ("mod_id/channel").
     struct Provider {
         std::string key;
-        ModrixProviderFn fn;
+        TLModProviderFn fn;
         void* user;
         std::unique_ptr<std::mutex> mutex;  // serializa chamadas ao mesmo provedor
     };
     std::vector<Provider> providers;
 
-    const ModRecord& Mod(const ModrixContext* ctx) const { return self->mods_[ctx->index]; }
-    const std::string& ModId(const ModrixContext* ctx) const { return Mod(ctx).manifest.id; }
+    const ModRecord& Mod(const TLModContext* ctx) const { return self->mods_[ctx->index]; }
+    const std::string& ModId(const TLModContext* ctx) const { return Mod(ctx).manifest.id; }
 
-    bool DispatchHurt(ModrixPlayerHurt& ev, bool after) {
+    bool DispatchHurt(TLModPlayerHurt& ev, bool after) {
         for (const HurtSub& s : hurtSubs) {
             bool keep = s.fn(s.user, &ev, after);
             if (!after && !keep) return false;  // um mod cancelou o golpe
@@ -78,23 +78,23 @@ struct ModLoader::Impl {
 
     // ---- NPCs de mod ----------------------------------------------------------
     // Tabela lateral: para cada slot de Main.npc, qual NPC de mod está ali
-    // (MODRIX_INVALID_ID = NPC original) e o estado privado local[] dele.
+    // (TLMOD_INVALID_ID = NPC original) e o estado privado local[] dele.
     // É o "registro de spawns": preenchido no pós-NewNPC, limpo no SetDefaults.
     struct NpcSlot {
-        ModrixId type = MODRIX_INVALID_ID;
+        TLModId type = TLMOD_INVALID_ID;
         float local[8] = {};
     };
     std::vector<NpcSlot> npcSlots;
     uint64_t modNpcSpawns = 0;
 
     const NpcDefinition* ModNpcDef(int32_t type) const {
-        const ContentEntry* e = self->registry_.Get(MODRIX_CONTENT_NPC, type);
+        const ContentEntry* e = self->registry_.Get(TLMOD_CONTENT_NPC, type);
         return e ? e->Npc() : nullptr;
     }
     bool ValidSlot(int32_t index) const {
         return index >= 0 && static_cast<size_t>(index) < npcSlots.size();
     }
-    bool ReadModNpc(int32_t index, ModrixNpcState& st) const {
+    bool ReadModNpc(int32_t index, TLModNpcState& st) const {
         if (!game->ReadNpc(index, st)) return false;
         st.index = index;
         st.type = npcSlots[static_cast<size_t>(index)].type;  // o jogo só vê a casca
@@ -102,7 +102,7 @@ struct ModLoader::Impl {
                   std::end(npcSlots[static_cast<size_t>(index)].local), st.local);
         return true;
     }
-    void WriteModNpc(int32_t index, const ModrixNpcState& st) {
+    void WriteModNpc(int32_t index, const TLModNpcState& st) {
         game->WriteNpc(index, st);
         std::copy(std::begin(st.local), std::end(st.local), npcSlots[static_cast<size_t>(index)].local);
     }
@@ -117,17 +117,17 @@ struct ModLoader::Impl {
     void OnNpcSpawned(int32_t index, int32_t requested, int32_t spawned) {
         const NpcDefinition* def = ModNpcDef(requested);
         if (!def) return;  // NPC original: nada a fazer (ponto para eventos de spawn no futuro)
-        const ContentEntry* e = self->registry_.Get(MODRIX_CONTENT_NPC, requested);
+        const ContentEntry* e = self->registry_.Get(TLMOD_CONTENT_NPC, requested);
         if (!ValidSlot(index)) {
-            Log(MODRIX_LOG_WARN, e->modId, "spawn de " + e->key + " falhou: sem slot livre");
+            Log(TLMOD_LOG_WARN, e->modId, "spawn de " + e->key + " falhou: sem slot livre");
             return;
         }
         npcSlots[static_cast<size_t>(index)] = NpcSlot{requested, {}};
         ++modNpcSpawns;
-        Log(MODRIX_LOG_DEBUG, e->modId,
+        Log(TLMOD_LOG_DEBUG, e->modId,
             "spawn " + e->key + " no slot " + std::to_string(index) + " (casca " + std::to_string(spawned) + ")");
 
-        ModrixNpcState st{};
+        TLModNpcState st{};
         if (!ReadModNpc(index, st)) return;
         if (def->lifeMax > 0) st.life = st.life_max = def->lifeMax;
         if (def->damage >= 0) st.damage = def->damage;
@@ -145,11 +145,11 @@ struct ModLoader::Impl {
     // Pré-AI, por tick: só NPCs de mod com on_ai pagam o custo de ler/escrever.
     bool OnNpcAi(int32_t index) {
         if (!ValidSlot(index)) return false;
-        ModrixId type = npcSlots[static_cast<size_t>(index)].type;
-        if (type == MODRIX_INVALID_ID) return false;
+        TLModId type = npcSlots[static_cast<size_t>(index)].type;
+        if (type == TLMOD_INVALID_ID) return false;
         const NpcDefinition* def = ModNpcDef(type);
         if (!def || !def->onAi) return false;
-        ModrixNpcState st{};
+        TLModNpcState st{};
         if (!ReadModNpc(index, st)) return false;
         bool replace = def->onAi(def->user, &st);
         WriteModNpc(index, st);
@@ -161,36 +161,36 @@ namespace {
 
 using Impl = ModLoader::Impl;
 
-Impl* ImplOf(const ModrixContext* ctx) { return ctx ? ctx->impl : nullptr; }
+Impl* ImplOf(const TLModContext* ctx) { return ctx ? ctx->impl : nullptr; }
 
-// ---- Implementação de ModrixHostApi -------------------------------------
+// ---- Implementação de TLModHostApi -------------------------------------
 // Todas validam o contexto; nenhum erro de mod derruba o runtime.
 
-const char* Api_ModId(const ModrixContext* ctx) {
+const char* Api_ModId(const TLModContext* ctx) {
     return ctx ? ImplOf(ctx)->ModId(ctx).c_str() : "";
 }
-const char* Api_ModVersion(const ModrixContext* ctx) { return ctx ? ctx->version.c_str() : ""; }
-const char* Api_ModDir(const ModrixContext* ctx) { return ctx ? ctx->dir.c_str() : ""; }
+const char* Api_ModVersion(const TLModContext* ctx) { return ctx ? ctx->version.c_str() : ""; }
+const char* Api_ModDir(const TLModContext* ctx) { return ctx ? ctx->dir.c_str() : ""; }
 
-void Api_Log(const ModrixContext* ctx, ModrixLogLevel level, const char* msg) {
+void Api_Log(const TLModContext* ctx, TLModLogLevel level, const char* msg) {
     Log(level, ctx ? ImplOf(ctx)->ModId(ctx) : "?", msg ? msg : "");
 }
 
-constexpr uint32_t kItemDefV1Size = static_cast<uint32_t>(offsetof(ModrixItemDef, use_time) + sizeof(int32_t));
+constexpr uint32_t kItemDefV1Size = static_cast<uint32_t>(offsetof(TLModItemDef, use_time) + sizeof(int32_t));
 
-ModrixId Api_RegisterItem(ModrixContext* ctx, const ModrixItemDef* def) {
-    if (!ctx) return MODRIX_INVALID_ID;
+TLModId Api_RegisterItem(TLModContext* ctx, const TLModItemDef* def) {
+    if (!ctx) return TLMOD_INVALID_ID;
     Impl* impl = ImplOf(ctx);
     const ModRecord& mod = impl->Mod(ctx);
     auto err = [&](const std::string& msg) {
-        Log(MODRIX_LOG_ERROR, mod.manifest.id, "register_item: " + msg);
-        return MODRIX_INVALID_ID;
+        Log(TLMOD_LOG_ERROR, mod.manifest.id, "register_item: " + msg);
+        return TLMOD_INVALID_ID;
     };
-    if (!ctx->initializing) return err("só pode ser chamado durante modrix_mod_init");
-    if (!def || def->struct_size < kItemDefV1Size) return err("ModrixItemDef nulo ou struct_size inválido");
+    if (!ctx->initializing) return err("só pode ser chamado durante tlmod_mod_init");
+    if (!def || def->struct_size < kItemDefV1Size) return err("TLModItemDef nulo ou struct_size inválido");
     if (!def->name) return err("name é obrigatório");
     std::string name = def->name;
-    if (!mod.manifest.Declares(MODRIX_CONTENT_ITEM, name))
+    if (!mod.manifest.Declares(TLMOD_CONTENT_ITEM, name))
         return err("\"" + name + "\" não está declarado em content.items do manifest.json");
     if (!def->display_name || !*def->display_name) return err("display_name é obrigatório");
     if (def->max_stack < 1 || def->width <= 0 || def->height <= 0 || def->use_time < 0)
@@ -213,60 +213,60 @@ ModrixId Api_RegisterItem(ModrixContext* ctx, const ModrixItemDef* def) {
     item.useTime = def->use_time;
 
     std::string error;
-    auto id = impl->self->Registry().Register(MODRIX_CONTENT_ITEM, mod.manifest.id, name,
+    auto id = impl->self->Registry().Register(TLMOD_CONTENT_ITEM, mod.manifest.id, name,
                                               std::move(item), &error);
     if (!id) return err(error);
-    Log(MODRIX_LOG_INFO, mod.manifest.id,
+    Log(TLMOD_LOG_INFO, mod.manifest.id,
         "item " + mod.manifest.id + ":" + name + " -> ID " + std::to_string(*id));
     return *id;
 }
 
-ModrixId Api_FindContent(const ModrixContext* ctx, ModrixContentKind kind, const char* key) {
-    if (!ctx || !key) return MODRIX_INVALID_ID;
+TLModId Api_FindContent(const TLModContext* ctx, TLModContentKind kind, const char* key) {
+    if (!ctx || !key) return TLMOD_INVALID_ID;
     auto id = ImplOf(ctx)->self->Registry().Find(kind, key);
-    return id ? *id : MODRIX_INVALID_ID;
+    return id ? *id : TLMOD_INVALID_ID;
 }
 
-bool Api_SubscribePlayerHurt(ModrixContext* ctx, ModrixPlayerHurtFn fn, void* user) {
+bool Api_SubscribePlayerHurt(TLModContext* ctx, TLModPlayerHurtFn fn, void* user) {
     if (!ctx || !fn) return false;
     Impl* impl = ImplOf(ctx);
     if (!ctx->initializing) {
-        Log(MODRIX_LOG_ERROR, impl->ModId(ctx), "subscribe_player_hurt: só durante modrix_mod_init");
+        Log(TLMOD_LOG_ERROR, impl->ModId(ctx), "subscribe_player_hurt: só durante tlmod_mod_init");
         return false;
     }
     impl->hurtSubs.push_back({ctx, fn, user});
     return true;
 }
 
-ModrixPlayer Api_LocalPlayer(const ModrixContext* ctx) {
-    return ctx ? ImplOf(ctx)->game->LocalPlayer() : MODRIX_NO_PLAYER;
+TLModPlayer Api_LocalPlayer(const TLModContext* ctx) {
+    return ctx ? ImplOf(ctx)->game->LocalPlayer() : TLMOD_NO_PLAYER;
 }
 
-int32_t Api_PlayerLife(const ModrixContext* ctx, ModrixPlayer p) {
+int32_t Api_PlayerLife(const TLModContext* ctx, TLModPlayer p) {
     return ctx ? ImplOf(ctx)->game->PlayerLife(p) : -1;
 }
 
-constexpr uint32_t kNpcDefV1Size = static_cast<uint32_t>(offsetof(ModrixNpcDef, on_ai) + sizeof(ModrixNpcAiFn));
+constexpr uint32_t kNpcDefV1Size = static_cast<uint32_t>(offsetof(TLModNpcDef, on_ai) + sizeof(TLModNpcAiFn));
 
-ModrixId Api_RegisterNpc(ModrixContext* ctx, const ModrixNpcDef* def) {
-    if (!ctx) return MODRIX_INVALID_ID;
+TLModId Api_RegisterNpc(TLModContext* ctx, const TLModNpcDef* def) {
+    if (!ctx) return TLMOD_INVALID_ID;
     Impl* impl = ImplOf(ctx);
     const ModRecord& mod = impl->Mod(ctx);
     auto err = [&](const std::string& msg) {
-        Log(MODRIX_LOG_ERROR, mod.manifest.id, "register_npc: " + msg);
-        return MODRIX_INVALID_ID;
+        Log(TLMOD_LOG_ERROR, mod.manifest.id, "register_npc: " + msg);
+        return TLMOD_INVALID_ID;
     };
-    if (!ctx->initializing) return err("só pode ser chamado durante modrix_mod_init");
-    if (!def || def->struct_size < kNpcDefV1Size) return err("ModrixNpcDef nulo ou struct_size inválido");
+    if (!ctx->initializing) return err("só pode ser chamado durante tlmod_mod_init");
+    if (!def || def->struct_size < kNpcDefV1Size) return err("TLModNpcDef nulo ou struct_size inválido");
     if (!def->name) return err("name é obrigatório");
     std::string name = def->name;
-    if (!mod.manifest.Declares(MODRIX_CONTENT_NPC, name))
+    if (!mod.manifest.Declares(TLMOD_CONTENT_NPC, name))
         return err("\"" + name + "\" não está declarado em content.npcs do manifest.json");
     if (!def->display_name || !*def->display_name) return err("display_name é obrigatório");
 
     // A casca tem de ser um NPC original existente: é ela que o jogo vê.
     ContentRegistry& reg = impl->self->Registry();
-    int32_t vanilla = reg.VanillaCount(MODRIX_CONTENT_NPC).value_or(0);
+    int32_t vanilla = reg.VanillaCount(TLMOD_CONTENT_NPC).value_or(0);
     if (def->shell_type <= 0 || def->shell_type >= vanilla)
         return err("shell_type " + std::to_string(def->shell_type) + " não é um NPC original (1.." +
                    std::to_string(vanilla - 1) + ")");
@@ -283,9 +283,9 @@ ModrixId Api_RegisterNpc(ModrixContext* ctx, const ModrixNpcDef* def) {
     npc.onAi = def->on_ai;
 
     std::string error;
-    auto id = reg.Register(MODRIX_CONTENT_NPC, mod.manifest.id, name, std::move(npc), &error);
+    auto id = reg.Register(TLMOD_CONTENT_NPC, mod.manifest.id, name, std::move(npc), &error);
     if (!id) return err(error);
-    Log(MODRIX_LOG_INFO, mod.manifest.id,
+    Log(TLMOD_LOG_INFO, mod.manifest.id,
         "npc " + mod.manifest.id + ":" + name + " -> ID " + std::to_string(*id) + " (casca " +
             std::to_string(def->shell_type) + ")");
     return *id;
@@ -293,10 +293,10 @@ ModrixId Api_RegisterNpc(ModrixContext* ctx, const ModrixNpcDef* def) {
 
 int32_t ToTri(std::optional<bool> v) { return v ? (*v ? 1 : 0) : -1; }
 
-int32_t Api_InWorld(const ModrixContext* ctx) { return ctx ? ToTri(ImplOf(ctx)->game->InWorld()) : -1; }
+int32_t Api_InWorld(const TLModContext* ctx) { return ctx ? ToTri(ImplOf(ctx)->game->InWorld()) : -1; }
 
-int32_t Api_Progress(const ModrixContext* ctx, ModrixProgress flag) {
-    if (!ctx || flag < 0 || flag >= MODRIX_PROGRESS_COUNT) return -1;
+int32_t Api_Progress(const TLModContext* ctx, TLModProgress flag) {
+    if (!ctx || flag < 0 || flag >= TLMOD_PROGRESS_COUNT) return -1;
     GameAdapter* game = ImplOf(ctx)->game;
     // Flags só fazem sentido com um mundo carregado; no menu ficam com o
     // valor do último mundo (ou lixo), então a resposta é "desconhecido".
@@ -304,15 +304,15 @@ int32_t Api_Progress(const ModrixContext* ctx, ModrixProgress flag) {
     return ToTri(game->Progress(flag));
 }
 
-bool Api_RegisterProvider(ModrixContext* ctx, const char* channel, ModrixProviderFn fn, void* user) {
+bool Api_RegisterProvider(TLModContext* ctx, const char* channel, TLModProviderFn fn, void* user) {
     if (!ctx) return false;
     Impl* impl = ImplOf(ctx);
     const ModRecord& mod = impl->Mod(ctx);
     auto err = [&](const std::string& msg) {
-        Log(MODRIX_LOG_ERROR, mod.manifest.id, "register_provider: " + msg);
+        Log(TLMOD_LOG_ERROR, mod.manifest.id, "register_provider: " + msg);
         return false;
     };
-    if (!ctx->initializing) return err("só pode ser chamado durante modrix_mod_init");
+    if (!ctx->initializing) return err("só pode ser chamado durante tlmod_mod_init");
     if (!channel || !fn) return err("channel e fn são obrigatórios");
     std::string ch = channel;
     if (std::find(mod.manifest.provides.begin(), mod.manifest.provides.end(), ch) == mod.manifest.provides.end())
@@ -324,18 +324,18 @@ bool Api_RegisterProvider(ModrixContext* ctx, const char* channel, ModrixProvide
     return true;
 }
 
-void Api_BufferAppend(ModrixBuffer* out, const char* data, size_t len) {
+void Api_BufferAppend(TLModBuffer* out, const char* data, size_t len) {
     if (out && data) out->data.append(data, len);
 }
 
-int32_t Api_SpawnNpc(ModrixContext* ctx, ModrixId type, float x, float y) {
+int32_t Api_SpawnNpc(TLModContext* ctx, TLModId type, float x, float y) {
     if (!ctx) return -1;
     Impl* impl = ImplOf(ctx);
     const ContentRegistry& reg = impl->self->Registry();
-    int32_t vanilla = reg.VanillaCount(MODRIX_CONTENT_NPC).value_or(0);
-    bool known = reg.IsModId(MODRIX_CONTENT_NPC, type) || (type > 0 && type < vanilla);
+    int32_t vanilla = reg.VanillaCount(TLMOD_CONTENT_NPC).value_or(0);
+    bool known = reg.IsModId(TLMOD_CONTENT_NPC, type) || (type > 0 && type < vanilla);
     if (!known) {
-        Log(MODRIX_LOG_ERROR, impl->ModId(ctx), "spawn_npc: tipo " + std::to_string(type) + " desconhecido");
+        Log(TLMOD_LOG_ERROR, impl->ModId(ctx), "spawn_npc: tipo " + std::to_string(type) + " desconhecido");
         return -1;
     }
     // Passa pelo NewNPC do jogo; o remap para a casca acontece no gancho.
@@ -349,9 +349,9 @@ int32_t Api_SpawnNpc(ModrixContext* ctx, ModrixId type, float x, float y) {
 ModLoader::ModLoader(GameAdapter* game) : game_(game), registry_(game), impl_(std::make_unique<Impl>()) {
     impl_->self = this;
     impl_->game = game;
-    ModrixHostApi& a = impl_->api;
-    a.api_version = MODRIX_API_VERSION;
-    a.struct_size = sizeof(ModrixHostApi);
+    TLModHostApi& a = impl_->api;
+    a.api_version = TLMOD_API_VERSION;
+    a.struct_size = sizeof(TLModHostApi);
     a.mod_id = &Api_ModId;
     a.mod_version = &Api_ModVersion;
     a.mod_dir = &Api_ModDir;
@@ -369,7 +369,7 @@ ModLoader::ModLoader(GameAdapter* game) : game_(game), registry_(game), impl_(st
     a.buffer_append = &Api_BufferAppend;
 
     Impl* impl = impl_.get();
-    game_->SetPlayerHurtHandler([impl](ModrixPlayerHurt& ev, bool after) { return impl->DispatchHurt(ev, after); });
+    game_->SetPlayerHurtHandler([impl](TLModPlayerHurt& ev, bool after) { return impl->DispatchHurt(ev, after); });
 
     impl->npcSlots.resize(static_cast<size_t>(std::max(0, game_->MaxNpcs())));
     GameAdapter::NpcHooks hooks;
@@ -400,7 +400,7 @@ std::optional<std::string> ModLoader::Query(const std::string& modId, const std:
     std::string key = modId + "/" + channel;
     for (const auto& p : impl_->providers) {
         if (p.key != key) continue;
-        ModrixBuffer buf;
+        TLModBuffer buf;
         bool ok;
         {
             std::lock_guard<std::mutex> lock(*p.mutex);
@@ -410,7 +410,7 @@ std::optional<std::string> ModLoader::Query(const std::string& modId, const std:
         // A interface recebe sempre JSON válido: um mod com bug não a quebra.
         std::string jsonError;
         if (!json::Parse(buf.data, &jsonError)) {
-            Log(MODRIX_LOG_ERROR, modId, "provedor " + channel + " gerou JSON inválido: " + jsonError);
+            Log(TLMOD_LOG_ERROR, modId, "provedor " + channel + " gerou JSON inválido: " + jsonError);
             return fail(key + ": " + jsonError);
         }
         return std::move(buf.data);
@@ -418,11 +418,11 @@ std::optional<std::string> ModLoader::Query(const std::string& modId, const std:
     return fail("canal " + key + " não existe");
 }
 
-ModrixId ModLoader::NpcInSlot(int32_t index) const {
-    return impl_->ValidSlot(index) ? impl_->npcSlots[static_cast<size_t>(index)].type : MODRIX_INVALID_ID;
+TLModId ModLoader::NpcInSlot(int32_t index) const {
+    return impl_->ValidSlot(index) ? impl_->npcSlots[static_cast<size_t>(index)].type : TLMOD_INVALID_ID;
 }
 
-const ModrixHostApi& ModLoader::HostApi() const { return impl_->api; }
+const TLModHostApi& ModLoader::HostApi() const { return impl_->api; }
 
 const ModRecord* ModLoader::Find(const std::string& id) const {
     for (const ModRecord& m : mods_)
@@ -436,7 +436,7 @@ void ModLoader::DiscoverDirectory(const std::filesystem::path& modsDir) {
     for (const auto& e : std::filesystem::directory_iterator(modsDir, ec))
         if (e.is_directory(ec) && std::filesystem::exists(e.path() / "manifest.json", ec))
             dirs.push_back(e.path());
-    if (ec) Log(MODRIX_LOG_WARN, "loader", "não foi possível listar " + modsDir.string() + ": " + ec.message());
+    if (ec) Log(TLMOD_LOG_WARN, "loader", "não foi possível listar " + modsDir.string() + ": " + ec.message());
     std::sort(dirs.begin(), dirs.end());
 
     for (const auto& dir : dirs) {
@@ -459,7 +459,7 @@ void ModLoader::DiscoverDirectory(const std::filesystem::path& modsDir) {
     }
 }
 
-void ModLoader::AddBuiltin(ModManifest manifest, ModrixModInitFn init) {
+void ModLoader::AddBuiltin(ModManifest manifest, TLModModInitFn init) {
     ModRecord rec;
     rec.manifest = std::move(manifest);
     rec.builtinInit = init;
@@ -476,9 +476,9 @@ std::vector<std::string> ModLoader::ResolveOrder(std::vector<ModRecord>& mods) {
         m.error = why;
     };
     for (ModRecord& m : mods) {
-        if (m.state == ModState::Discovered && m.manifest.apiVersion != MODRIX_API_VERSION)
-            reject(m, "modrix_api " + std::to_string(m.manifest.apiVersion) + " incompatível (runtime: " +
-                          std::to_string(MODRIX_API_VERSION) + ")");
+        if (m.state == ModState::Discovered && m.manifest.apiVersion != TLMOD_API_VERSION)
+            reject(m, "tlmod_api " + std::to_string(m.manifest.apiVersion) + " incompatível (runtime: " +
+                          std::to_string(TLMOD_API_VERSION) + ")");
     }
 
     // Rejeições se propagam: se A depende de B e B é rejeitado, A também é.
@@ -554,7 +554,7 @@ size_t ModLoader::LoadAll() {
         if (disabled_.count(rec.manifest.id)) {
             rec.state = ModState::Disabled;
             rec.error = "desativado nas configurações";
-            Log(MODRIX_LOG_INFO, rec.manifest.id, rec.error);
+            Log(TLMOD_LOG_INFO, rec.manifest.id, rec.error);
             continue;
         }
 
@@ -571,18 +571,18 @@ size_t ModLoader::LoadAll() {
             }
         }
         if (rec.state == ModState::Skipped) {
-            Log(MODRIX_LOG_WARN, rec.manifest.id, rec.error);
+            Log(TLMOD_LOG_WARN, rec.manifest.id, rec.error);
             continue;
         }
 
-        ModrixModInitFn init = rec.builtinInit;
+        TLModModInitFn init = rec.builtinInit;
         if (!init) {
             const char* platform = CurrentPlatformKey();
             auto entry = rec.manifest.entries.find(platform);
             if (entry == rec.manifest.entries.end()) {
                 rec.state = ModState::Failed;
                 rec.error = std::string("sem entry para a plataforma \"") + platform + "\"";
-                Log(MODRIX_LOG_ERROR, rec.manifest.id, rec.error);
+                Log(TLMOD_LOG_ERROR, rec.manifest.id, rec.error);
                 continue;
             }
             std::string error;
@@ -590,20 +590,20 @@ size_t ModLoader::LoadAll() {
             if (!lib) {
                 rec.state = ModState::Failed;
                 rec.error = "não foi possível carregar " + entry->second + ": " + error;
-                Log(MODRIX_LOG_ERROR, rec.manifest.id, rec.error);
+                Log(TLMOD_LOG_ERROR, rec.manifest.id, rec.error);
                 continue;
             }
             impl_->libraries.push_back(lib);
-            init = reinterpret_cast<ModrixModInitFn>(dynlib::Symbol(lib, MODRIX_ENTRY_SYMBOL));
+            init = reinterpret_cast<TLModModInitFn>(dynlib::Symbol(lib, TLMOD_ENTRY_SYMBOL));
             if (!init) {
                 rec.state = ModState::Failed;
-                rec.error = std::string("símbolo ") + MODRIX_ENTRY_SYMBOL + " não exportado";
-                Log(MODRIX_LOG_ERROR, rec.manifest.id, rec.error);
+                rec.error = std::string("símbolo ") + TLMOD_ENTRY_SYMBOL + " não exportado";
+                Log(TLMOD_LOG_ERROR, rec.manifest.id, rec.error);
                 continue;
             }
         }
 
-        auto ctx = std::make_unique<ModrixContext>();
+        auto ctx = std::make_unique<TLModContext>();
         ctx->loader = this;
         ctx->impl = impl_.get();
         ctx->index = index;
@@ -622,26 +622,26 @@ size_t ModLoader::LoadAll() {
             impl_->hurtSubs.resize(subsBefore);
             while (impl_->providers.size() > providersBefore) impl_->providers.pop_back();
             rec.state = ModState::Failed;
-            rec.error = "modrix_mod_init retornou " + std::to_string(rc);
-            Log(MODRIX_LOG_ERROR, rec.manifest.id, rec.error);
+            rec.error = "tlmod_mod_init retornou " + std::to_string(rc);
+            Log(TLMOD_LOG_ERROR, rec.manifest.id, rec.error);
             impl_->contexts.push_back(std::move(ctx));  // ponteiro pode ter sido guardado pelo mod
             continue;
         }
 
-        for (int k = 0; k < MODRIX_CONTENT_KIND_COUNT; ++k) {
-            auto kind = static_cast<ModrixContentKind>(k);
+        for (int k = 0; k < TLMOD_CONTENT_KIND_COUNT; ++k) {
+            auto kind = static_cast<TLModContentKind>(k);
             for (const std::string& n : rec.manifest.content[k]) {
                 if (!registry_.Find(kind, rec.manifest.id + ":" + n))
-                    Log(MODRIX_LOG_WARN, rec.manifest.id,
+                    Log(TLMOD_LOG_WARN, rec.manifest.id,
                         std::string("declarado em content.") + ContentKindKey(kind) + " mas não registrado: " + n);
             }
         }
         rec.state = ModState::Loaded;
         impl_->contexts.push_back(std::move(ctx));
         ++loaded;
-        Log(MODRIX_LOG_INFO, rec.manifest.id, "carregado (" + rec.manifest.version.ToString() + ")");
+        Log(TLMOD_LOG_INFO, rec.manifest.id, "carregado (" + rec.manifest.version.ToString() + ")");
     }
     return loaded;
 }
 
-}  // namespace modrix::rt
+}  // namespace tlmod::rt

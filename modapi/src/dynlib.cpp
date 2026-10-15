@@ -6,7 +6,7 @@
 #include <dlfcn.h>
 #endif
 
-namespace modrix::rt::dynlib {
+namespace tlmod::rt::dynlib {
 
 #if defined(_WIN32)
 
@@ -36,4 +36,4 @@ void Close(void* handle) { dlclose(handle); }
 
 #endif
 
-}  // namespace modrix::rt::dynlib
+}  // namespace tlmod::rt::dynlib

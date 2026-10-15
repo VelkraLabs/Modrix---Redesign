@@ -1,9 +1,9 @@
 {
-  "modrix_api": 1,
-  "id": "modrix.example_boss",
+  "tlmod_api": 1,
+  "id": "tlmod.example_boss",
   "name": "Exemplo: Titã de Brasa (esqueleto de boss)",
   "version": "0.1.0",
-  "authors": ["Modrix"],
+  "authors": ["TLMod"],
   "description": "Mostra onde um boss customizado se pluga: spawn, estado por NPC e comportamento por tick. Sem combate ainda.",
   "dependencies": {},
   "content": {

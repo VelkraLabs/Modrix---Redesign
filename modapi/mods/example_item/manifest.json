@@ -1,9 +1,9 @@
 {
-  "modrix_api": 1,
-  "id": "modrix.example_item",
+  "tlmod_api": 1,
+  "id": "tlmod.example_item",
   "name": "Exemplo: Rubi Fictício",
   "version": "0.1.0",
-  "authors": ["Modrix"],
+  "authors": ["TLMod"],
   "description": "Mod mínimo: registra um único item que não existe no jogo original.",
   "dependencies": {},
   "content": {

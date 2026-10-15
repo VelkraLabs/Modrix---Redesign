@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace modrix::rt {
+namespace tlmod::rt {
 
 // Versão semântica MAJOR.MINOR.PATCH[-pre]. Metadados de build (+...) são ignorados.
 struct SemVer {
@@ -42,4 +42,4 @@ private:
     std::string text_;
 };
 
-}  // namespace modrix::rt
+}  // namespace tlmod::rt

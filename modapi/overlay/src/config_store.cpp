@@ -1,4 +1,4 @@
-#include "modrix/overlay/config_store.h"
+#include "tlmod/overlay/config_store.h"
 
 #include <cstdio>
 #include <fstream>
@@ -8,7 +8,7 @@
 #include "json.h"
 #include "json_writer.h"
 
-namespace modrix::overlay {
+namespace tlmod::overlay {
 
 bool ConfigStore::Load(std::string* error) {
     disabled_.clear();
@@ -73,4 +73,4 @@ bool ConfigStore::Save(const std::set<std::string>& disabled, std::string* error
     return true;
 }
 
-}  // namespace modrix::overlay
+}  // namespace tlmod::overlay

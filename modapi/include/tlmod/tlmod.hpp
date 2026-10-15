@@ -1,21 +1,21 @@
-// Camada C++ opcional, só de header, sobre modrix_api.h.
+// Camada C++ opcional, só de header, sobre tlmod_api.h.
 //
 // Tudo aqui é compilado DENTRO do mod: na fronteira com o runtime só passam
-// as structs C de modrix_api.h, então o mod pode usar outra versão de
+// as structs C de tlmod_api.h, então o mod pode usar outra versão de
 // compilador/libc++ sem quebrar a ABI.
 //
 // Uso:
-//   static bool OnLoad(modrix::Host& host) { ...; return true; }
-//   MODRIX_MOD(OnLoad)
+//   static bool OnLoad(tlmod::Host& host) { ...; return true; }
+//   TLMOD_MOD(OnLoad)
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
 
-#include "modrix_api.h"
+#include "tlmod_api.h"
 
-namespace modrix {
+namespace tlmod {
 
 struct ItemDef {
     std::string name;          // chave local, declarada no manifest
@@ -34,7 +34,7 @@ struct ItemDef {
 struct NpcDef {
     std::string name;          // chave local, declarada em content.npcs
     std::string displayName;
-    ModrixId shellType = 0;    // NPC original usado como casca
+    TLModId shellType = 0;    // NPC original usado como casca
     int32_t lifeMax = 0;       // <= 0: o da casca
     int32_t damage = -1;       // < 0: o da casca
     int32_t defense = -1;      // < 0: o da casca
@@ -42,13 +42,13 @@ struct NpcDef {
 };
 
 // Comportamento de um NPC de mod. Uma instância por TIPO (não por NPC): o
-// estado de cada NPC vive em ModrixNpcState (ai[] / local[]).
+// estado de cada NPC vive em TLModNpcState (ai[] / local[]).
 class NpcBehavior {
 public:
     virtual ~NpcBehavior() = default;
-    virtual void OnSpawn(ModrixNpcState& /*npc*/) {}
+    virtual void OnSpawn(TLModNpcState& /*npc*/) {}
     // true = substitui a AI da casca neste tick.
-    virtual bool OnAI(ModrixNpcState& /*npc*/) { return false; }
+    virtual bool OnAI(TLModNpcState& /*npc*/) { return false; }
 };
 
 // Provedor de dados para a interface: devolve um documento JSON.
@@ -59,26 +59,26 @@ public:
 
 private:
     friend class Host;
-    const ModrixHostApi* api_ = nullptr;  // preenchido por Host::Provide
+    const TLModHostApi* api_ = nullptr;  // preenchido por Host::Provide
 };
 
 class Host {
 public:
-    Host(const ModrixHostApi* api, ModrixContext* ctx) : api_(api), ctx_(ctx) {}
+    Host(const TLModHostApi* api, TLModContext* ctx) : api_(api), ctx_(ctx) {}
 
     const char* ModId() const { return api_->mod_id(ctx_); }
     const char* ModVersion() const { return api_->mod_version(ctx_); }
     const char* ModDir() const { return api_->mod_dir(ctx_); }
 
-    void Log(ModrixLogLevel level, const std::string& msg) const {
+    void Log(TLModLogLevel level, const std::string& msg) const {
         api_->log(ctx_, level, msg.c_str());
     }
-    void Info(const std::string& msg) const { Log(MODRIX_LOG_INFO, msg); }
-    void Warn(const std::string& msg) const { Log(MODRIX_LOG_WARN, msg); }
-    void Error(const std::string& msg) const { Log(MODRIX_LOG_ERROR, msg); }
+    void Info(const std::string& msg) const { Log(TLMOD_LOG_INFO, msg); }
+    void Warn(const std::string& msg) const { Log(TLMOD_LOG_WARN, msg); }
+    void Error(const std::string& msg) const { Log(TLMOD_LOG_ERROR, msg); }
 
-    ModrixId RegisterItem(const ItemDef& def) const {
-        ModrixItemDef c{};
+    TLModId RegisterItem(const ItemDef& def) const {
+        TLModItemDef c{};
         c.struct_size = sizeof(c);
         c.name = def.name.c_str();
         c.display_name = def.displayName.c_str();
@@ -94,14 +94,14 @@ public:
         return api_->register_item(ctx_, &c);
     }
 
-    ModrixId Find(ModrixContentKind kind, const std::string& key) const {
+    TLModId Find(TLModContentKind kind, const std::string& key) const {
         return api_->find_content(ctx_, kind, key.c_str());
     }
 
     // `behavior` precisa viver enquanto o jogo roda (ex.: variável estática).
-    ModrixId RegisterNpc(const NpcDef& def, NpcBehavior* behavior) const {
-        if (!HasNpcApi()) return MODRIX_INVALID_ID;
-        ModrixNpcDef c{};
+    TLModId RegisterNpc(const NpcDef& def, NpcBehavior* behavior) const {
+        if (!HasNpcApi()) return TLMOD_INVALID_ID;
+        TLModNpcDef c{};
         c.struct_size = sizeof(c);
         c.name = def.name.c_str();
         c.display_name = def.displayName.c_str();
@@ -115,13 +115,13 @@ public:
         c.on_ai = behavior ? &AiTrampoline : nullptr;
         return api_->register_npc(ctx_, &c);
     }
-    int32_t SpawnNpc(ModrixId type, float x, float y) const {
+    int32_t SpawnNpc(TLModId type, float x, float y) const {
         return HasNpcApi() ? api_->spawn_npc(ctx_, type, x, y) : -1;
     }
 
-    // -1/0/1, ver modrix_api.h. Seguros em qualquer thread.
+    // -1/0/1, ver tlmod_api.h. Seguros em qualquer thread.
     int32_t InWorld() const { return HasProgressApi() ? api_->in_world(ctx_) : -1; }
-    int32_t Progress(ModrixProgress flag) const { return HasProgressApi() ? api_->progress(ctx_, flag) : -1; }
+    int32_t Progress(TLModProgress flag) const { return HasProgressApi() ? api_->progress(ctx_, flag) : -1; }
 
     // `provider` precisa viver enquanto o jogo roda (ex.: objeto estático).
     bool Provide(const std::string& channel, DataProvider* provider) const {
@@ -130,14 +130,14 @@ public:
         return api_->register_provider(ctx_, channel.c_str(), &ProviderTrampoline, provider);
     }
 
-    bool OnPlayerHurt(ModrixPlayerHurtFn fn, void* user = nullptr) const {
+    bool OnPlayerHurt(TLModPlayerHurtFn fn, void* user = nullptr) const {
         return api_->subscribe_player_hurt(ctx_, fn, user);
     }
-    ModrixPlayer LocalPlayer() const { return api_->local_player(ctx_); }
-    int32_t PlayerLife(ModrixPlayer p) const { return api_->player_life(ctx_, p); }
+    TLModPlayer LocalPlayer() const { return api_->local_player(ctx_); }
+    int32_t PlayerLife(TLModPlayer p) const { return api_->player_life(ctx_, p); }
 
 private:
-    static bool ProviderTrampoline(void* user, ModrixBuffer* out) {
+    static bool ProviderTrampoline(void* user, TLModBuffer* out) {
         auto* p = static_cast<DataProvider*>(user);
         std::string json;
         if (!p->Build(json)) return false;
@@ -145,37 +145,37 @@ private:
         return true;
     }
     bool HasProgressApi() const {
-        return api_->struct_size >= offsetof(ModrixHostApi, buffer_append) + sizeof(api_->buffer_append);
+        return api_->struct_size >= offsetof(TLModHostApi, buffer_append) + sizeof(api_->buffer_append);
     }
     bool HasNpcApi() const {
-        return api_->struct_size >= offsetof(ModrixHostApi, spawn_npc) + sizeof(api_->spawn_npc);
+        return api_->struct_size >= offsetof(TLModHostApi, spawn_npc) + sizeof(api_->spawn_npc);
     }
-    static void SpawnTrampoline(void* user, ModrixNpcState* npc) {
+    static void SpawnTrampoline(void* user, TLModNpcState* npc) {
         static_cast<NpcBehavior*>(user)->OnSpawn(*npc);
     }
-    static bool AiTrampoline(void* user, ModrixNpcState* npc) {
+    static bool AiTrampoline(void* user, TLModNpcState* npc) {
         return static_cast<NpcBehavior*>(user)->OnAI(*npc);
     }
 
-    const ModrixHostApi* api_;
-    ModrixContext* ctx_;
+    const TLModHostApi* api_;
+    TLModContext* ctx_;
 };
 
 // Confere a versão da ABI antes de qualquer chamada. Exige só o núcleo da
 // tabela (até player_life): funções acrescentadas depois (NPCs) são checadas
 // uma a uma, então o mod roda também num runtime mais antigo, sem elas.
-inline bool CompatibleHost(const ModrixHostApi* api) {
-    return api && api->api_version == MODRIX_API_VERSION &&
-           api->struct_size >= offsetof(ModrixHostApi, register_npc);
+inline bool CompatibleHost(const TLModHostApi* api) {
+    return api && api->api_version == TLMOD_API_VERSION &&
+           api->struct_size >= offsetof(TLModHostApi, register_npc);
 }
 
-}  // namespace modrix
+}  // namespace tlmod
 
-// Define o ponto de entrada exportado a partir de uma função bool(modrix::Host&).
-#define MODRIX_MOD(OnLoadFn)                                                          \
-    extern "C" MODRIX_MOD_EXPORT int modrix_mod_init(const ModrixHostApi* api,       \
-                                                     ModrixContext* ctx) {          \
-        if (!::modrix::CompatibleHost(api)) return -1;                               \
-        ::modrix::Host host(api, ctx);                                               \
+// Define o ponto de entrada exportado a partir de uma função bool(tlmod::Host&).
+#define TLMOD_MOD(OnLoadFn)                                                          \
+    extern "C" TLMOD_MOD_EXPORT int tlmod_mod_init(const TLModHostApi* api,       \
+                                                     TLModContext* ctx) {          \
+        if (!::tlmod::CompatibleHost(api)) return -1;                               \
+        ::tlmod::Host host(api, ctx);                                               \
         return OnLoadFn(host) ? 0 : 1;                                               \
     }

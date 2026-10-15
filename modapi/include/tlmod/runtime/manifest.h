@@ -7,10 +7,10 @@
 #include <string>
 #include <vector>
 
-#include "modrix/modrix_api.h"
-#include "modrix/runtime/semver.h"
+#include "tlmod/tlmod_api.h"
+#include "tlmod/runtime/semver.h"
 
-namespace modrix::rt {
+namespace tlmod::rt {
 
 struct Dependency {
     std::string id;
@@ -20,8 +20,8 @@ struct Dependency {
 
 // Conteúdo de manifest.json (esquema em modapi/README.md).
 struct ModManifest {
-    uint32_t apiVersion = 0;       // "modrix_api"
-    std::string id;                // "modrix.example_item"
+    uint32_t apiVersion = 0;       // "tlmod_api"
+    std::string id;                // "tlmod.example_item"
     std::string name;              // nome exibido
     SemVer version;
     std::vector<std::string> authors;
@@ -29,9 +29,9 @@ struct ModManifest {
     std::vector<Dependency> dependencies;
 
     // "content": o que o mod declara adicionar, por tipo. Permite à interface
-    // do Modrix mostrar o conteúdo sem executar código e ao runtime recusar
+    // do TLMod mostrar o conteúdo sem executar código e ao runtime recusar
     // registros não declarados.
-    std::array<std::vector<std::string>, MODRIX_CONTENT_KIND_COUNT> content;
+    std::array<std::vector<std::string>, TLMOD_CONTENT_KIND_COUNT> content;
 
     // "provides": canais de dados que o mod expõe à interface.
     std::vector<std::string> provides;
@@ -41,7 +41,7 @@ struct ModManifest {
 
     std::filesystem::path dir;  // pasta do mod (preenchido ao carregar do disco)
 
-    bool Declares(ModrixContentKind kind, const std::string& name) const;
+    bool Declares(TLModContentKind kind, const std::string& name) const;
 };
 
 // Erros vêm com o campo afetado ("dependencies.foo: faixa inválida").
@@ -58,6 +58,6 @@ bool IsSafeRelativePath(const std::string& p);
 const char* CurrentPlatformKey();
 
 // Nome do tipo de conteúdo no manifest: "items", "npcs", ...
-const char* ContentKindKey(ModrixContentKind kind);
+const char* ContentKindKey(TLModContentKind kind);
 
-}  // namespace modrix::rt
+}  // namespace tlmod::rt

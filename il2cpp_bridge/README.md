@@ -1,4 +1,4 @@
-# Ponte IL2CPP do Modrix (Terraria Mobile)
+# Ponte IL2CPP do TLMod (Terraria Mobile)
 
 Esqueleto em C++ que fala com o runtime IL2CPP do jogo através dos exports da
 `libil2cpp.so` (`il2cpp_domain_get`, `il2cpp_class_from_name`,
@@ -15,14 +15,14 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
 4. Resolve `Player.Hurt` (8 parâmetros), compara `methodPointer` com `base + 0xFA15B8` e instala o
    inline hook com o [ShadowHook](https://github.com/bytedance/android-inline-hook) v2.0.1 (MIT),
    embutido na `.so`, em modo multi (`src/hook_shadowhook.cpp`).
-5. A cada `Player.Hurt`, `Modrix_Hooked_PlayerHurt` chama o callback do mod antes e depois do original.
+5. A cada `Player.Hurt`, `TLMod_Hooked_PlayerHurt` chama o callback do mod antes e depois do original.
 6. Resolve `Terraria.NPC` e instala hooks em `NPC.NewNPC` (`0xEE4630`), `NPC.SetDefaults` (`0xDAF1BC`)
-   e `NPC.AI` (`0xDCE54C`), expostos via `Modrix_SetNpcCallbacks` (`src/npc_hooks.cpp`). Se algo de NPC
+   e `NPC.AI` (`0xDCE54C`), expostos via `TLMod_SetNpcCallbacks` (`src/npc_hooks.cpp`). Se algo de NPC
    não resolver, só esses hooks ficam desligados.
 
 ## Build
 
-Android (gera `libmodrix_bridge.so`, com o ShadowHook embutido). O configure baixa o ShadowHook via git;
+Android (gera `libtlmod_bridge.so`, com o ShadowHook embutido). O configure baixa o ShadowHook via git;
 para build offline, acrescente `-DFETCHCONTENT_SOURCE_DIR_SHADOWHOOK=/caminho/android-inline-hook`:
 
 ```sh
@@ -57,4 +57,4 @@ porque o mock não tem o layout do binário real.
   o ShadowHook reescreve esse slot quando outro hook no mesmo alvo é removido.
 - O upstream compila com o NDK r23. Com o r27, quatro grupos novos do `-Weverything` são desligados só para o
   ShadowHook (ver comentário no `CMakeLists.txt`); o resto do `-Weverything -Werror` dele continua valendo.
-- A `.so` exporta apenas `Modrix_*` (`src/exports.map`) e é alinhada a 16 KB (Android 15+).
+- A `.so` exporta apenas `TLMod_*` (`src/exports.map`) e é alinhada a 16 KB (Android 15+).

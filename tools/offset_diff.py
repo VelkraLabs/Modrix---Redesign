@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compara os offsets/RVAs registrados no Modrix com o dump de um APK novo.
+"""Compara os offsets/RVAs registrados no TLMod com o dump de um APK novo.
 
 A cada atualização do Terraria Mobile:
 
@@ -313,7 +313,7 @@ def parse_script_json(path: Path, dump: Dump) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Leitura do que o Modrix registra
+# Leitura do que o TLMod registra
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -362,12 +362,12 @@ def parse_header(path: Path) -> List[HeaderConst]:
 
 
 def parse_progress_fields(path: Path) -> List[Tuple[str, str, str, int]]:
-    """bridge_adapter.cpp: {MODRIX_FLAG, "Classe", "campo"} -> (flag, classe, campo, linha)."""
+    """bridge_adapter.cpp: {TLMOD_FLAG, "Classe", "campo"} -> (flag, classe, campo, linha)."""
     out = []
     if not path.exists():
         return out
     for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        m = re.search(r'\{\s*(MODRIX_\w+)\s*,\s*"(\w+)"\s*,\s*"(\w+)"\s*\}', line)
+        m = re.search(r'\{\s*(TLMOD_\w+)\s*,\s*"(\w+)"\s*,\s*"(\w+)"\s*\}', line)
         if m:
             out.append((m.group(1), m.group(2), m.group(3), lineno))
     return out
@@ -622,7 +622,7 @@ LABEL = {OK: "OK   ", CHANGED: "MUDOU", MISSING: "SUMIU", WARN: "AVISO", SKIP: "
 
 def render(findings: List[Finding], show_all: bool, sources: List[str], header: Path) -> str:
     lines = [
-        "Modrix offset diff",
+        "TLMod offset diff",
         f"  registrado: {header}",
         f"  dump:       {', '.join(sources)}",
         "",
@@ -666,7 +666,7 @@ def render(findings: List[Finding], show_all: bool, sources: List[str], header: 
         lines.append(f"Nada mudou no que foi verificado, mas {len(skipped)} itens não puderam ser "
                      "conferidos (script.json não traz campos): rode também com --dump dump.cs.")
     else:
-        lines.append("Nada a reconferir: o dump bate com o que o Modrix registra.")
+        lines.append("Nada a reconferir: o dump bate com o que o TLMod registra.")
     return "\n".join(lines)
 
 

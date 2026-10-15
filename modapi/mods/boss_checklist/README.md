@@ -8,7 +8,7 @@ para a camada de interface. Ele não desenha nada; a UI consome o canal de dados
 O mod declara `"provides": ["checklist"]` no manifest. O runtime expõe esse canal:
 
 ```cpp
-std::optional<std::string> json = loader.Query("modrix.boss_checklist", "checklist", &error);
+std::optional<std::string> json = loader.Query("tlmod.boss_checklist", "checklist", &error);
 ```
 
 - O runtime valida o JSON antes de devolver. Um provedor com bug nunca entrega JSON quebrado.
