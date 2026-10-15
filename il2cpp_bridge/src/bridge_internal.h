@@ -12,6 +12,7 @@ bool Ready();
 Il2CppDomain* Domain();
 const Il2CppImage* Image();  // Assembly-CSharp.dll
 Il2CppClass* MainClass();    // Terraria.Main
+Il2CppClass* PlayerClass();  // Terraria.Player
 
 void LogException(const char* where, Il2CppException* exc);
 
@@ -35,5 +36,9 @@ void InstallNpcHooks();
 // Frame / estado do mundo (world_state.cpp).
 bool ResolveWorldState();
 void InstallWorldStateHooks();
+
+// Save/load de personagem e mundo (save_hooks.cpp).
+bool ResolveSaves();
+void InstallSaveHooks();
 
 }  // namespace bridge

@@ -47,6 +47,12 @@ FIELD_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "npc_off": ("Terraria", "NPC", "instance"),
     "main_static_off": ("Terraria", "Main", "static"),
     "local_user_off": ("", "LocalUserGameState", "instance"),
+    "item_off": ("Terraria", "Item", "instance"),
+    "chest_off": ("Terraria", "Chest", "instance"),
+    "loadout_off": ("Terraria", "EquipmentLoadout", "instance"),
+    "file_data_off": ("Terraria.IO", "FileData", "instance"),
+    "player_file_data_off": ("Terraria.IO", "PlayerFileData", "instance"),
+    "world_gen_static_off": ("Terraria", "WorldGen", "static"),
 }
 
 # Prefixo de rva::/argc:: (antes do primeiro "_") -> (namespace C#, classe).
@@ -55,12 +61,16 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
     "Player": ("Terraria", "Player"),
     "NPC": ("Terraria", "NPC"),
     "Main": ("Terraria", "Main"),
+    "WorldFile": ("Terraria.IO", "WorldFile"),
+    "CreativeUI": ("Terraria.GameContent.Creative", "CreativeUI"),
 }
 
 # Constantes do header que espelham uma const do jogo.
 CONST_CHECKS: Dict[str, Tuple[str, str, str]] = {
     "kMaxNPCs": ("Terraria", "Main", "maxNPCs"),
     "kNpcVanillaCount": ("Terraria.ID", "NPCID", "Count"),
+    "kMaxChests": ("Terraria", "Main", "maxChests"),
+    "kItemVanillaCount": ("Terraria.ID", "ItemID", "Count"),
 }
 
 # Constantes do header que nomeiam classes (namespace onde devem existir).
@@ -69,6 +79,13 @@ CLASS_NAME_CONSTANTS: Dict[str, str] = {
     "kMainClass": "Terraria",
     "kNpcClass": "Terraria",
     "kLocalUserGameStateClass": "",
+    "kItemClass": "Terraria",
+    "kChestClass": "Terraria",
+    "kEquipmentLoadoutClass": "Terraria",
+    "kWorldGenClass": "Terraria",
+    "kFileDataClass": "Terraria.IO",
+    "kPlayerFileDataClass": "Terraria.IO",
+    "kWorldFileClass": "Terraria.IO",
 }
 
 # content_registry.cpp DefaultRanges: tipo -> const com a contagem original.

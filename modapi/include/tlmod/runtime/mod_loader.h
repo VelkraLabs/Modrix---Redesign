@@ -8,6 +8,7 @@
 
 #include "tlmod/tlmod_api.h"
 #include "tlmod/runtime/content_registry.h"
+#include "tlmod/runtime/item_persistence.h"
 #include "tlmod/runtime/manifest.h"
 
 namespace tlmod::rt {
@@ -68,6 +69,12 @@ public:
     // NPC de mod que ocupa o slot de Main.npc (TLMOD_INVALID_ID = original).
     TLModId NpcInSlot(int32_t index) const;
 
+    // Itens de mod fora do arquivo do jogo (arquivo paralelo). Os ganchos de
+    // save/load só entram no fim de LoadAll, com todos os IDs já atribuídos;
+    // configurar (SetCloudDirectory) antes disso.
+    ItemPersistence& Persistence() { return *persistence_; }
+    const ItemPersistence& Persistence() const { return *persistence_; }
+
     // --- Camada de interface ---------------------------------------------------
     // Canais registrados, como "mod_id/channel".
     std::vector<std::string> Providers() const;
@@ -89,6 +96,7 @@ private:
     std::vector<ModRecord> mods_;
     std::vector<std::string> order_;
     std::unique_ptr<Impl> impl_;
+    std::unique_ptr<ItemPersistence> persistence_;
     bool loaded_ = false;
     std::set<std::string> disabled_;
 };

@@ -346,7 +346,11 @@ int32_t Api_SpawnNpc(TLModContext* ctx, TLModId type, float x, float y) {
 
 // ---- ModLoader -----------------------------------------------------------
 
-ModLoader::ModLoader(GameAdapter* game) : game_(game), registry_(game), impl_(std::make_unique<Impl>()) {
+ModLoader::ModLoader(GameAdapter* game)
+    : game_(game),
+      registry_(game),
+      impl_(std::make_unique<Impl>()),
+      persistence_(std::make_unique<ItemPersistence>(registry_)) {
     impl_->self = this;
     impl_->game = game;
     TLModHostApi& a = impl_->api;
@@ -383,6 +387,7 @@ ModLoader::ModLoader(GameAdapter* game) : game_(game), registry_(game), impl_(st
 ModLoader::~ModLoader() {
     game_->SetPlayerHurtHandler(nullptr);
     game_->SetNpcHooks({});
+    game_->SetPersistenceHooks({});
 }
 
 std::vector<std::string> ModLoader::Providers() const {
@@ -641,6 +646,16 @@ size_t ModLoader::LoadAll() {
         ++loaded;
         Log(TLMOD_LOG_INFO, rec.manifest.id, "carregado (" + rec.manifest.version.ToString() + ")");
     }
+
+    // Save/load só agora, com o registro completo: antes disso uma chave de
+    // mod ainda não registrado viraria órfã à toa. Liga mesmo sem itens de mod
+    // (órfãos de mods removidos continuam sendo regravados).
+    ItemPersistence* p = persistence_.get();
+    GameAdapter::PersistenceHooks hooks;
+    hooks.beforeSave = [p](const SaveFile& f, ItemSlots& s) { p->BeforeSave(f, s); };
+    hooks.afterSave = [p](const SaveFile& f, ItemSlots& s, bool ok) { p->AfterSave(f, s, ok); };
+    hooks.afterLoad = [p](const SaveFile& f, ItemSlots& s) { p->AfterLoad(f, s); };
+    game_->SetPersistenceHooks(std::move(hooks));
     return loaded;
 }
 

@@ -50,7 +50,8 @@ struct MethodInfo {
     X(Il2CppThread*, il2cpp_thread_attach, (Il2CppDomain*))                                 \
     X(Il2CppThread*, il2cpp_thread_current, (void))                                         \
     X(void, il2cpp_thread_detach, (Il2CppThread*))                                          \
-    X(void, il2cpp_format_exception, (const Il2CppException*, char*, int))
+    X(void, il2cpp_format_exception, (const Il2CppException*, char*, int))                  \
+    X(void, il2cpp_raise_exception, (Il2CppException*))
 
 namespace il2cpp {
 
@@ -73,6 +74,10 @@ bool LoadApi(const char* libName);
 // Em arm64, um Il2CppArray tem cabeçalho de 4 ponteiros
 // (klass, monitor, bounds, max_length) antes dos elementos: 0x20 bytes.
 constexpr size_t kArrayDataOffset = 4 * sizeof(void*);
+
+// Il2CppString em arm64: klass, monitor, int32 length, depois UTF-16.
+constexpr size_t kStringLengthOffset = 2 * sizeof(void*);
+constexpr size_t kStringCharsOffset = kStringLengthOffset + sizeof(int32_t);
 
 template <typename T>
 inline T* ArrayData(Il2CppArray* arr) {

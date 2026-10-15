@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -14,6 +15,7 @@
 #include "fake_game.h"
 #include "json.h"
 #include "tlmod/runtime/content_registry.h"
+#include "tlmod/runtime/item_persistence.h"
 #include "tlmod/runtime/log.h"
 #include "tlmod/runtime/manifest.h"
 #include "tlmod/runtime/mod_loader.h"
@@ -516,6 +518,316 @@ static void TestBossChecklist(const fs::path& modsDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Itens de mod no save: o arquivo do jogo só vê IDs originais; o resto vai
+// para o arquivo paralelo pela chave "mod_id:nome".
+namespace saves {
+
+using Item = FakeGame::Item;
+
+TLModId Reg(const TLModHostApi* api, TLModContext* ctx, const char* name, int32_t maxStack) {
+    TLModItemDef d{};
+    d.struct_size = sizeof(d);
+    d.name = name;
+    d.display_name = name;
+    d.width = d.height = 16;
+    d.max_stack = maxStack;
+    return api->register_item(ctx, &d);
+}
+int GemsInit(const TLModHostApi* api, TLModContext* ctx) {
+    return Reg(api, ctx, "ruby", 999) != TLMOD_INVALID_ID && Reg(api, ctx, "topaz", 99) != TLMOD_INVALID_ID ? 0 : 1;
+}
+int ToolsInit(const TLModHostApi* api, TLModContext* ctx) { return Reg(api, ctx, "drill", 1) != TLMOD_INVALID_ID ? 0 : 1; }
+int FirstInit(const TLModHostApi* api, TLModContext* ctx) { return Reg(api, ctx, "first", 1) != TLMOD_INVALID_ID ? 0 : 1; }
+
+const std::string kRuby = "test.gems:ruby", kTopaz = "test.gems:topaz", kDrill = "test.tools:drill";
+const std::string kFictionalRuby = "tlmod.example_item:fictional_ruby";  // o mod de exemplo real (.so)
+
+// Uma "abertura do jogo": jogo novo, runtime novo, conjunto de mods dado.
+struct Session {
+    FakeGame game;
+    ModLoader loader{&game};
+    Session(const fs::path& realMods, std::initializer_list<const char*> builtins, bool load = true) {
+        if (!realMods.empty()) loader.DiscoverDirectory(realMods);
+        for (const char* id : builtins) {
+            std::string s = id;
+            if (s == "test.gems") loader.AddBuiltin(Builtin(s, {"ruby", "topaz"}), &GemsInit);
+            if (s == "test.tools") loader.AddBuiltin(Builtin(s, {"drill"}), &ToolsInit);
+            if (s == "test.aaa") loader.AddBuiltin(Builtin(s, {"first"}), &FirstInit);
+        }
+        if (load) loader.LoadAll();
+    }
+    TLModId Id(const std::string& key) const {
+        return loader.Registry().Find(TLMOD_CONTENT_ITEM, key).value_or(TLMOD_INVALID_ID);
+    }
+    std::string Key(const Item& it) const {
+        const ContentEntry* e = loader.Registry().Get(TLMOD_CONTENT_ITEM, it.type);
+        return e ? e->key : (it.IsAir() ? "ar" : std::to_string(it.type));
+    }
+    Item Make(const std::string& key, int32_t stack, uint8_t prefix = 0, bool fav = false) const {
+        return Item{Id(key), stack, prefix, fav};
+    }
+    const FakeGame::Chest* ChestAt(int32_t x, int32_t y) const {
+        for (const auto& c : game.chests)
+            if (c && c->x == x && c->y == y) return &*c;
+        return nullptr;
+    }
+    // Quantas unidades da chave existem no personagem + mundo (nada sumiu, nada duplicou).
+    int Count(const std::string& key) const {
+        int n = 0;
+        auto add = [&](const Item& it) { n += Key(it) == key ? it.stack : 0; };
+        const FakeGame::Player& p = game.player;
+        for (const Item& it : p.inventory) add(it);
+        for (const Item& it : p.armor) add(it);
+        for (const Item& it : p.dye) add(it);
+        for (const Item& it : p.miscEquips) add(it);
+        for (const Item& it : p.miscDyes) add(it);
+        for (const auto& b : p.banks) for (const Item& it : b) add(it);
+        for (const auto& l : p.loadoutArmor) for (const Item& it : l) add(it);
+        for (const auto& l : p.loadoutDye) for (const Item& it : l) add(it);
+        for (const Item& it : p.temporary) add(it);
+        for (const Item& it : game.held) add(it);
+        for (const auto& c : game.chests)
+            if (c) for (const Item& it : c->item) add(it);
+        return n;
+    }
+};
+
+std::vector<SavedModItem> Sidecar(const std::string& path) {
+    std::string err;
+    auto v = ItemPersistence::ReadSidecar(path + ItemPersistence::kSidecarSuffix, &err);
+    if (!v) std::printf("      erro: %s\n", err.c_str());
+    return v.value_or(std::vector<SavedModItem>{});
+}
+size_t CountOrphans(const std::vector<SavedModItem>& v, const std::string& why) {
+    return static_cast<size_t>(std::count_if(v.begin(), v.end(), [&](const SavedModItem& e) { return e.orphan == why; }));
+}
+std::string ReadAll(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+bool Same(const Item& a, const Item& b) {
+    return a.type == b.type && a.stack == b.stack && a.prefix == b.prefix && a.favorited == b.favorited;
+}
+
+}  // namespace saves
+
+static void TestSaves(const fs::path& modsDir) {
+    using namespace saves;
+    std::printf("\n== itens de mod no save (arquivo paralelo)\n");
+    fs::path dir = fs::temp_directory_path() / "tlmod_saves_test";
+    fs::remove_all(dir);
+    fs::create_directories(dir / "mods");
+    fs::copy(modsDir / "example_item", dir / "mods" / "example_item", fs::copy_options::recursive);
+    const fs::path mods = dir / "mods";
+    const std::string plr = (dir / "Jogador.plr").string(), wld = (dir / "Mundo.wld").string();
+    const std::string plrSide = plr + ItemPersistence::kSidecarSuffix, wldSide = wld + ItemPersistence::kSidecarSuffix;
+
+    // 0) Sem o TLMod: o ID de mod vai para o arquivo e o estraga.
+    {
+        FakeGame g;
+        g.player.armor[0] = Item{8192, 1, 0, false};
+        g.player.inventory[1] = Item{8193, 5, 0, false};
+        CHECK(g.SavePlayer(plr) && g.lastSavedMaxId == 8193);
+        std::string err;
+        CHECK(!g.LoadPlayer(plr, &err) && err.find("IndexOutOfRange") != std::string::npos);  // não carrega mais
+        g.chests[0] = FakeGame::Chest{10, 20, {}};
+        g.chests[0]->item[0] = Item{8192, 1, 0, false};
+        CHECK(!g.SaveWorld(wld));  // SaveChests estoura: o mundo não salva
+        fs::remove(plr);
+    }
+
+    // 1) Primeira abertura: salvar com itens de mod em todo tipo de lugar.
+    TLModId rubyId1 = 0, topazId1 = 0;
+    {
+        Session s(mods, {"test.gems", "test.tools"});
+        rubyId1 = s.Id(kRuby);
+        topazId1 = s.Id(kTopaz);
+        CHECK(rubyId1 >= 8192 && topazId1 >= 8192 && s.Id(kDrill) >= 8192 && s.Id(kFictionalRuby) >= 8192);
+        FakeGame::Player& p = s.game.player;
+        p.inventory[3] = s.Make(kRuby, 5, 7, true);
+        p.inventory[10] = Item{2, 99, 0, false};  // original (terra)
+        p.armor[0] = s.Make(kTopaz, 1);
+        p.loadoutArmor[1][2] = s.Make(kDrill, 1);
+        p.banks[3][5] = s.Make(kTopaz, 3, 0, true);  // Cofre do Vazio
+        s.game.held[0] = s.Make(kFictionalRuby, 1);  // no mouse
+        s.game.chests[0] = FakeGame::Chest{100, 200, {}};
+        s.game.chests[0]->item[0] = s.Make(kDrill, 1);
+        s.game.chests[0]->item[1] = Item{8, 10, 0, false};  // tochas
+        s.game.chests[5] = FakeGame::Chest{300, 50, {}};
+        s.game.chests[5]->item[39] = s.Make(kRuby, 20);
+        const FakeGame::Player before = p;
+
+        CHECK(s.game.SavePlayer(plr) && s.game.lastSavedMaxId == 2);  // só IDs originais no arquivo
+        CHECK(s.game.SaveWorld(wld) && s.game.lastSavedMaxId == 8);
+        // Depois do save, tudo de volta no lugar.
+        CHECK(Same(p.inventory[3], before.inventory[3]) && Same(p.armor[0], before.armor[0]));
+        CHECK(Same(p.loadoutArmor[1][2], before.loadoutArmor[1][2]) && Same(p.banks[3][5], before.banks[3][5]));
+        CHECK(s.Key(s.game.held[0]) == kFictionalRuby && s.Key(s.game.chests[5]->item[39]) == kRuby);
+        CHECK(fs::exists(plrSide) && fs::exists(wldSide));
+        auto side = Sidecar(plr);
+        CHECK(side.size() == 5 && CountOrphans(side, "") == 5);
+        CHECK(Sidecar(wld).size() == 2);
+        CHECK(ReadAll(plrSide).find("\"key\":\"test.gems:ruby\",\"container\":\"inventory\",\"slot\":3,\"stack\":5,"
+                                    "\"prefix\":7,\"favorited\":true") != std::string::npos);
+        CHECK(ReadAll(wldSide).find("\"container\":\"chest\",\"x\":300,\"y\":50,\"slot\":39") != std::string::npos);
+
+        // O jogo sozinho lê os dois arquivos: válidos e sem nada de mod.
+        FakeGame vanilla;
+        CHECK(vanilla.LoadPlayer(plr) && vanilla.player.armor[0].IsAir() && vanilla.player.inventory[3].IsAir());
+        CHECK(vanilla.player.inventory[10].type == 2 && vanilla.player.inventory[10].stack == 99);
+        CHECK(vanilla.LoadWorld(wld) && vanilla.chests[1]->item[39].IsAir() && vanilla.chests[0]->item[1].type == 8);
+    }
+
+    // 2) Outra ordem de mods: test.aaa entra antes e todos os IDs mudam.
+    {
+        Session s(mods, {"test.aaa", "test.gems", "test.tools"});
+        CHECK(s.Id(kRuby) != rubyId1 && s.Id(kTopaz) != topazId1);
+        CHECK(s.game.LoadPlayer(plr) && s.game.LoadWorld(wld));
+        const FakeGame::Player& p = s.game.player;
+        CHECK(p.inventory[3].type == s.Id(kRuby) && p.inventory[3].stack == 5 && p.inventory[3].prefix == 7 &&
+              p.inventory[3].favorited);
+        CHECK(s.Key(p.armor[0]) == kTopaz && s.Key(p.loadoutArmor[1][2]) == kDrill);
+        CHECK(s.Key(p.banks[3][5]) == kTopaz && p.banks[3][5].stack == 3 && p.banks[3][5].favorited);
+        CHECK(s.Key(p.temporary[0]) == kFictionalRuby);  // o load põe o "mouse" nos temporários
+        CHECK(p.inventory[10].type == 2);
+        // Os baús voltam com índices novos; a posição identifica cada um.
+        CHECK(s.game.chests[1] && s.game.chests[1]->x == 300);
+        CHECK(s.ChestAt(300, 50) && s.Key(s.ChestAt(300, 50)->item[39]) == kRuby && s.ChestAt(300, 50)->item[39].stack == 20);
+        CHECK(s.ChestAt(100, 200) && s.Key(s.ChestAt(100, 200)->item[0]) == kDrill &&
+              s.ChestAt(100, 200)->item[1].type == 8);
+        CHECK(s.loader.Persistence().Orphans(plr).empty() && s.loader.Persistence().Orphans(wld).empty());
+        // Entrar no mundo: o jogo devolve os temporários ao mouse; salvar de novo.
+        s.game.held[0] = s.game.player.temporary[0];
+        s.game.player.temporary[0] = Item{};
+        CHECK(s.game.SavePlayer(plr) && s.game.lastSavedMaxId == 2 && s.game.SaveWorld(wld) && s.game.lastSavedMaxId == 8);
+        CHECK(Sidecar(plr).size() == 5 && Sidecar(wld).size() == 2);
+    }
+
+    // 3) Mods removidos (test.gems e o example_item): o save continua válido
+    //    e os itens ficam órfãos no arquivo paralelo.
+    {
+        Session s({}, {"test.aaa", "test.tools"});
+        std::string err;
+        CHECK(s.game.LoadPlayer(plr, &err) && s.game.LoadWorld(wld, &err));
+        const FakeGame::Player& p = s.game.player;
+        CHECK(p.inventory[3].IsAir() && p.armor[0].IsAir() && p.banks[3][5].IsAir() && p.temporary[0].IsAir());
+        CHECK(s.Key(p.loadoutArmor[1][2]) == kDrill && s.Key(s.ChestAt(100, 200)->item[0]) == kDrill);  // o mod que ficou
+        auto orphans = s.loader.Persistence().Orphans(plr);
+        CHECK(orphans.size() == 4 && CountOrphans(orphans, "missing_mod") == 4);
+        CHECK(s.loader.Persistence().Orphans(wld).size() == 1);
+        // Jogando sem o mod: terra no slot onde o rubi estava, e salva.
+        s.game.player.inventory[3] = Item{2, 1, 0, false};
+        CHECK(s.game.SavePlayer(plr) && s.game.lastSavedMaxId == 2 && s.game.SaveWorld(wld));
+        auto side = Sidecar(plr);
+        CHECK(side.size() == 5 && CountOrphans(side, "missing_mod") == 4 && CountOrphans(side, "") == 1);
+        CHECK(Sidecar(wld).size() == 2 && CountOrphans(Sidecar(wld), "missing_mod") == 1);
+        CHECK(ReadAll(plrSide).find("\"orphan\":\"missing_mod\"") != std::string::npos);
+    }
+
+    // 4) Mods reinstalados: os itens voltam. O rubi achou o slot ocupado e foi
+    //    para o primeiro slot livre do inventário.
+    {
+        Session s(mods, {"test.aaa", "test.gems", "test.tools"});
+        CHECK(s.game.LoadPlayer(plr) && s.game.LoadWorld(wld));
+        const FakeGame::Player& p = s.game.player;
+        CHECK(p.inventory[3].type == 2);  // a terra continua lá
+        CHECK(s.Key(p.inventory[0]) == kRuby && p.inventory[0].stack == 5 && p.inventory[0].prefix == 7);
+        CHECK(s.Key(p.armor[0]) == kTopaz && s.Key(p.banks[3][5]) == kTopaz && s.Key(p.temporary[0]) == kFictionalRuby);
+        CHECK(s.Key(s.ChestAt(300, 50)->item[39]) == kRuby);
+        CHECK(s.Count(kRuby) == 25 && s.Count(kTopaz) == 4 && s.Count(kDrill) == 2 && s.Count(kFictionalRuby) == 1);
+        CHECK(s.loader.Persistence().Orphans(plr).empty() && s.loader.Persistence().Orphans(wld).empty());
+        s.game.held[0] = s.game.player.temporary[0];
+        s.game.player.temporary[0] = Item{};
+        CHECK(s.game.SavePlayer(plr) && s.game.SaveWorld(wld));
+        CHECK(CountOrphans(Sidecar(plr), "") == 5 && CountOrphans(Sidecar(wld), "") == 2);
+
+        // O save roda fora da thread do jogo: o jogador pôs terra no slot do
+        // rubi enquanto o arquivo era gravado. O rubi vai para outro slot.
+        s.game.duringSave = [&] { s.game.player.inventory[0] = Item{2, 7, 0, false}; };
+        CHECK(s.game.SavePlayer(plr));
+        s.game.duringSave = nullptr;
+        CHECK(p.inventory[0].type == 2 && p.inventory[0].stack == 7);  // nada sobrescrito
+        CHECK(s.Count(kRuby) == 25);                                     // nada perdido
+        CHECK(s.Key(p.inventory[1]) == kRuby);
+
+        // Save que falha no meio: os itens voltam e o arquivo paralelo não muda.
+        std::string sideBefore = ReadAll(plrSide);
+        s.game.player.inventory[20] = s.Make(kTopaz, 9);
+        s.game.failNextSave = true;
+        CHECK(!s.game.SavePlayer(plr));
+        CHECK(s.Key(p.inventory[20]) == kTopaz && s.Count(kTopaz) == 13 && ReadAll(plrSide) == sideBefore);
+
+        // ID fora da faixa original e sem dono: nunca vai para o arquivo, mas
+        // continua na memória.
+        s.game.player.inventory[21] = Item{9000, 1, 0, false};
+        CHECK(s.game.SavePlayer(plr) && s.game.lastSavedMaxId == 2 && p.inventory[21].type == 9000);
+        CHECK(ReadAll(plrSide).find("9000") == std::string::npos);
+    }
+
+    // 5) Saves concorrentes (autosave no ThreadPool + salvar e sair): o mesmo
+    //    personagem salvo por duas threads ao mesmo tempo, e o mundo em paralelo.
+    //    Um save só devolve os itens quando o outro do mesmo tipo não está gravando.
+    {
+        Session s(mods, {"test.gems", "test.tools"});
+        CHECK(s.game.LoadPlayer(plr) && s.game.LoadWorld(wld));
+        s.game.held[0] = s.game.player.temporary[0];  // entrar no mundo
+        s.game.player.temporary[0] = Item{};
+        s.game.worstSavedId = 0;
+        std::atomic<int> ok{0};
+        std::vector<std::thread> threads;
+        for (int t = 0; t < 2; ++t)
+            threads.emplace_back([&] {
+                for (int i = 0; i < 25; ++i) ok += s.game.SavePlayer(plr) ? 1 : 0;
+            });
+        threads.emplace_back([&] {
+            for (int i = 0; i < 25; ++i) ok += s.game.SaveWorld(wld) ? 1 : 0;
+        });
+        for (auto& t : threads) t.join();
+        CHECK(ok == 75 && s.game.worstSavedId < FakeGame::kItemCount);
+        CHECK(s.Count(kRuby) == 25 && s.Count(kTopaz) == 13 && s.Count(kDrill) == 2 && s.Count(kFictionalRuby) == 1);
+        CHECK(Sidecar(plr).size() == 6 && Sidecar(wld).size() == 2);
+    }
+
+    // 6) Arquivo salvo sem ter sido carregado pelo TLMod (o jogo leu o mundo
+    //    antes de os mods subirem): o que estava no arquivo paralelo continua.
+    {
+        Session s(mods, {"test.gems", "test.tools"}, /*load=*/false);
+        CHECK(s.game.LoadWorld(wld));          // ganchos ainda não existem
+        s.loader.LoadAll();
+        CHECK(s.game.SaveWorld(wld));
+        auto side = Sidecar(wld);
+        CHECK(side.size() == 2 && CountOrphans(side, "not_loaded") == 2);
+        Session again(mods, {"test.gems", "test.tools"});
+        CHECK(again.game.LoadWorld(wld) && again.Key(again.ChestAt(300, 50)->item[39]) == kRuby);
+    }
+
+    // 7) Arquivo paralelo corrompido: o jogo carrega, o arquivo ruim é
+    //    guardado à parte (nunca sobrescrito sem cópia).
+    {
+        std::ofstream(plrSide, std::ios::trunc) << "{ isto não é json";
+        Session s(mods, {"test.gems"});
+        CHECK(s.game.LoadPlayer(plr));
+        bool quarantined = false;
+        for (const auto& e : fs::directory_iterator(dir))
+            quarantined |= e.path().filename().string().find(".tlmod.json.invalid-") != std::string::npos;
+        CHECK(quarantined && !fs::exists(plrSide));
+    }
+
+    // 8) Save na nuvem: o arquivo paralelo vai para a pasta do TLMod.
+    {
+        Session s(mods, {"test.gems"});
+        s.loader.Persistence().SetCloudDirectory(dir / "cloud");
+        SaveFile cloud{SaveFile::Kind::Player, "/cloud/players/Jogador.plr", true};
+        CHECK(s.loader.Persistence().SidecarPath(cloud) == dir / "cloud" / "player" / "Jogador.plr.tlmod.json");
+        SaveFile local{SaveFile::Kind::World, wld, false};
+        CHECK(s.loader.Persistence().SidecarPath(local) == fs::path(wldSide));
+    }
+    fs::remove_all(dir);
+}
+
+// ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -529,6 +841,7 @@ int main(int argc, char** argv) {
     TestLoader(argv[1]);
     TestNpcs(argv[1]);
     TestBossChecklist(argv[1]);
+    TestSaves(argv[1]);
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

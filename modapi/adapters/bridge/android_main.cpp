@@ -64,6 +64,9 @@ void* RuntimeMain(void*) {
     std::string configError;
     if (!config.Load(&configError)) tlmod::rt::Log(TLMOD_LOG_WARN, "runtime", configError);
     loader.SetDisabled(config.Disabled());
+    // Saves na nuvem não têm um caminho local confiável: o arquivo paralelo
+    // dos itens de mod fica na pasta do TLMod.
+    loader.Persistence().SetCloudDirectory(dir.parent_path() / "cloud_saves");
 
     loader.DiscoverDirectory(dir);
     size_t n = loader.LoadAll();

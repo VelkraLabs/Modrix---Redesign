@@ -136,6 +136,7 @@ bool Ready() { return g_ready.load(); }
 Il2CppDomain* Domain() { return g.domain; }
 const Il2CppImage* Image() { return g.image; }
 Il2CppClass* MainClass() { return g.mainClass; }
+Il2CppClass* PlayerClass() { return g.playerClass; }
 
 void LogException(const char* where, Il2CppException* exc) {
     char buf[512] = {0};
@@ -230,6 +231,7 @@ bool TLMod_Init(int timeoutMs) {
         // NPCs são opcionais: se algo não resolver, o resto da ponte segue.
         if (bridge::ResolveNpc()) bridge::InstallNpcHooks();
         if (bridge::ResolveWorldState()) bridge::InstallWorldStateHooks();
+        if (bridge::ResolveSaves()) bridge::InstallSaveHooks();
         g_ready.store(true);
     } else {
         LOGE("timeout resolvendo Terraria.Player em %s", terraria::kAssembly);

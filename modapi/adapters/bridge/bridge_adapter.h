@@ -30,6 +30,11 @@ public:
     // Leem a fotografia do último frame: seguros em qualquer thread.
     std::optional<bool> InWorld() const override;
     std::optional<bool> Progress(TLModProgress flag) const override;
+
+    // Save/load: Player.InternalSavePlayerFile (0x1044040), Player.LoadPlayer
+    // (0x1049FA8), WorldFile.InternalSaveWorld (0x14F1AC8), WorldFile.LoadWorld
+    // (0x14EC048), via TLMod_SetSaveCallback.
+    void SetPersistenceHooks(PersistenceHooks hooks) override;
 };
 
 }  // namespace tlmod::rt

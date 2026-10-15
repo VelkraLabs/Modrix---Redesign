@@ -3,9 +3,12 @@
 // dispara Player.Hurt pelo caminho do hook.
 #include <dlfcn.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "bridge.h"
 
@@ -73,6 +76,184 @@ int32_t g_lastGameMenu = -2;
 void OnFrame() {
     ++g_frameCalls;
     g_lastGameMenu = TLMod_IsGameMenu();  // aqui estamos na thread do jogo
+}
+
+// --- Save/load: o mesmo esquema que o runtime usa (tira antes, devolve depois) ---
+constexpr int32_t kItemCount = 5456;  // ItemID.Count
+
+struct Stripped {
+    TLModItemContainer container;
+    int32_t group, index;
+    TLModItemFields fields;
+};
+std::vector<Stripped> g_stripped;
+std::vector<std::string> g_saveLog;  // "fase:tipo:caminho:ok"
+bool g_sawAirDuringSave = false;
+
+// Todos os slots que o save do personagem grava (+ baús, para o mundo).
+template <typename Fn>
+void ForEachSlot(Il2CppObject* player, Fn fn) {
+    static const TLModItemContainer kPlayer[] = {
+        TLMOD_ITEMS_INVENTORY, TLMOD_ITEMS_ARMOR, TLMOD_ITEMS_DYE,   TLMOD_ITEMS_MISC_EQUIPS, TLMOD_ITEMS_MISC_DYES,
+        TLMOD_ITEMS_BANK,      TLMOD_ITEMS_BANK2, TLMOD_ITEMS_BANK3, TLMOD_ITEMS_BANK4,       TLMOD_ITEMS_HELD};
+    if (player) {
+        for (TLModItemContainer c : kPlayer)
+            for (int32_t i = 0; i < TLMod_ItemSlotCount(player, c, 0); ++i) fn(c, 0, i);
+        for (int32_t l = 0; l < 3; ++l)
+            for (TLModItemContainer c : {TLMOD_ITEMS_LOADOUT_ARMOR, TLMOD_ITEMS_LOADOUT_DYE})
+                for (int32_t i = 0; i < TLMod_ItemSlotCount(player, c, l); ++i) fn(c, l, i);
+        return;
+    }
+    for (int32_t c = 0; c < TLMod_ChestCount(); ++c)
+        for (int32_t i = 0; i < TLMod_ItemSlotCount(nullptr, TLMOD_ITEMS_CHEST, c); ++i) fn(TLMOD_ITEMS_CHEST, c, i);
+}
+
+void OnSave(const TLModSaveEvent* ev, TLModSavePhase phase) {
+    static const char* kPhase[] = {"antes", "depois", "carregou"};
+    g_saveLog.push_back(std::string(kPhase[phase]) + ":" + (ev->kind == TLMOD_SAVE_PLAYER ? "player" : "world") +
+                        ":" + ev->path + ":" + (ev->ok ? "ok" : "erro"));
+    if (phase == TLMOD_BEFORE_SAVE) {
+        g_stripped.clear();
+        ForEachSlot(ev->player, [&](TLModItemContainer c, int32_t g, int32_t i) {
+            Il2CppObject* item = TLMod_ItemSlot(ev->player, c, g, i);
+            TLModItemFields f{};
+            if (!TLMod_ReadItem(item, &f) || f.type < kItemCount) return;
+            g_stripped.push_back({c, g, i, f});
+            TLModItemFields air{};
+            TLMod_WriteItem(item, &air);
+        });
+    } else if (phase == TLMOD_AFTER_SAVE) {
+        for (const Stripped& st : g_stripped) {
+            Il2CppObject* item = TLMod_ItemSlot(ev->player, st.container, st.group, st.index);
+            TLModItemFields now{};
+            if (TLMod_ReadItem(item, &now) && now.type == 0 && now.stack == 0) g_sawAirDuringSave = true;
+            TLMod_WriteItem(item, &st.fields);
+        }
+        g_stripped.clear();
+    }
+}
+
+// Põe um "item de mod" (ID fora de ItemID.Count) num slot.
+bool PutItem(Il2CppObject* player, TLModItemContainer c, int32_t group, int32_t index, int32_t type, int32_t stack) {
+    TLModItemFields f{type, type, stack, 3, true};
+    return TLMod_WriteItem(TLMod_ItemSlot(player, c, group, index), &f);
+}
+int32_t TypeAt(Il2CppObject* player, TLModItemContainer c, int32_t group, int32_t index) {
+    TLModItemFields f{};
+    return TLMod_ReadItem(TLMod_ItemSlot(player, c, group, index), &f) ? f.type : -1;
+}
+
+int TestSaves(void* lib) {
+    auto sym = [&](const char* name) { return dlsym(lib, name); };
+    auto save_player = reinterpret_cast<void (*)()>(sym("mock_game_save_player"));
+    auto load_player = reinterpret_cast<void* (*)(const char16_t*, bool)>(sym("mock_game_load_player"));
+    auto save_world = reinterpret_cast<void (*)()>(sym("mock_game_save_world"));
+    auto load_world = reinterpret_cast<int (*)(bool)>(sym("mock_game_load_world"));
+    auto set_world_path = reinterpret_cast<void (*)(const char16_t*)>(sym("mock_set_world_path"));
+    auto set_load_status = reinterpret_cast<void (*)(int32_t)>(sym("mock_set_load_status"));
+    auto set_throw = reinterpret_cast<void (*)(bool)>(sym("mock_set_throw_on_save"));
+    auto saved_ids = reinterpret_cast<size_t (*)(const int32_t**)>(sym("mock_saved_ids"));
+    auto add_chest = reinterpret_cast<void (*)(int32_t, int32_t, int32_t)>(sym("mock_add_chest"));
+    auto held_item = reinterpret_cast<void* (*)(int32_t)>(sym("mock_held_item"));
+    CHECK(save_player && load_player && save_world && load_world && set_world_path && set_load_status && set_throw &&
+          saved_ids && add_chest && held_item);
+    auto maxSaved = [&] {
+        const int32_t* ids = nullptr;
+        size_t n = saved_ids(&ids);
+        int32_t m = 0;
+        for (size_t i = 0; i < n; ++i) m = std::max(m, ids[i]);
+        return m;
+    };
+
+    // ---- Slots ------------------------------------------------------------------
+    Il2CppObject* player = TLMod_GetLocalPlayer();
+    CHECK(TLMod_ItemSlotCount(player, TLMOD_ITEMS_INVENTORY, 0) == 58);  // o save grava 0..57
+    CHECK(TLMod_ItemSlotCount(player, TLMOD_ITEMS_ARMOR, 0) == 20 && TLMod_ItemSlotCount(player, TLMOD_ITEMS_DYE, 0) == 10);
+    CHECK(TLMod_ItemSlotCount(player, TLMOD_ITEMS_BANK4, 0) == 40 && TLMod_ItemSlotCount(player, TLMOD_ITEMS_HELD, 0) == 4);
+    CHECK(TLMod_ItemSlotCount(player, TLMOD_ITEMS_LOADOUT_DYE, 2) == 10 &&
+          TLMod_ItemSlotCount(player, TLMOD_ITEMS_LOADOUT_DYE, 3) == -1);
+    CHECK(TLMod_ItemSlotCount(player, TLMOD_ITEMS_TEMPORARY, 0) == 4);
+    CHECK(TLMod_ItemSlotCount(nullptr, TLMOD_ITEMS_INVENTORY, 0) == -1);
+    CHECK(TLMod_ItemSlot(player, TLMOD_ITEMS_INVENTORY, 0, 58) == nullptr);
+    CHECK(TLMod_ChestCount() == 8000 && TLMod_ItemSlotCount(nullptr, TLMOD_ITEMS_CHEST, 5) == -1);
+    add_chest(5, 120, 340);
+    int32_t cx = 0, cy = 0;
+    CHECK(TLMod_ChestPosition(5, &cx, &cy) && cx == 120 && cy == 340 && !TLMod_ChestPosition(6, &cx, &cy));
+    CHECK(TLMod_ItemSlotCount(nullptr, TLMOD_ITEMS_CHEST, 5) == 40);
+    // HELD passa pelos getters do jogo (runtime_invoke), inclusive o sacrifício da Jornada.
+    CHECK(TLMod_ItemSlot(player, TLMOD_ITEMS_HELD, 0, 0) == held_item(0));
+    CHECK(TLMod_ItemSlot(player, TLMOD_ITEMS_HELD, 0, 1) == held_item(1));
+    CHECK(TLMod_ItemSlot(player, TLMOD_ITEMS_HELD, 0, 3) == held_item(3));
+
+    // ---- Personagem: itens de mod em vários contêineres ----------------------------
+    CHECK(PutItem(player, TLMOD_ITEMS_INVENTORY, 0, 7, 8192, 5));
+    CHECK(PutItem(player, TLMOD_ITEMS_ARMOR, 0, 0, 8193, 1));
+    CHECK(PutItem(player, TLMOD_ITEMS_BANK3, 0, 39, 8194, 2));
+    CHECK(PutItem(player, TLMOD_ITEMS_LOADOUT_ARMOR, 2, 4, 8195, 1));
+    CHECK(PutItem(player, TLMOD_ITEMS_HELD, 0, 0, 8196, 1));  // no mouse
+    CHECK(PutItem(player, TLMOD_ITEMS_INVENTORY, 0, 8, 25, 9));  // original: fica no arquivo
+
+    // Sem callback, o ID de mod vai para o arquivo (é o problema).
+    save_player();
+    CHECK(maxSaved() == 8196);
+
+    TLMod_SetSaveCallback(&OnSave);
+    save_player();
+    CHECK(maxSaved() == 25);  // nenhum ID de mod no arquivo; o original está lá
+    CHECK(g_saveLog.size() == 2 && g_saveLog[0] == "antes:player:/saves/Players/Jogador.plr:ok" &&
+          g_saveLog[1] == "depois:player:/saves/Players/Jogador.plr:ok");
+    CHECK(g_sawAirDuringSave);  // durante o save os slots estavam vazios
+    CHECK(TypeAt(player, TLMOD_ITEMS_INVENTORY, 0, 7) == 8192 && TypeAt(player, TLMOD_ITEMS_ARMOR, 0, 0) == 8193);
+    CHECK(TypeAt(player, TLMOD_ITEMS_BANK3, 0, 39) == 8194 && TypeAt(player, TLMOD_ITEMS_LOADOUT_ARMOR, 2, 4) == 8195);
+    CHECK(TypeAt(player, TLMOD_ITEMS_HELD, 0, 0) == 8196);
+    TLModItemFields back{};
+    CHECK(TLMod_ReadItem(TLMod_ItemSlot(player, TLMOD_ITEMS_INVENTORY, 0, 7), &back) && back.stack == 5 &&
+          back.netID == 8192 && back.prefix == 3 && back.favorited);
+
+    // Exceção no save: o "depois" roda (ok=false), os itens voltam e a
+    // exceção chega a quem chamou o save.
+    g_saveLog.clear();
+    set_throw(true);
+    bool threw = false;
+    try {
+        save_player();
+    } catch (...) {
+        threw = true;
+    }
+    set_throw(false);
+    CHECK(threw && g_saveLog.size() == 2 && g_saveLog[1] == "depois:player:/saves/Players/Jogador.plr:erro");
+    CHECK(TypeAt(player, TLMOD_ITEMS_INVENTORY, 0, 7) == 8192 && TypeAt(player, TLMOD_ITEMS_HELD, 0, 0) == 8196);
+
+    // Load: caminho UTF-16 com acento e emoji (par substituto) chega em UTF-8.
+    g_saveLog.clear();
+    CHECK(load_player(u"/saves/Players/Café \U0001F600.plr", false) != nullptr);
+    CHECK(g_saveLog.size() == 1 && g_saveLog[0] == "carregou:player:/saves/Players/Caf\xc3\xa9 \xf0\x9f\x98\x80.plr:ok");
+    set_load_status(1);  // arquivo que o jogo não conseguiu ler
+    load_player(u"/x.plr", true);
+    CHECK(g_saveLog.back() == "carregou:player:/x.plr:erro");
+    set_load_status(0);
+
+    // ---- Mundo: baús ----------------------------------------------------------------
+    CHECK(PutItem(nullptr, TLMOD_ITEMS_CHEST, 5, 0, 8200, 30));
+    CHECK(PutItem(nullptr, TLMOD_ITEMS_CHEST, 5, 1, 12, 3));
+    TLMod_SetSaveCallback(nullptr);
+    threw = false;
+    try {
+        save_world();  // sem o callback, SaveChests estoura no ID de mod (como no jogo)
+    } catch (...) {
+        threw = true;
+    }
+    CHECK(threw);
+    TLMod_SetSaveCallback(&OnSave);
+    g_saveLog.clear();
+    set_world_path(u"/saves/Worlds/Ilha.wld");
+    save_world();
+    CHECK(maxSaved() == 12 && TypeAt(nullptr, TLMOD_ITEMS_CHEST, 5, 0) == 8200);
+    CHECK(g_saveLog.size() == 2 && g_saveLog[1] == "depois:world:/saves/Worlds/Ilha.wld:ok");
+    CHECK(load_world(false) == 1 && g_saveLog.back() == "carregou:world:/saves/Worlds/Ilha.wld:ok");
+    CHECK(load_world(true) == 2 && g_saveLog.back() == "carregou:world:/saves/Worlds/Ilha.wld:erro");
+    TLMod_SetSaveCallback(nullptr);
+    return 0;
 }
 
 }  // namespace
@@ -196,6 +377,8 @@ int main(int argc, char** argv) {
     mock_set_flag("hardMode", true);
     CHECK(TLMod_ReadStaticBool(boss1, &b) && b);
     CHECK(TLMod_ReadStaticBool(hard, &b) && b);
+
+    if (int rc = TestSaves(lib)) return rc;
 
     std::printf("TODOS OS TESTES PASSARAM\n");
     return 0;

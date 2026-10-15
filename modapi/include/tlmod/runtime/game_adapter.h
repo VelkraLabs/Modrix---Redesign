@@ -3,10 +3,81 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
 
 #include "tlmod/tlmod_api.h"
 
 namespace tlmod::rt {
+
+// --- Persistência: tipos usados pelo adaptador e por ItemPersistence --------------
+
+// Contêineres de item que o jogo grava. Os nomes (ToString) vão para o
+// arquivo paralelo: não renomear.
+enum class ItemContainer : uint8_t {
+    Inventory,       // o jogo grava 0..57 (0..49 principal, moedas, munição)
+    Armor,           // armadura, acessórios e vaidade
+    Dye,
+    MiscEquips,      // pet, luz, carrinho, montaria, gancho
+    MiscDyes,
+    PiggyBank,       // Porquinho
+    Safe,            // Cofre
+    DefendersForge,  // Forja do Defensor
+    VoidVault,       // Cofre do Vazio
+    LoadoutArmor,    // equipamento dos loadouts guardados
+    LoadoutDye,
+    Temporary,       // 0 mouse, 1 sacrifício da Jornada, 2 Guia, 3 Reforja
+    Chest,           // baú do mundo
+};
+const char* ToString(ItemContainer c);
+std::optional<ItemContainer> ParseItemContainer(const std::string& name);
+bool IsPlayerContainer(ItemContainer c);
+
+// Um slot. `loadout` só vale para Loadout*; baús são identificados pela
+// posição (x, y) em tiles, estável entre save e load (o índice em Main.chest
+// pode mudar).
+struct ItemSlot {
+    ItemContainer container = ItemContainer::Inventory;
+    int32_t index = 0;
+    int32_t loadout = 0;
+    int32_t chestX = 0, chestY = 0;
+
+    bool SameContainer(const ItemSlot& o) const {
+        return container == o.container && loadout == o.loadout && chestX == o.chestX && chestY == o.chestY;
+    }
+    bool operator==(const ItemSlot& o) const { return SameContainer(o) && index == o.index; }
+};
+
+// O que o jogo grava de um item.
+struct ItemStack {
+    int32_t type = 0;
+    int32_t stack = 0;
+    uint8_t prefix = 0;
+    bool favorited = false;
+    bool IsAir() const { return type == 0 || stack <= 0; }
+};
+
+// O arquivo que o jogo está gravando ou acabou de ler.
+struct SaveFile {
+    enum class Kind { Player, World };
+    Kind kind = Kind::Player;
+    std::string path;    // .plr / .wld, como o jogo o chama
+    bool cloud = false;  // save na nuvem: o caminho pode não ser um arquivo local
+};
+
+// Os slots que o jogo grava para um arquivo: os de um personagem, ou os baús
+// de um mundo. Válido só durante o gancho que o recebe.
+class ItemSlots {
+public:
+    virtual ~ItemSlots() = default;
+    // Cada slot não vazio.
+    virtual void ForEach(const std::function<void(const ItemSlot&, const ItemStack&)>& fn) const = 0;
+    // nullopt = o slot não existe (índice fora da faixa, baú que não existe mais...).
+    virtual std::optional<ItemStack> Read(const ItemSlot& slot) const = 0;
+    // Grava só o que o jogo salva (tipo, pilha, prefixo, favorito).
+    virtual bool Write(const ItemSlot& slot, const ItemStack& item) = 0;
+    // Quantos slots tem o contêiner de `slot` (mesmo loadout/baú); 0 se não existe.
+    virtual int32_t Count(const ItemSlot& slot) const = 0;
+};
 
 // Tudo o que o runtime precisa do jogo. O runtime e a API de mods dependem só
 // desta interface; o adaptador concreto (ponte IL2CPP no Android, um falso nos
@@ -56,6 +127,20 @@ public:
     // jogo). nullopt = desconhecido.
     virtual std::optional<bool> InWorld() const = 0;
     virtual std::optional<bool> Progress(TLModProgress flag) const = 0;
+
+    // --- Save/load ---------------------------------------------------------------
+    // Ganchos em volta do save e do load de personagem e mundo (no Terraria:
+    // Player.InternalSavePlayerFile, Player.LoadPlayer, WorldFile.InternalSaveWorld,
+    // WorldFile.LoadWorld). Rodam na thread que salva/carrega, que pode não ser
+    // a do jogo. beforeSave e afterSave de um save vêm na mesma thread, e o
+    // afterSave vem sempre, inclusive se o save falhou (ok = false).
+    struct PersistenceHooks {
+        std::function<void(const SaveFile& file, ItemSlots& slots)> beforeSave;
+        std::function<void(const SaveFile& file, ItemSlots& slots, bool ok)> afterSave;
+        // Só depois de um load que o jogo conseguiu ler.
+        std::function<void(const SaveFile& file, ItemSlots& slots)> afterLoad;
+    };
+    virtual void SetPersistenceHooks(PersistenceHooks hooks) = 0;
 };
 
 }  // namespace tlmod::rt

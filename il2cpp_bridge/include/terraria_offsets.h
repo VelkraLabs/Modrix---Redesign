@@ -45,7 +45,73 @@ constexpr size_t statDefense = 0x6F8;  // int
 constexpr size_t statLifeMax = 0x6FC;  // int
 constexpr size_t statLifeMax2 = 0x700; // int  (vida máxima com bônus)
 constexpr size_t statLife = 0x704;     // int  <-- usado pela ponte
+// Itens gravados no .plr (Player.InternalSavePlayerFile). Laços do save:
+// armor/dye/miscEquips/miscDyes inteiros, inventory 0..57, bancos 0..39.
+constexpr size_t armor = 0x3F8;        // Item[] (20: armadura, acessórios, vaidade)
+constexpr size_t dye = 0x400;          // Item[] (10)
+constexpr size_t miscEquips = 0x408;   // Item[] (5: pet, luz, carrinho, montaria, gancho)
+constexpr size_t miscDyes = 0x410;     // Item[] (5)
+constexpr size_t inventory = 0x4A0;    // Item[] (59; o save grava 0..57)
+constexpr size_t bank = 0x4B8;         // Chest (Porquinho)
+constexpr size_t bank2 = 0x4C0;        // Chest (Cofre)
+constexpr size_t bank3 = 0x4C8;        // Chest (Forja do Defensor)
+constexpr size_t bank4 = 0x4D0;        // Chest (Cofre do Vazio)
+constexpr size_t loadStatus = 0x1C0;   // int  (0 = LoadPlayer leu o arquivo sem erro)
+constexpr size_t Loadouts = 0xD60;     // EquipmentLoadout[] (3)
+// Item[] (4): o que LoadPlayer leu da seção "temporária" (mouse, sacrifício
+// da Jornada, Guia, Reforja). No save o jogo grava Main.mouseItem etc.
+constexpr size_t _temporaryItemSlots = 0xD78;
 }  // namespace player_off
+
+// --- Terraria.Item / Chest / EquipmentLoadout --------------------------------
+// O save grava netID (int32 no .plr, int32 nos baús do .wld), stack e prefix.
+namespace item_off {
+constexpr size_t favorited = 0x69;  // bool
+constexpr size_t type = 0xBC;       // int
+constexpr size_t stack = 0xCC;      // int
+constexpr size_t netID = 0x198;     // int  <-- o que vai para o arquivo
+constexpr size_t prefix = 0x1A0;    // byte
+}  // namespace item_off
+namespace chest_off {
+constexpr size_t item = 0x10;  // Item[] (40)
+constexpr size_t x = 0x18;     // int
+constexpr size_t y = 0x1C;     // int
+}  // namespace chest_off
+namespace loadout_off {
+constexpr size_t Armor = 0x10;  // Item[] (20)
+constexpr size_t Dye = 0x18;    // Item[] (10)
+}  // namespace loadout_off
+
+// --- Terraria.IO.FileData / PlayerFileData -----------------------------------
+// Caminho do arquivo que o jogo grava/lê (o .plr de um personagem, o .wld de
+// um mundo). Mundo ativo: Main.ActiveWorldFileData.
+constexpr const char* kIoNamespace = "Terraria.IO";
+constexpr const char* kFileDataClass = "FileData";
+constexpr const char* kPlayerFileDataClass = "PlayerFileData";
+constexpr const char* kWorldFileClass = "WorldFile";
+constexpr const char* kItemClass = "Item";
+constexpr const char* kChestClass = "Chest";
+constexpr const char* kEquipmentLoadoutClass = "EquipmentLoadout";
+constexpr const char* kWorldGenClass = "WorldGen";
+namespace file_data_off {
+constexpr size_t _path = 0x10;         // string
+constexpr size_t _isCloudSave = 0x18;  // bool
+}  // namespace file_data_off
+namespace player_file_data_off {
+constexpr size_t _player = 0x40;  // Player
+}  // namespace player_file_data_off
+// static bool WorldGen.loadFailed (static_fields+0xC5): LoadWorld não conseguiu ler.
+namespace world_gen_static_off {
+constexpr size_t loadFailed = 0xC5;  // bool
+}  // namespace world_gen_static_off
+// Main.maxChests (const = 8000): tamanho de Main.chest[].
+constexpr int32_t kMaxChests = 8000;
+// ItemID.Count (const = 5456). Na leitura do .plr, armor/dye/miscEquips/
+// miscDyes chamam netDefaults(id) sem conferir a faixa: um ID >= 5456 ali
+// estoura os arrays do jogo e o personagem não carrega. Inventário e bancos
+// conferem (id >= 5456 vira ar, e o item some). Em SaveChests,
+// ItemID.Sets.ItemsThatShouldNotBeInInventory[type] também estoura.
+constexpr int32_t kItemVanillaCount = 5456;
 
 // --- Campos de instância de Terraria.NPC -----------------------------------
 // Os de Entity são os mesmos de Player (whoAmI 0x10, active 0x14, ...).
@@ -70,6 +136,9 @@ namespace main_static_off {
 constexpr size_t npc = 0x5B0;      // NPC[] Main.npc (200 slots)
 constexpr size_t player = 0x678;   // Player[] Main.player (255 slots)
 constexpr size_t netMode = 0x81C;  // int Main.netMode
+constexpr size_t chest = 0x5F8;    // Chest[] Main.chest (8000 slots; nulo = sem baú)
+constexpr size_t ActiveWorldFileData = 0x730;  // WorldFileData Main.ActiveWorldFileData
+constexpr size_t CreativeMenu = 0x50;          // CreativeUI Main.CreativeMenu
 }  // namespace main_static_off
 
 // --- Estado do mundo -------------------------------------------------------
@@ -118,6 +187,45 @@ constexpr uintptr_t Main_DoUpdate = 0xCADDB8;
 // Instance é [ThreadStatic]: fora da thread do jogo é nulo e o getter lança
 // NullReferenceException. Por isso a ponte só lê isso dentro de DoUpdate.
 constexpr uintptr_t Main_get_gameMenu = 0xC69BB0;
+
+// --- Save/load (formato idêntico ao do PC 1.4.4) ---------------------------
+// static void Player.SavePlayer(PlayerFileData, bool skipMapSave, bool forceSave):
+// chamado por WorldGen.saveToonWhilePlayingCallBack (0x130ED54),
+// SaveAndQuitCallBack (0x130C8CC), Netplay.InnerClientLoop, PlayerFileData.CreateAndSave,
+// PlayerFileData.Rename e GUIPlayerSelectMenu.CloseNameEditAndSave. Os callbacks
+// do WorldGen rodam no ThreadPool, com o jogo rodando em paralelo.
+constexpr uintptr_t Player_SavePlayer = 0x1043A9C;
+// private static void Player.InternalSavePlayerFile(PlayerFileData): único chamador
+// é SavePlayer. Copia o .plr para .bak, cifra com Rijndael e grava, nesta ordem:
+// armor/dye (netID int32, prefix byte), inventory 0..57 (netID int32, stack int32,
+// prefix byte, favorited bool), miscEquips/miscDyes (netID, prefix), bank/bank2/bank3
+// 0..39 (netID, stack, prefix), bank4 0..39 (+favorited), depois
+// SaveTemporaryItemSlotContents (0x104624C) e EquipmentLoadout.Serialize (0x12AC9CC),
+// que usam Item.Serialize (0xBB8988: netID int32, stack int32, prefix byte).
+constexpr uintptr_t Player_InternalSavePlayerFile = 0x1044040;
+// static PlayerFileData Player.LoadPlayer(string playerPath, bool cloudSave):
+// chamado por Player.GetFileData (0x104E554), que Main.LoadPlayers usa para listar
+// os personagens no menu.
+constexpr uintptr_t Player_LoadPlayer = 0x1049FA8;
+// static void WorldFile.SaveWorld(bool useCloudSaving, bool resetTime, WorldSaveContext)
+// -> InternalSaveWorld (único chamador) -> SaveWorld_Version2 (0x14F2BA8) -> SaveChests.
+constexpr uintptr_t WorldFile_SaveWorld = 0x14F15E8;
+constexpr uintptr_t WorldFile_InternalSaveWorld = 0x14F1AC8;
+// private static int WorldFile.SaveChests(BinaryWriter): (short)count, (short)40;
+// por baú x int32, y int32, nome; por item (short)stack e, se stack > 0,
+// netID int32 + prefix byte.
+constexpr uintptr_t WorldFile_SaveChests = 0x14F83CC;
+// static void WorldFile.LoadWorld(bool loadFromCloud): chamado por
+// WorldGen.playWorldCallBack (0x130D624), serverLoadWorldCallBack e
+// RenameWorldCallBack. Lê os baús em LoadChests (0x14FD70C).
+constexpr uintptr_t WorldFile_LoadWorld = 0x14EC048;
+constexpr uintptr_t WorldFile_LoadChests = 0x14FD70C;
+// Itens "temporários" que o save do personagem grava (Main.* lê
+// LocalUserGameState.Instance, que é [ThreadStatic]).
+constexpr uintptr_t Main_get_mouseItem = 0xC68290;
+constexpr uintptr_t Main_get_guideItem = 0xC685F4;
+constexpr uintptr_t Main_get_reforgeItem = 0xC686A0;
+constexpr uintptr_t CreativeUI_GetItemByIndex = 0x8F643C;
 }  // namespace rva
 
 // Número de parâmetros C# (sem contar `this`), usado em
@@ -130,6 +238,15 @@ constexpr int NPC_NewNPC = 10;
 constexpr int NPC_SetDefaults = 2;
 constexpr int NPC_AI = 0;
 constexpr int Main_DoUpdate = 1;
+constexpr int Player_InternalSavePlayerFile = 1;
+constexpr int Player_LoadPlayer = 2;
+constexpr int WorldFile_SaveWorld = 3;
+constexpr int WorldFile_InternalSaveWorld = 2;
+constexpr int WorldFile_LoadWorld = 1;
+constexpr int Main_get_mouseItem = 0;
+constexpr int Main_get_guideItem = 0;
+constexpr int Main_get_reforgeItem = 0;
+constexpr int CreativeUI_GetItemByIndex = 1;
 }  // namespace argc
 
 }  // namespace terraria

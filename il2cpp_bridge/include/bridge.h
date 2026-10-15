@@ -196,7 +196,97 @@ typedef struct TLModStaticField TLModStaticField;
 TLModStaticField* TLMod_FindStaticField(const char* namespaze, const char* klass, const char* field);
 bool TLMod_ReadStaticBool(const TLModStaticField* field, bool* out);
 
+// ===========================================================================
+// Save/load: personagem (.plr) e mundo (.wld)
+// ===========================================================================
+//
+// O jogo grava o ID numérico do item (netID) no arquivo. Para que um ID de mod
+// nunca chegue lá, quem assina os callbacks abaixo tira os itens de mod antes
+// do save e os devolve depois. Hooks (RVAs em terraria_offsets.h):
+//
+//   Player.InternalSavePlayerFile(PlayerFileData)   antes / depois
+//   Player.LoadPlayer(string path, bool cloud)      depois (devolve PlayerFileData)
+//   WorldFile.InternalSaveWorld(bool cloud, bool)   antes / depois
+//   WorldFile.LoadWorld(bool cloud)                 depois
+//
+// Os saves rodam no ThreadPool (saveToonWhilePlayingCallBack, saveAndPlayCallBack,
+// SaveAndQuitCallBack) com a thread do jogo rodando em paralelo: o antes e o
+// depois de um save chegam sempre na MESMA thread, mas o jogo pode mexer nos
+// itens entre os dois.
+
+typedef enum TLModSaveKind { TLMOD_SAVE_PLAYER = 0, TLMOD_SAVE_WORLD = 1 } TLModSaveKind;
+typedef enum TLModSavePhase {
+    TLMOD_BEFORE_SAVE = 0,
+    TLMOD_AFTER_SAVE = 1,  // também quando o save lançou exceção (ok = false)
+    TLMOD_AFTER_LOAD = 2,
+} TLModSavePhase;
+
+typedef struct TLModSaveEvent {
+    TLModSaveKind kind;
+    const char* path;      // UTF-8, válido só durante o callback; nunca nulo
+    bool cloud;
+    // Personagem: o Player gravado/carregado (do PlayerFileData). Mundo: nulo.
+    Il2CppObject* player;
+    // Depois do save: false se o jogo lançou exceção. Depois do load:
+    // false se o jogo não conseguiu ler (Player.loadStatus != 0, WorldGen.loadFailed).
+    bool ok;
+} TLModSaveEvent;
+
+// Chamado na thread que salva/carrega. Não pode lançar exceção.
+typedef void (*TLModSaveCallback)(const TLModSaveEvent* ev, TLModSavePhase phase);
+void TLMod_SetSaveCallback(TLModSaveCallback cb);
+
+// Onde ficam os itens que o jogo grava. `group`: índice do loadout
+// (LOADOUT_*), índice em Main.chest (CHEST); 0 nos outros.
+typedef enum TLModItemContainer {
+    TLMOD_ITEMS_INVENTORY = 0,  // Player.inventory (o save grava 0..57)
+    TLMOD_ITEMS_ARMOR,          // Player.armor
+    TLMOD_ITEMS_DYE,            // Player.dye
+    TLMOD_ITEMS_MISC_EQUIPS,    // Player.miscEquips
+    TLMOD_ITEMS_MISC_DYES,      // Player.miscDyes
+    TLMOD_ITEMS_BANK,           // Player.bank.item  (Porquinho)
+    TLMOD_ITEMS_BANK2,          // Player.bank2.item (Cofre)
+    TLMOD_ITEMS_BANK3,          // Player.bank3.item (Forja do Defensor)
+    TLMOD_ITEMS_BANK4,          // Player.bank4.item (Cofre do Vazio)
+    TLMOD_ITEMS_LOADOUT_ARMOR,  // Player.Loadouts[group].Armor
+    TLMOD_ITEMS_LOADOUT_DYE,    // Player.Loadouts[group].Dye
+    // O que o save grava como "temporário": 0 Main.mouseItem,
+    // 1 Main.CreativeMenu.GetItemByIndex(0), 2 Main.guideItem, 3 Main.reforgeItem.
+    // Globais da thread do jogo (LocalUserGameState): ler na thread do save.
+    TLMOD_ITEMS_HELD,
+    TLMOD_ITEMS_TEMPORARY,      // Player._temporaryItemSlots: o que o load leu de HELD
+    TLMOD_ITEMS_CHEST,          // Main.chest[group].item
+    TLMOD_ITEMS_CONTAINER_COUNT
+} TLModItemContainer;
+
+// Número de slots; -1 se o contêiner não existe (player nulo, baú vazio...).
+int32_t TLMod_ItemSlotCount(Il2CppObject* player, TLModItemContainer container, int32_t group);
+// O Item no slot; nulo se não existe. Em HELD chama os getters do jogo.
+Il2CppObject* TLMod_ItemSlot(Il2CppObject* player, TLModItemContainer container, int32_t group,
+                             int32_t index);
+
+// Campos de Terraria.Item que o save grava.
+typedef struct TLModItemFields {
+    int32_t type;
+    int32_t netID;  // o que vai para o arquivo; igual a type exceto em variantes antigas (< 0)
+    int32_t stack;
+    uint8_t prefix;
+    bool favorited;
+} TLModItemFields;
+bool TLMod_ReadItem(Il2CppObject* item, TLModItemFields* out);
+// Escreve SÓ esses campos (não chama SetDefaults): serve para esvaziar um
+// slot durante o save e devolver depois exatamente o que estava lá.
+bool TLMod_WriteItem(Il2CppObject* item, const TLModItemFields* in);
+
+// Main.chest: tamanho (8000) e posição do baú (false se Main.chest[index] é nulo).
+int32_t TLMod_ChestCount(void);
+bool TLMod_ChestPosition(int32_t index, int32_t* x, int32_t* y);
+
 // Handlers que os hooks apontam (exportados como TLMod_Hooked_PlayerHurt).
+void TLMod_Hooked_PlayerInternalSavePlayerFile(Il2CppObject* playerFile, const MethodInfo* method);
+Il2CppObject* TLMod_Hooked_PlayerLoadPlayer(Il2CppObject* path, bool cloudSave, const MethodInfo* method);
+void TLMod_Hooked_WorldFileInternalSaveWorld(bool useCloudSaving, bool resetTime, const MethodInfo* method);
+void TLMod_Hooked_WorldFileLoadWorld(bool loadFromCloud, const MethodInfo* method);
 void TLMod_Hooked_MainDoUpdate(Il2CppObject* self, Il2CppObject* gameTime, const MethodInfo* method);
 int32_t TLMod_Hooked_NpcNewNPC(Il2CppObject* source, int32_t x, int32_t y, int32_t type,
                                 int32_t start, float ai0, float ai1, float ai2, float ai3,

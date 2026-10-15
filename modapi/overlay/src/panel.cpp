@@ -302,7 +302,7 @@ bool PanelController::Tick(int64_t nowMs) {
 }
 
 std::string PanelController::SnapshotJson() const {
-    JsonWriter w;
+    rt::JsonWriter w;
     w.BeginObject();
     w.Key("version").Int(static_cast<int64_t>(version_));
     w.Key("open").Bool(open_);

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace tlmod::overlay {
+namespace tlmod::rt {
 
 class JsonWriter {
 public:
@@ -67,4 +67,4 @@ private:
     bool afterKey_ = false;
 };
 
-}  // namespace tlmod::overlay
+}  // namespace tlmod::rt

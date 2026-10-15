@@ -43,7 +43,7 @@ bool ConfigStore::SetEnabled(const std::string& modId, bool enabled, std::string
 }
 
 bool ConfigStore::Save(const std::set<std::string>& disabled, std::string* error) const {
-    JsonWriter w;
+    rt::JsonWriter w;
     w.BeginObject();
     w.Key("schema").Int(1);
     w.Key("disabled_mods").BeginArray();

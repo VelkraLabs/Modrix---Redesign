@@ -19,6 +19,11 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
 6. Resolve `Terraria.NPC` e instala hooks em `NPC.NewNPC` (`0xEE4630`), `NPC.SetDefaults` (`0xDAF1BC`)
    e `NPC.AI` (`0xDCE54C`), expostos via `TLMod_SetNpcCallbacks` (`src/npc_hooks.cpp`). Se algo de NPC
    não resolver, só esses hooks ficam desligados.
+7. Instala hooks no save/load de personagem e mundo (`Player.InternalSavePlayerFile`, `Player.LoadPlayer`,
+   `WorldFile.InternalSaveWorld`, `WorldFile.LoadWorld`) e expõe os slots de item que o jogo grava
+   (`TLMod_SetSaveCallback`, `TLMod_ItemSlot`, `src/save_hooks.cpp`). O save original roda via
+   `il2cpp_runtime_invoke`, que devolve a exceção gerenciada em vez de desenrolá-la pelos nossos
+   frames; o "depois" roda sempre e a exceção é relançada com `il2cpp_raise_exception`.
 
 ## Build
 

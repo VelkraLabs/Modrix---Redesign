@@ -4,6 +4,7 @@
 // Terraria.Player / Terraria.Main com os offsets reais do dump
 // (statLife @0x704, statDefense @0x6F8 ...). Não tem nada da Unity dentro.
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -71,7 +72,7 @@ constexpr size_t kStatLifeMax2 = 0x700;
 constexpr size_t kStatLife = 0x704;
 constexpr size_t kPlayerSize = 0xD80;
 
-bool g_initialized = false;
+std::atomic<bool> g_initialized{false};  // a thread de TLMod_Init consulta em loop
 Il2CppImage g_corlib{"mscorlib.dll", {}};
 Il2CppImage g_csharp{"Assembly-CSharp.dll", {}};
 Il2CppAssembly g_asmCorlib{&g_corlib};
@@ -268,6 +269,211 @@ using DoUpdateFn = decltype(&MockMainDoUpdate);
 DoUpdateFn g_doUpdateEntry = &MockMainDoUpdate;
 MethodInfo g_mDoUpdate{reinterpret_cast<Il2CppMethodPointer>(&MockMainDoUpdate), "DoUpdate", 1};
 
+// ---- Save/load ---------------------------------------------------------------------
+// Offsets do dump (terraria_offsets.h: item_off, chest_off, loadout_off, file_data_off...).
+constexpr size_t kItemFavorited = 0x69, kItemType = 0xBC, kItemStack = 0xCC, kItemNetId = 0x198,
+                 kItemPrefix = 0x1A0, kItemSize = 0x1B0;
+constexpr size_t kChestItem = 0x10, kChestX = 0x18, kChestY = 0x1C, kChestSize = 0x40;
+constexpr size_t kLoadoutArmor = 0x10, kLoadoutDye = 0x18, kLoadoutSize = 0x28;
+constexpr size_t kFilePath = 0x10, kFileCloud = 0x18, kFilePlayer = 0x40, kFileSize = 0x68;
+constexpr size_t kPInventory = 0x4A0, kPArmor = 0x3F8, kPDye = 0x400, kPMiscEquips = 0x408, kPMiscDyes = 0x410,
+                 kPBank = 0x4B8, kPLoadouts = 0xD60, kPTemporary = 0xD78, kPLoadStatus = 0x1C0;
+constexpr int32_t kItemCount = 5456;  // ItemID.Count
+constexpr int kMaxChests = 8000;
+
+// "Heap" do teste: nada é liberado (o GC do jogo cuidaria disso).
+Il2CppObject* NewObject(size_t size) { return static_cast<Il2CppObject*>(std::calloc(1, size)); }
+Il2CppArray* NewArray(uint32_t n) {
+    auto* a = static_cast<Il2CppArray*>(std::calloc(1, sizeof(Il2CppArray) + n * sizeof(void*)));
+    a->max_length = n;
+    return a;
+}
+void*& Elem(Il2CppArray* a, uint32_t i) { return reinterpret_cast<void**>(a + 1)[i]; }
+Il2CppArray* NewItemArray(uint32_t n) {
+    Il2CppArray* a = NewArray(n);
+    for (uint32_t i = 0; i < n; ++i) Elem(a, i) = NewObject(kItemSize);
+    return a;
+}
+Il2CppObject* NewChest(int32_t x, int32_t y) {
+    Il2CppObject* c = NewObject(kChestSize);
+    At<Il2CppArray*>(c, kChestItem) = NewItemArray(40);
+    At<int32_t>(c, kChestX) = x;
+    At<int32_t>(c, kChestY) = y;
+    return c;
+}
+// System.String: klass, monitor, int32 length, UTF-16.
+Il2CppObject* NewString(const char16_t* text) {
+    size_t n = 0;
+    while (text[n]) ++n;
+    Il2CppObject* str = NewObject(0x14 + (n + 1) * sizeof(char16_t));
+    At<int32_t>(str, 0x10) = static_cast<int32_t>(n);
+    std::memcpy(reinterpret_cast<uint8_t*>(str) + 0x14, text, n * sizeof(char16_t));
+    return str;
+}
+
+Il2CppClass g_item{"Terraria", "Item", {}, {}};
+FieldInfo g_fItem[] = {{"type", kItemType, nullptr},     {"netID", kItemNetId, nullptr},
+                       {"stack", kItemStack, nullptr},   {"prefix", kItemPrefix, nullptr},
+                       {"favorited", kItemFavorited, nullptr}};
+Il2CppClass g_chest{"Terraria", "Chest", {}, {}};
+FieldInfo g_fChest[] = {{"item", kChestItem, nullptr}, {"x", kChestX, nullptr}, {"y", kChestY, nullptr}};
+Il2CppClass g_loadout{"Terraria", "EquipmentLoadout", {}, {}};
+FieldInfo g_fLoadout[] = {{"Armor", kLoadoutArmor, nullptr}, {"Dye", kLoadoutDye, nullptr}};
+Il2CppClass g_fileData{"Terraria.IO", "FileData", {}, {}};
+FieldInfo g_fFileData[] = {{"_path", kFilePath, nullptr}, {"_isCloudSave", kFileCloud, nullptr}};
+Il2CppClass g_playerFileData{"Terraria.IO", "PlayerFileData", {}, {}};
+FieldInfo g_fPlayerFilePlayer{"_player", kFilePlayer, nullptr};
+Il2CppClass g_worldFile{"Terraria.IO", "WorldFile", {}, {}};
+Il2CppClass g_worldGen{"Terraria", "WorldGen", {}, {}};
+bool g_loadFailed = false;
+FieldInfo g_fLoadFailed{"loadFailed", 0xC5, &g_loadFailed, 1};
+Il2CppClass g_creativeUi{"Terraria.GameContent.Creative", "CreativeUI", {}, {}};
+FieldInfo g_fPlayerItems[] = {{"inventory", kPInventory, nullptr},   {"armor", kPArmor, nullptr},
+                              {"dye", kPDye, nullptr},               {"miscEquips", kPMiscEquips, nullptr},
+                              {"miscDyes", kPMiscDyes, nullptr},     {"bank", kPBank, nullptr},
+                              {"bank2", kPBank + 8, nullptr},        {"bank3", kPBank + 16, nullptr},
+                              {"bank4", kPBank + 24, nullptr},       {"Loadouts", kPLoadouts, nullptr},
+                              {"_temporaryItemSlots", kPTemporary, nullptr},
+                              {"loadStatus", kPLoadStatus, nullptr}};
+
+Il2CppArray* g_chests = nullptr;  // static Chest[] Main.chest
+FieldInfo g_fMainChest{"chest", 0x5F8, &g_chests};
+Il2CppObject* g_activeWorld = nullptr;  // static WorldFileData Main.ActiveWorldFileData
+FieldInfo g_fActiveWorld{"ActiveWorldFileData", 0x730, &g_activeWorld};
+Il2CppObject* g_creativeMenu = nullptr;  // static CreativeUI Main.CreativeMenu
+FieldInfo g_fCreativeMenu{"CreativeMenu", 0x50, &g_creativeMenu};
+Il2CppObject* g_playerFile = nullptr;  // PlayerFileData do personagem local
+Il2CppObject* g_held[4] = {};          // mouse, sacrifício, Guia, Reforja
+
+MethodInfo g_mGetMouseItem{nullptr, "get_mouseItem", 0};
+MethodInfo g_mGetGuideItem{nullptr, "get_guideItem", 0};
+MethodInfo g_mGetReforgeItem{nullptr, "get_reforgeItem", 0};
+MethodInfo g_mCreativeGetItem{nullptr, "GetItemByIndex", 1};
+
+// Exceção gerenciada do "jogo" (no IL2CPP real, Il2CppExceptionWrapper).
+struct MockManagedException {
+    Il2CppException* exc;
+};
+Il2CppObject g_saveException{};
+bool g_throwOnSave = false;
+std::vector<int32_t> g_savedIds;  // netIDs que o último save gravou, na ordem
+int g_worldLoads = 0;
+
+int32_t NetId(void* item) { return item ? At<int32_t>(item, kItemNetId) : 0; }
+void RecordItems(Il2CppArray* items, uint32_t count) {
+    for (uint32_t i = 0; i < count && i < items->max_length; ++i) g_savedIds.push_back(NetId(Elem(items, i)));
+}
+
+// Player.InternalSavePlayerFile: grava os netIDs na ordem do jogo real.
+void MockInternalSavePlayerFile(Il2CppObject* playerFile, const MethodInfo*) {
+    g_savedIds.clear();
+    void* p = At<void*>(playerFile, kFilePlayer);
+    RecordItems(At<Il2CppArray*>(p, kPArmor), 20);
+    RecordItems(At<Il2CppArray*>(p, kPDye), 10);
+    RecordItems(At<Il2CppArray*>(p, kPInventory), 58);
+    RecordItems(At<Il2CppArray*>(p, kPMiscEquips), 5);
+    RecordItems(At<Il2CppArray*>(p, kPMiscDyes), 5);
+    for (int b = 0; b < 4; ++b) RecordItems(At<Il2CppArray*>(At<void*>(p, kPBank + 8 * b), kChestItem), 40);
+    for (Il2CppObject* held : g_held) g_savedIds.push_back(NetId(held));  // SaveTemporaryItemSlotContents
+    Il2CppArray* loadouts = At<Il2CppArray*>(p, kPLoadouts);
+    for (uint32_t l = 0; l < loadouts->max_length; ++l) {
+        RecordItems(At<Il2CppArray*>(Elem(loadouts, l), kLoadoutArmor), 20);
+        RecordItems(At<Il2CppArray*>(Elem(loadouts, l), kLoadoutDye), 10);
+    }
+    if (g_throwOnSave) throw MockManagedException{&g_saveException};
+}
+using SavePlayerFn = decltype(&MockInternalSavePlayerFile);
+SavePlayerFn g_savePlayerEntry = &MockInternalSavePlayerFile;
+MethodInfo g_mInternalSavePlayerFile{reinterpret_cast<Il2CppMethodPointer>(&MockInternalSavePlayerFile),
+                                     "InternalSavePlayerFile", 1};
+
+// Player.LoadPlayer: "lê" o arquivo para o PlayerFileData do personagem local.
+Il2CppObject* MockLoadPlayer(Il2CppObject* path, bool cloud, const MethodInfo*) {
+    At<Il2CppObject*>(g_playerFile, kFilePath) = path;
+    At<bool>(g_playerFile, kFileCloud) = cloud;
+    return g_playerFile;
+}
+using LoadPlayerFn = decltype(&MockLoadPlayer);
+LoadPlayerFn g_loadPlayerEntry = &MockLoadPlayer;
+MethodInfo g_mLoadPlayer{reinterpret_cast<Il2CppMethodPointer>(&MockLoadPlayer), "LoadPlayer", 2};
+
+// WorldFile.InternalSaveWorld -> SaveChests. Como no jogo, um type fora de
+// ItemID.Sets.ItemsThatShouldNotBeInInventory (tamanho ItemID.Count) estoura.
+void MockInternalSaveWorld(bool, bool, const MethodInfo*) {
+    g_savedIds.clear();
+    for (int c = 0; c < kMaxChests; ++c) {
+        void* chest = Elem(g_chests, static_cast<uint32_t>(c));
+        if (!chest) continue;
+        Il2CppArray* items = At<Il2CppArray*>(chest, kChestItem);
+        for (uint32_t i = 0; i < 40; ++i) {
+            void* item = Elem(items, i);
+            if (At<int32_t>(item, kItemType) >= kItemCount) throw MockManagedException{&g_saveException};
+            g_savedIds.push_back(NetId(item));
+        }
+    }
+    if (g_throwOnSave) throw MockManagedException{&g_saveException};
+}
+using SaveWorldFn = decltype(&MockInternalSaveWorld);
+SaveWorldFn g_saveWorldEntry = &MockInternalSaveWorld;
+MethodInfo g_mInternalSaveWorld{reinterpret_cast<Il2CppMethodPointer>(&MockInternalSaveWorld), "InternalSaveWorld", 2};
+
+void MockLoadWorld(bool, const MethodInfo*) { ++g_worldLoads; }
+using LoadWorldFn = decltype(&MockLoadWorld);
+LoadWorldFn g_loadWorldEntry = &MockLoadWorld;
+MethodInfo g_mLoadWorld{reinterpret_cast<Il2CppMethodPointer>(&MockLoadWorld), "LoadWorld", 1};
+
+void InitSaveWorld() {
+    g_item.fields.clear();
+    for (FieldInfo& f : g_fItem) g_item.fields.push_back(&f);
+    g_chest.fields.clear();
+    for (FieldInfo& f : g_fChest) g_chest.fields.push_back(&f);
+    g_loadout.fields = {&g_fLoadout[0], &g_fLoadout[1]};
+    g_fileData.fields = {&g_fFileData[0], &g_fFileData[1]};
+    g_playerFileData.fields = {&g_fPlayerFilePlayer};
+    g_worldGen.fields = {&g_fLoadFailed};
+    g_worldFile.methods = {&g_mInternalSaveWorld, &g_mLoadWorld};
+    g_creativeUi.methods = {&g_mCreativeGetItem};
+    for (FieldInfo& f : g_fPlayerItems) g_player.fields.push_back(&f);
+    g_player.methods.push_back(&g_mInternalSavePlayerFile);
+    g_player.methods.push_back(&g_mLoadPlayer);
+    g_main.fields.push_back(&g_fMainChest);
+    g_main.fields.push_back(&g_fActiveWorld);
+    g_main.fields.push_back(&g_fCreativeMenu);
+    g_main.methods.push_back(&g_mGetMouseItem);
+    g_main.methods.push_back(&g_mGetGuideItem);
+    g_main.methods.push_back(&g_mGetReforgeItem);
+    g_csharp.classes.insert(g_csharp.classes.end(), {&g_item, &g_chest, &g_loadout, &g_fileData, &g_playerFileData,
+                                                     &g_worldFile, &g_worldGen, &g_creativeUi});
+
+    // Personagem: arrays com o tamanho do jogo; bancos e loadouts como objetos.
+    void* p = g_localPlayer;
+    At<Il2CppArray*>(p, kPInventory) = NewItemArray(59);
+    At<Il2CppArray*>(p, kPArmor) = NewItemArray(20);
+    At<Il2CppArray*>(p, kPDye) = NewItemArray(10);
+    At<Il2CppArray*>(p, kPMiscEquips) = NewItemArray(5);
+    At<Il2CppArray*>(p, kPMiscDyes) = NewItemArray(5);
+    for (int b = 0; b < 4; ++b) At<Il2CppObject*>(p, kPBank + 8 * b) = NewChest(-1, -1);
+    Il2CppArray* loadouts = NewArray(3);
+    for (uint32_t l = 0; l < 3; ++l) {
+        Il2CppObject* lo = NewObject(kLoadoutSize);
+        At<Il2CppArray*>(lo, kLoadoutArmor) = NewItemArray(20);
+        At<Il2CppArray*>(lo, kLoadoutDye) = NewItemArray(10);
+        Elem(loadouts, l) = lo;
+    }
+    At<Il2CppArray*>(p, kPLoadouts) = loadouts;
+    At<Il2CppArray*>(p, kPTemporary) = NewItemArray(4);
+    for (Il2CppObject*& h : g_held) h = NewObject(kItemSize);
+    g_creativeMenu = NewObject(0x40);
+
+    g_playerFile = NewObject(kFileSize);
+    At<void*>(g_playerFile, kFilePlayer) = p;
+    At<Il2CppObject*>(g_playerFile, kFilePath) = NewString(u"/saves/Players/Jogador.plr");
+    g_activeWorld = NewObject(kFileSize);
+    At<Il2CppObject*>(g_activeWorld, kFilePath) = NewString(u"/saves/Worlds/Mundo.wld");
+    g_chests = NewArray(kMaxChests);
+}
+
+
 }  // namespace
 
 extern "C" {
@@ -305,6 +511,7 @@ __attribute__((visibility("default"))) void mock_il2cpp_init() {
     }
     g_localUserClass.fields = {&g_fLocalUserInstance, &g_fGameMenu};
     g_localUser.gameMenu = true;
+    InitSaveWorld();
     g_initialized = true;
 }
 __attribute__((visibility("default"))) void* mock_local_player() { return g_localPlayer; }
@@ -314,6 +521,10 @@ __attribute__((visibility("default"))) bool mock_patch_function(void* target, vo
     else if (target == reinterpret_cast<void*>(&MockNpcSetDefaults)) g_setDefaultsEntry = reinterpret_cast<SetDefaultsFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockNpcAI)) g_aiEntry = reinterpret_cast<AiFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockMainDoUpdate)) g_doUpdateEntry = reinterpret_cast<DoUpdateFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockInternalSavePlayerFile)) g_savePlayerEntry = reinterpret_cast<SavePlayerFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockLoadPlayer)) g_loadPlayerEntry = reinterpret_cast<LoadPlayerFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockInternalSaveWorld)) g_saveWorldEntry = reinterpret_cast<SaveWorldFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockLoadWorld)) g_loadWorldEntry = reinterpret_cast<LoadWorldFn>(replacement);
     else return false;
     return true;
 }
@@ -350,6 +561,40 @@ __attribute__((visibility("default"))) double mock_game_hurt_player(void* player
     return g_hurtEntry(static_cast<Il2CppObject*>(player), nullptr, dmg, 1, false, false, false,
                        -1, true, &g_mHurt);
 }
+
+// ---- Save/load ---------------------------------------------------------------------
+// O "jogo" salva/carrega pelo endereço (com hook, se instalado). Exceções do
+// jogo saem como MockManagedException (o teste pega com catch (...)).
+__attribute__((visibility("default"))) void mock_game_save_player() { g_savePlayerEntry(g_playerFile, &g_mInternalSavePlayerFile); }
+__attribute__((visibility("default"))) void* mock_game_load_player(const char16_t* path, bool cloud) {
+    return g_loadPlayerEntry(NewString(path), cloud, &g_mLoadPlayer);
+}
+__attribute__((visibility("default"))) void mock_game_save_world() { g_saveWorldEntry(false, false, &g_mInternalSaveWorld); }
+__attribute__((visibility("default"))) int mock_game_load_world(bool fail) {
+    g_loadFailed = fail;
+    g_loadWorldEntry(false, &g_mLoadWorld);
+    return g_worldLoads;
+}
+__attribute__((visibility("default"))) void mock_set_world_path(const char16_t* path) {
+    At<Il2CppObject*>(g_activeWorld, kFilePath) = NewString(path);
+}
+__attribute__((visibility("default"))) void mock_set_load_status(int32_t status) {
+    At<int32_t>(g_localPlayer, kPLoadStatus) = status;
+}
+__attribute__((visibility("default"))) void mock_set_throw_on_save(bool v) { g_throwOnSave = v; }
+// netIDs gravados pelo último save; devolve a quantidade.
+__attribute__((visibility("default"))) size_t mock_saved_ids(const int32_t** ids) {
+    *ids = g_savedIds.data();
+    return g_savedIds.size();
+}
+// Cria um baú em Main.chest[index] (posição em tiles).
+__attribute__((visibility("default"))) void mock_add_chest(int32_t index, int32_t x, int32_t y) {
+    Elem(g_chests, static_cast<uint32_t>(index)) = NewChest(x, y);
+}
+__attribute__((visibility("default"))) void mock_remove_chest(int32_t index) {
+    Elem(g_chests, static_cast<uint32_t>(index)) = nullptr;
+}
+__attribute__((visibility("default"))) void* mock_held_item(int32_t index) { return g_held[index]; }
 
 // ---- exports da API IL2CPP --------------------------------------------------
 const Il2CppImage* il2cpp_get_corlib() { return g_initialized ? &g_corlib : nullptr; }
@@ -398,6 +643,24 @@ Il2CppObject* il2cpp_runtime_invoke(const MethodInfo* m, void* obj, void** param
         MockPlayerHeal(static_cast<Il2CppObject*>(obj), *static_cast<int32_t*>(params[0]), m);
         return nullptr;
     }
+    // Como o invoker real: chama o endereço (com hook) e captura a exceção gerenciada.
+    try {
+        if (m == &g_mInternalSavePlayerFile) {
+            g_savePlayerEntry(static_cast<Il2CppObject*>(params[0]), m);
+            return nullptr;
+        }
+        if (m == &g_mInternalSaveWorld) {
+            g_saveWorldEntry(*static_cast<bool*>(params[0]), *static_cast<bool*>(params[1]), m);
+            return nullptr;
+        }
+    } catch (const MockManagedException& e) {
+        *exc = e.exc;
+        return nullptr;
+    }
+    if (m == &g_mGetMouseItem) return g_held[0];
+    if (m == &g_mGetGuideItem) return g_held[2];
+    if (m == &g_mGetReforgeItem) return g_held[3];
+    if (m == &g_mCreativeGetItem && obj == g_creativeMenu && *static_cast<int32_t*>(params[0]) == 0) return g_held[1];
     std::abort();
 }
 void* il2cpp_object_unbox(Il2CppObject* o) { return o + 1; }
@@ -405,6 +668,7 @@ uint32_t il2cpp_array_length(Il2CppArray* a) { return static_cast<uint32_t>(a->m
 Il2CppThread* il2cpp_thread_attach(Il2CppDomain*) { return t_current = &g_thread; }
 Il2CppThread* il2cpp_thread_current() { return t_current; }
 void il2cpp_thread_detach(Il2CppThread*) { t_current = nullptr; }
+void il2cpp_raise_exception(Il2CppException* exc) { throw MockManagedException{exc}; }
 void il2cpp_format_exception(const Il2CppException*, char* msg, int size) {
     std::strncpy(msg, "mock exception", size);
 }

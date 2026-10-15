@@ -94,6 +94,88 @@ privado do mod, fica guardado no runtime e o jogo não toca. Veja `mods/example_
 Ainda falta: nome exibido, barra e música de boss (`boss`), textura própria, sincronizar a tabela de
 slots e o `local[]` em multiplayer, e confirmar no jogo que `NewNPC` aceita `source` nulo.
 
+## Itens de mod no save
+
+O jogo grava o ID numérico do item (`netID`) no arquivo. Um ID de mod (8192+) muda quando o
+conjunto de mods muda e, gravado no arquivo, o estraga. Por isso a regra é: **nenhum ID de mod
+chega ao arquivo do jogo.**
+
+| quando | o que o runtime faz (`ItemPersistence`) |
+|---|---|
+| antes do save | todo item fora da faixa original sai do slot (vira ar) e é anotado: chave `mod_id:nome`, pilha, prefixo, favorito e posição |
+| depois do save | os itens voltam para o lugar e a lista vai para o arquivo paralelo, `<arquivo do jogo>.tlmod.json` |
+| depois do load | o arquivo paralelo é lido, cada chave vira o ID atual e o item volta para o slot |
+
+- **Mod removido.** A chave não resolve: o item fica no arquivo paralelo como órfão
+  (`"orphan": "missing_mod"`) e é regravado a cada save. Com o mod de volta, o item volta.
+- **Slot ocupado.** Se o slot estiver ocupado no load (o personagem foi usado sem o mod) ou no fim
+  do save (o save roda no ThreadPool e o jogo segue rodando), o item vai para um slot livre
+  equivalente: o mesmo banco ou baú, depois o inventário principal (0..49). Sem lugar, fica guardado
+  como órfão (`"no_space"`). Nada é sobrescrito nem descartado.
+- **Save que falha.** Os itens voltam do mesmo jeito e o arquivo paralelo não muda.
+- **Arquivo salvo sem ter sido carregado com o TLMod** (o jogo leu o mundo antes de os mods
+  subirem): o que estava no arquivo paralelo continua lá (`"not_loaded"`).
+- **Arquivo paralelo ilegível.** É movido para `.tlmod.json.invalid-<data>` e nunca é sobrescrito sem
+  cópia.
+- **Baús** são identificados pela posição (x, y): o `LoadChests` do jogo renumera `Main.chest`.
+- **Saves na nuvem** guardam o arquivo paralelo na pasta do TLMod (`cloud_saves/player|world/`).
+- **ID fora da faixa original sem dono** (nenhum mod registrou): também sai do arquivo do jogo,
+  volta para a memória e não vai para o arquivo paralelo (aviso no log).
+
+```json
+{"tlmod_items": 1, "kind": "player", "items": [
+  {"key": "acme.gems:ruby", "container": "inventory", "slot": 3, "stack": 5, "prefix": 7, "favorited": true},
+  {"key": "acme.gems:topaz", "container": "loadout_armor", "loadout": 1, "slot": 0, "stack": 1, "prefix": 0},
+  {"key": "acme.gems:ruby", "container": "chest", "x": 300, "y": 50, "slot": 39, "stack": 20, "prefix": 0,
+   "orphan": "missing_mod"}
+]}
+```
+
+Contêineres: `inventory` (0..57), `armor`, `dye`, `misc_equips`, `misc_dyes`, `piggy_bank`, `safe`,
+`defenders_forge`, `void_vault`, `loadout_armor`, `loadout_dye`, `temporary` (0 mouse, 1 sacrifício
+da Jornada, 2 Guia, 3 Reforja) e `chest`. Em `temporary` vale o que o jogo grava: no save,
+`Main.mouseItem` etc.; no load, `Player._temporaryItemSlots`. Como no jogo, um item que está só em
+`_temporaryItemSlots` (personagem carregado e salvo pelo menu antes de entrar num mundo) não volta
+ao arquivo. Trocar o prefixo do projeto (`tools/rename_prefix.py`) muda
+o sufixo do arquivo paralelo e os ids dos mods, ou seja, as chaves.
+
+### Como o jogo salva (dump desta build)
+
+O formato é o do PC 1.4.4. RVAs em `il2cpp_bridge/include/terraria_offsets.h`.
+
+| método | RVA | papel |
+|---|---|---|
+| `Player.SavePlayer(PlayerFileData, bool, bool)` | `0x1043A9C` | chamado por `WorldGen.saveToonWhilePlayingCallBack`, `SaveAndQuitCallBack` (ThreadPool), `PlayerFileData.CreateAndSave`/`Rename`, `Netplay.InnerClientLoop` |
+| `Player.InternalSavePlayerFile(PlayerFileData)` | `0x1044040` | **hook antes/depois**. Cifra com Rijndael e grava o `.plr` |
+| `Player.LoadPlayer(string, bool)` | `0x1049FA8` | **hook depois**. Chamado por `Player.GetFileData` (lista do menu) |
+| `WorldFile.SaveWorld(bool, bool, WorldSaveContext)` | `0x14F15E8` | único chamador de `InternalSaveWorld` |
+| `WorldFile.InternalSaveWorld(bool, bool)` | `0x14F1AC8` | **hook antes/depois**. `SaveWorld_Version2` → `SaveChests` (`0x14F83CC`) |
+| `WorldFile.LoadWorld(bool)` | `0x14EC048` | **hook depois**. `LoadWorld_Version2` → `LoadChests` (`0x14FD70C`) |
+
+| onde | formato do tipo do item |
+|---|---|
+| `.plr`: `armor`, `dye`, `miscEquips`, `miscDyes` | `netID` int32 + `prefix` byte |
+| `.plr`: `inventory[0..57]` | `netID` int32, `stack` int32, `prefix` byte, `favorited` bool |
+| `.plr`: `bank`, `bank2`, `bank3` (40) / `bank4` (40) | `netID` int32, `stack` int32, `prefix` byte (+ `favorited` no `bank4`) |
+| `.plr`: temporários e loadouts | `Item.Serialize` (`0xBB8988`): `netID` int32, `stack` int32, `prefix` byte |
+| `.wld`: `SaveChests` | por baú `x`, `y` int32 e nome; por item `stack` int16 e, se > 0, `netID` int32 + `prefix` byte |
+
+Um ID de mod gravado ali quebra o arquivo: na leitura do `.plr`, `armor`/`dye`/`miscEquips`/`miscDyes`
+chamam `Item.netDefaults(id)` sem conferir a faixa (`IndexOutOfRangeException`, o personagem não
+carrega); inventário e bancos conferem `id >= 5456` e trocam por ar (o item some). No `.wld`,
+`SaveChests` indexa `ItemID.Sets.ItemsThatShouldNotBeInInventory[type]` e estoura antes de gravar.
+
+### O que ainda fica de fora
+
+- **Tile entities do mundo**: molduras (`TEItemFrame`), suportes de arma (`TEWeaponsRack`), pratos
+  (`TEFoodPlatter`), manequins (`TEDisplayDoll`) e cabideiros (`TEHatRack`) gravam o item em
+  `WriteExtraData` (`0x7B3E20`, `0x7BAF28`, `0x7AF108`, `0x7AB6A0`, `0x7B0AA8`). Um item de mod
+  colocado num deles ainda chegaria ao `.wld`.
+- **Pesquisa da Jornada** (`CreativeUnlocksTracker.Save`, chamado pelo save do personagem) e a
+  sincronização de saves do celular (`SaveSynchronisationOperation`).
+- **Itens de mod de verdade no jogo**: ainda não há hook em `Item.SetDefaults`. O item reinserido
+  recebe só os campos que o save grava (`type`, `netID`, `stack`, `prefix`, `favorited`).
+
 ## Build
 
 ```sh
@@ -116,7 +198,6 @@ No Android, o runtime procura mods em `$TLMOD_MODS_DIR`; se não houver, em
 
 - **Fazer o jogo usar o conteúdo registrado.** Hoje o registro atribui IDs e guarda as
   definições. Falta hookar `Item.SetDefaults`, carregar texturas e tratar nome e tooltip.
-- **Persistência.** Mundos e players precisam salvar itens de mod pela chave, e não pelo ID.
 - **Multiplayer.** O servidor precisa enviar a tabela chave → ID aos clientes.
 - **Outros tipos.** NPC, projectile, tile, wall e buff já têm faixa de ID, mas ainda não têm
   `register_*` na API.

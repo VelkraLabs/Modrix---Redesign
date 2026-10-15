@@ -15,6 +15,7 @@ add_library(tlmod_runtime STATIC
   src/semver.cpp
   src/manifest.cpp
   src/content_registry.cpp
+  src/item_persistence.cpp
   src/dynlib.cpp
   src/mod_loader.cpp)
 target_include_directories(tlmod_runtime PUBLIC include PRIVATE src)
@@ -128,6 +129,15 @@ if(NOT ANDROID)
   add_executable(overlay_snapshot overlay/tools/overlay_snapshot.cpp)
   target_compile_options(overlay_snapshot PRIVATE ${TLMOD_WARNINGS})
   target_link_libraries(overlay_snapshot PRIVATE tlmod_overlay)
+
+  # Ponta a ponta: runtime + BridgeGameAdapter + ponte contra a libil2cpp.so falsa.
+  if(TLMOD_WITH_BRIDGE)
+    add_executable(bridge_save_test tests/bridge_save_test.cpp)
+    target_compile_options(bridge_save_test PRIVATE ${TLMOD_WARNINGS})
+    target_link_libraries(bridge_save_test PRIVATE tlmod_bridge_adapter ${CMAKE_DL_LIBS} Threads::Threads)
+    add_dependencies(bridge_save_test il2cpp_mock)
+    add_test(NAME bridge_save_test COMMAND bridge_save_test $<TARGET_FILE:il2cpp_mock>)
+  endif()
 
   # tlmod_api.h precisa compilar como C99 puro, sem extensões.
   add_library(c_abi_check OBJECT tests/c_abi_check.c)

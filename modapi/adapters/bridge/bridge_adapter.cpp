@@ -1,9 +1,14 @@
 #include "bridge_adapter.h"
 
+#include <algorithm>
 #include <atomic>
+#include <exception>
+#include <map>
+#include <utility>
 
 #include "bridge.h"            // il2cpp_bridge/include
 #include "terraria_offsets.h"  // kMaxNPCs
+#include "tlmod/runtime/log.h"
 
 namespace tlmod::rt {
 namespace {
@@ -124,9 +129,167 @@ void OnFrame() {
     g_snapshot.store(snap, std::memory_order_release);
 }
 
+// --- Save/load -----------------------------------------------------------------------
+std::atomic<GameAdapter::PersistenceHooks*> g_persistence{nullptr};
+
+// Contêiner do runtime -> da ponte. Temporary: no save, o que o jogo grava
+// (Main.mouseItem etc., HELD); no load, o que ele leu (_temporaryItemSlots).
+TLModItemContainer ToBridge(ItemContainer c, bool saving) {
+    switch (c) {
+        case ItemContainer::Inventory: return TLMOD_ITEMS_INVENTORY;
+        case ItemContainer::Armor: return TLMOD_ITEMS_ARMOR;
+        case ItemContainer::Dye: return TLMOD_ITEMS_DYE;
+        case ItemContainer::MiscEquips: return TLMOD_ITEMS_MISC_EQUIPS;
+        case ItemContainer::MiscDyes: return TLMOD_ITEMS_MISC_DYES;
+        case ItemContainer::PiggyBank: return TLMOD_ITEMS_BANK;
+        case ItemContainer::Safe: return TLMOD_ITEMS_BANK2;
+        case ItemContainer::DefendersForge: return TLMOD_ITEMS_BANK3;
+        case ItemContainer::VoidVault: return TLMOD_ITEMS_BANK4;
+        case ItemContainer::LoadoutArmor: return TLMOD_ITEMS_LOADOUT_ARMOR;
+        case ItemContainer::LoadoutDye: return TLMOD_ITEMS_LOADOUT_DYE;
+        case ItemContainer::Temporary: return saving ? TLMOD_ITEMS_HELD : TLMOD_ITEMS_TEMPORARY;
+        case ItemContainer::Chest: return TLMOD_ITEMS_CHEST;
+    }
+    return TLMOD_ITEMS_CONTAINER_COUNT;
+}
+
+constexpr ItemContainer kPlayerContainers[] = {
+    ItemContainer::Inventory,    ItemContainer::Armor,     ItemContainer::Dye,          ItemContainer::MiscEquips,
+    ItemContainer::MiscDyes,     ItemContainer::PiggyBank, ItemContainer::Safe,         ItemContainer::DefendersForge,
+    ItemContainer::VoidVault,    ItemContainer::LoadoutArmor, ItemContainer::LoadoutDye, ItemContainer::Temporary,
+};
+
+// Slots de um Player (player != nulo) ou dos baús do mundo (Main.chest).
+class BridgeItemSlots final : public ItemSlots {
+public:
+    BridgeItemSlots(Il2CppObject* player, bool saving) : player_(player), saving_(saving) {}
+
+    void ForEach(const std::function<void(const ItemSlot&, const ItemStack&)>& fn) const override {
+        auto visit = [&](const ItemSlot& base, TLModItemContainer bc, int32_t group) {
+            ItemSlot slot = base;
+            int32_t n = TLMod_ItemSlotCount(player_, bc, group);
+            for (slot.index = 0; slot.index < n; ++slot.index) {
+                std::optional<ItemStack> it = ReadItem(TLMod_ItemSlot(player_, bc, group, slot.index));
+                if (it && !it->IsAir()) fn(slot, *it);
+            }
+        };
+        if (!player_) {
+            for (int32_t i = 0, n = TLMod_ChestCount(); i < n; ++i) {
+                ItemSlot slot;
+                slot.container = ItemContainer::Chest;
+                if (TLMod_ChestPosition(i, &slot.chestX, &slot.chestY)) visit(slot, TLMOD_ITEMS_CHEST, i);
+            }
+            return;
+        }
+        for (ItemContainer c : kPlayerContainers) {
+            ItemSlot slot;
+            slot.container = c;
+            bool loadout = c == ItemContainer::LoadoutArmor || c == ItemContainer::LoadoutDye;
+            for (slot.loadout = 0; slot.loadout < (loadout ? 16 : 1); ++slot.loadout) {
+                if (TLMod_ItemSlotCount(player_, ToBridge(c, saving_), slot.loadout) < 0) break;
+                visit(slot, ToBridge(c, saving_), slot.loadout);
+            }
+        }
+    }
+    std::optional<ItemStack> Read(const ItemSlot& slot) const override { return ReadItem(Find(slot)); }
+    bool Write(const ItemSlot& slot, const ItemStack& v) override {
+        Il2CppObject* item = Find(slot);
+        // Só os campos que o save grava; netID = type (itens de mod não têm variantes).
+        TLModItemFields f{};
+        if (!v.IsAir()) f = TLModItemFields{v.type, v.type, v.stack, v.prefix, v.favorited};
+        return item && TLMod_WriteItem(item, &f);
+    }
+    int32_t Count(const ItemSlot& slot) const override {
+        int32_t group = 0;
+        if (!Locate(slot, group)) return 0;
+        return std::max(0, TLMod_ItemSlotCount(player_, ToBridge(slot.container, saving_), group));
+    }
+
+private:
+    static std::optional<ItemStack> ReadItem(Il2CppObject* item) {
+        TLModItemFields f{};
+        if (!TLMod_ReadItem(item, &f)) return std::nullopt;
+        // O que vai para o arquivo é netID; type, para o resto do jogo. Um
+        // item de mod tem os dois iguais; fica com o maior para nunca deixar
+        // passar um ID de mod (variantes antigas têm netID < 0 < type).
+        return ItemStack{std::max(f.type, f.netID), f.stack, f.prefix, f.favorited};
+    }
+    // Contêiner + grupo da ponte para o slot (baú: índice atual pela posição).
+    bool Locate(const ItemSlot& slot, int32_t& group) const {
+        if (slot.container == ItemContainer::Chest) {
+            if (player_) return false;
+            group = ChestIndex(slot.chestX, slot.chestY);
+            return group >= 0;
+        }
+        if (!player_) return false;
+        group = slot.loadout;
+        return true;
+    }
+    Il2CppObject* Find(const ItemSlot& slot) const {
+        int32_t group = 0;
+        if (!Locate(slot, group)) return nullptr;
+        return TLMod_ItemSlot(player_, ToBridge(slot.container, saving_), group, slot.index);
+    }
+    // Main.chest pode mudar durante o save (o jogo segue rodando): confere a
+    // posição a cada uso e refaz o índice se não bater.
+    int32_t ChestIndex(int32_t x, int32_t y) const {
+        auto it = chestIndex_.find({x, y});
+        int32_t cx = 0, cy = 0;
+        if (it != chestIndex_.end() && TLMod_ChestPosition(it->second, &cx, &cy) && cx == x && cy == y)
+            return it->second;
+        chestIndex_.clear();
+        for (int32_t i = 0, n = TLMod_ChestCount(); i < n; ++i)
+            if (TLMod_ChestPosition(i, &cx, &cy)) chestIndex_.emplace(std::make_pair(cx, cy), i);
+        it = chestIndex_.find({x, y});
+        return it == chestIndex_.end() ? -1 : it->second;
+    }
+
+    Il2CppObject* player_;
+    bool saving_;
+    mutable std::map<std::pair<int32_t, int32_t>, int32_t> chestIndex_;
+};
+
+// Roda na thread que salva/carrega, dentro de um hook do jogo: nenhuma
+// exceção pode sair daqui.
+void OnBridgeSave(const TLModSaveEvent* ev, TLModSavePhase phase) {
+    GameAdapter::PersistenceHooks* h = g_persistence.load(std::memory_order_acquire);
+    if (!h || !ev || !ev->path) return;
+    try {
+        SaveFile file;
+        file.kind = ev->kind == TLMOD_SAVE_PLAYER ? SaveFile::Kind::Player : SaveFile::Kind::World;
+        file.path = ev->path;
+        file.cloud = ev->cloud;
+        Il2CppObject* player = file.kind == SaveFile::Kind::Player ? ev->player : nullptr;
+        if (file.kind == SaveFile::Kind::Player && !player) return;
+        BridgeItemSlots slots(player, phase != TLMOD_AFTER_LOAD);
+        switch (phase) {
+            case TLMOD_BEFORE_SAVE:
+                if (h->beforeSave) h->beforeSave(file, slots);
+                break;
+            case TLMOD_AFTER_SAVE:
+                if (h->afterSave) h->afterSave(file, slots, ev->ok);
+                break;
+            case TLMOD_AFTER_LOAD:
+                if (ev->ok && h->afterLoad) h->afterLoad(file, slots);
+                break;
+        }
+    } catch (const std::exception& e) {
+        Log(TLMOD_LOG_ERROR, "saves", std::string("exceção no gancho de save/load: ") + e.what());
+    } catch (...) {
+        Log(TLMOD_LOG_ERROR, "saves", "exceção desconhecida no gancho de save/load");
+    }
+}
+
 }  // namespace
 
 BridgeGameAdapter::BridgeGameAdapter() { TLMod_SetFrameCallback(&OnFrame); }
+
+void BridgeGameAdapter::SetPersistenceHooks(PersistenceHooks hooks) {
+    bool any = hooks.beforeSave || hooks.afterSave || hooks.afterLoad;
+    // Os antigos não são liberados: um save pode estar no meio, em outra thread.
+    g_persistence.store(any ? new PersistenceHooks(std::move(hooks)) : nullptr, std::memory_order_release);
+    TLMod_SetSaveCallback(any ? &OnBridgeSave : nullptr);
+}
 
 std::optional<bool> BridgeGameAdapter::InWorld() const {
     uint64_t s = g_snapshot.load(std::memory_order_acquire);

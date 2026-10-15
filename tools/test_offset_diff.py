@@ -199,10 +199,65 @@ class OffsetDiffTest(unittest.TestCase):
         self.assertEqual(od.c_signature_params(
             "void F (Terraria_NPC_o* __this, int32_t Type, Terraria_NPCSpawnParams_o p, const MethodInfo* method);"), 2)
 
+    def test_save_rules_namespaces_and_overloads(self):
+        # Hooks de save: WorldFile fica em Terraria.IO e SaveWorld tem 2 overloads.
+        header = HEADER.replace("namespace rva {", textwrap.dedent("""\
+            namespace file_data_off {
+            constexpr size_t _path = 0x10;         // string
+            }  // namespace file_data_off
+            namespace item_off {
+            constexpr size_t netID = 0x198;     // int
+            }  // namespace item_off
+            namespace rva {
+            constexpr uintptr_t WorldFile_SaveWorld = 0x14F15E8;"""))
+        self.header.write_text(header, encoding="utf-8")
+        dump = DUMP + textwrap.dedent("""\
+
+            // Namespace: Terraria.IO
+            public abstract class FileData // TypeDefIndex: 6
+            {
+            \t// Fields
+            \tprotected string _path; // 0x10
+            }
+
+            // Namespace: Terraria
+            public class Item // TypeDefIndex: 7
+            {
+            \t// Fields
+            \tpublic int netID; // 0x198
+            }
+
+            // Namespace: Terraria.IO
+            public class WorldFile // TypeDefIndex: 8
+            {
+            \t// Methods
+
+            \t// RVA: 0x14ED6C8 Offset: 0x14ED6C8 VA: 0x14ED6C8
+            \tpublic static void SaveWorld(WorldFile.WorldSaveContext saveContext = 0) { }
+
+            \t// RVA: 0x14F15E8 Offset: 0x14F15E8 VA: 0x14F15E8
+            \tpublic static void SaveWorld(bool useCloudSaving, bool resetTime = False, WorldFile.WorldSaveContext saveContext = 0) { }
+            }
+            """)
+        r = self.run_diff(dump)
+        self.assertEqual(r["Terraria.IO.FileData._path"].status, od.OK)
+        self.assertEqual(r["Terraria.Item.netID"].status, od.OK)
+        self.assertEqual(r["Terraria.IO.WorldFile.SaveWorld"].status, od.WARN)  # falta argc::
+        self.assertIn("argc::WorldFile_SaveWorld", r["Terraria.IO.WorldFile.SaveWorld"].note)
+        self.header.write_text(header.replace("namespace argc {",
+                                              "namespace argc {\nconstexpr int WorldFile_SaveWorld = 3;"),
+                               encoding="utf-8")
+        self.assertEqual(self.run_diff(dump)["Terraria.IO.WorldFile.SaveWorld"].status, od.OK)
+
     def test_real_header_parses(self):
         consts = od.parse_header(od.DEFAULT_HEADER)
         groups = {c.namespace for c in consts}
-        self.assertTrue({"player_off", "npc_off", "rva", "argc"} <= groups)
+        self.assertTrue({"player_off", "npc_off", "rva", "argc", "item_off", "chest_off"} <= groups)
+        # Todo namespace de offsets do header precisa de uma regra no offset_diff.
+        offset_groups = {g for g in groups if g.endswith("_off")}
+        self.assertEqual(offset_groups - set(od.FIELD_GROUPS), set())
+        prefixes = {c.name.partition("_")[0] for c in consts if c.namespace in ("rva", "argc")}
+        self.assertEqual(prefixes - set(od.METHOD_CLASSES), set())
 
 
 if __name__ == "__main__":
