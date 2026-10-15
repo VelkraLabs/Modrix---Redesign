@@ -26,6 +26,7 @@ public:
     bool ReadNpc(int32_t index, TLModNpcState& out) const override;
     bool WriteNpc(int32_t index, const TLModNpcState& in) override;
     int32_t SpawnNpc(int32_t type, float x, float y) override;
+    std::optional<std::pair<float, float>> LocalPlayerCenter() const override;
 
     // Leem a fotografia do último frame: seguros em qualquer thread.
     std::optional<bool> InWorld() const override;

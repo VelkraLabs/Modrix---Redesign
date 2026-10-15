@@ -71,6 +71,10 @@ Il2CppObject* TLMod_GetPlayerByIndex(int32_t index);
 // Entity.whoAmI do player (índice em Main.player); -1 para nulo.
 int32_t TLMod_GetPlayerIndex(Il2CppObject* player);
 
+// Centro do player em pixels do mundo (Entity.position + metade de
+// width/height). false para nulo, inativo ou morto.
+bool TLMod_GetPlayerCenter(Il2CppObject* player, float* x, float* y);
+
 // Espera, sem iniciar nada, até outra thread concluir TLMod_Init.
 bool TLMod_WaitReady(int timeoutMs);
 

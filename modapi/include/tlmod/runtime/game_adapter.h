@@ -4,6 +4,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "tlmod/runtime/content_registry.h"
 #include "tlmod/runtime/item_shell.h"
@@ -124,6 +125,9 @@ public:
     virtual bool WriteNpc(int32_t index, const TLModNpcState& in) = 0;
     // Cria um NPC pelo caminho normal do jogo (passa pelos ganchos). -1 se falhar.
     virtual int32_t SpawnNpc(int32_t type, float x, float y) = 0;
+    // Centro do jogador local em pixels do mundo. nullopt = sem jogador local,
+    // inativo ou morto. Só na thread do jogo.
+    virtual std::optional<std::pair<float, float>> LocalPlayerCenter() const = 0;
 
     // --- Estado do mundo -----------------------------------------------------
     // Precisam ser seguros em QUALQUER thread (a UI consulta fora da thread do

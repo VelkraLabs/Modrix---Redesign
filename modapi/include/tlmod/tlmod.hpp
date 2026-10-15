@@ -143,6 +143,11 @@ public:
         return HasGiveApi() && api_->give_item(ctx_, type, stack);
     }
 
+    // Cria o NPC perto do jogador quando ele estiver num mundo (ver tlmod_api.h).
+    bool SpawnNpcNearPlayer(TLModId type, float dx, float dy) const {
+        return HasSpawnNearApi() && api_->spawn_npc_near_player(ctx_, type, dx, dy);
+    }
+
     bool OnPlayerHurt(TLModPlayerHurtFn fn, void* user = nullptr) const {
         return api_->subscribe_player_hurt(ctx_, fn, user);
     }
@@ -162,6 +167,10 @@ private:
     }
     bool HasGiveApi() const {
         return api_->struct_size >= offsetof(TLModHostApi, give_item) + sizeof(api_->give_item);
+    }
+    bool HasSpawnNearApi() const {
+        return api_->struct_size >=
+               offsetof(TLModHostApi, spawn_npc_near_player) + sizeof(api_->spawn_npc_near_player);
     }
     bool HasNpcApi() const {
         return api_->struct_size >= offsetof(TLModHostApi, spawn_npc) + sizeof(api_->spawn_npc);

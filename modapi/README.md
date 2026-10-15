@@ -95,6 +95,16 @@ O nome exibido (`display_name`) aparece no hover, na barra de vida, no mapa e no
 despertou!"), por hooks em `NPC.TypeName` e `NPC.GetTypeNetName` (ver [Texturas de mod](#texturas-de-mod)).
 O bestiário não tem entrada para NPC de mod: o abate conta para a casca.
 
+**Na API.** `spawn_npc(ctx, tipo, x, y)` cria o NPC na hora, mas só na thread do jogo (dentro de
+`on_ai` ou de um evento). `spawn_npc_near_player(ctx, tipo, dx, dy)` pode ser chamado de qualquer
+thread, inclusive no init: o pedido espera numa fila e o runtime cria o NPC depois de 2 s seguidos
+com um mundo carregado e o jogador vivo, em (centro do jogador + `dx`, `dy`), com `dy < 0` acima.
+
+**Para testar no aparelho:** crie um arquivo vazio `spawn_on_start` na pasta do mod do boss
+(`.../tlmod/mods/example_boss/spawn_on_start`). Ao entrar num mundo, 2 s depois, o Titã de Brasa
+aparece 30 blocos à direita e 15 acima do jogador, com a folha `textures/ember_titan.png`, o nome
+do mod e 12000 de vida (uma vez por abertura do jogo).
+
 Ainda falta: barra e música de boss (`boss`), sincronizar a tabela de slots e o `local[]` em
 multiplayer, e confirmar no jogo que `NewNPC` aceita `source` nulo. Textura própria:
 ver [Texturas de mod](#texturas-de-mod).

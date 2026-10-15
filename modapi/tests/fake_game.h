@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "tlmod/runtime/game_adapter.h"
@@ -62,6 +63,8 @@ public:
         return true;
     }
     int32_t SpawnNpc(int32_t type, float x, float y) override { return NewNpc(type, x, y); }
+    std::optional<std::pair<float, float>> playerCenter = std::make_pair(800.0f, 400.0f);  // nullopt = morto
+    std::optional<std::pair<float, float>> LocalPlayerCenter() const override { return playerCenter; }
 
     // NPC.SetDefaults: o jogo de verdade indexa arrays por tipo.
     void SetDefaults(int32_t i, int32_t type) {

@@ -386,6 +386,39 @@ static void TestNpcs(const fs::path& modsDir) {
 
     // Em nenhum momento um ID de mod chegou ao SetDefaults original.
     CHECK(!game.vanillaSetDefaultsOverflow);
+
+    // O teste de aparelho do example_boss: com o arquivo spawn_on_start, o
+    // boss nasce perto do jogador depois de 120 frames seguidos num mundo com
+    // ele vivo, uma vez só.
+    {
+        std::ofstream(tmp / "example_boss" / "spawn_on_start").put('\n');
+        FakeGame g2;
+        ModLoader l2(&g2);
+        l2.DiscoverDirectory(tmp);
+        CHECK(l2.LoadAll() == 1);
+        const TLModId boss2 = l2.Registry().Find(TLMOD_CONTENT_NPC, bossMod + ":ember_titan").value_or(-1);
+        auto bossSlots = [&g2] {
+            int n = 0;
+            for (const auto& npc : g2.npcs) n += npc.active ? 1 : 0;
+            return n;
+        };
+        g2.inWorld = false;
+        for (int f = 0; f < 200; ++f) g2.Frame();  // menu
+        CHECK(bossSlots() == 0);
+        g2.inWorld = true;
+        for (int f = 0; f < 100; ++f) g2.Frame();
+        g2.playerCenter.reset();  // morreu: a contagem recomeça
+        g2.Frame();
+        g2.playerCenter = std::make_pair(800.0f, 400.0f);
+        for (int f = 0; f < 119; ++f) g2.Frame();
+        CHECK(bossSlots() == 0);
+        g2.Frame();
+        CHECK(bossSlots() == 1 && l2.NpcInSlot(0) == boss2 && g2.npcs[0].s.type == 4);
+        CHECK(g2.npcs[0].s.x == 1280.0f && g2.npcs[0].s.y == 160.0f);
+        CHECK(g2.npcs[0].s.life_max == 12000);
+        for (int f = 0; f < 300; ++f) g2.Frame();
+        CHECK(bossSlots() == 1 && !g2.vanillaSetDefaultsOverflow);  // uma vez só
+    }
     fs::remove_all(tmp);
 }
 

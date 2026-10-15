@@ -91,6 +91,9 @@ Il2CppClass g_player{"Terraria", "Player", {}, {}};
 Il2CppClass g_main{"Terraria", "Main", {}, {}};
 FieldInfo g_fStatLife{"statLife", kStatLife, nullptr};
 FieldInfo g_fWhoAmI{"whoAmI", 0x10, nullptr};  // de Entity; o IL2CPP real busca nas classes-base
+FieldInfo g_fPlayerEntity[] = {{"active", 0x14, nullptr}, {"position", 0x20, nullptr},
+                               {"width", 0x48, nullptr},  {"height", 0x4C, nullptr},
+                               {"dead", 0x534, nullptr}};
 
 alignas(16) uint8_t g_localPlayer[kPlayerSize];
 alignas(16) uint8_t g_playersArray[sizeof(Il2CppArray) + 255 * sizeof(void*)];
@@ -851,6 +854,7 @@ __attribute__((visibility("default"))) void mock_il2cpp_init() {
         reinterpret_cast<void**>(g_mainNpc + 1)[i] = g_npcs[i];
     }
     g_player.fields = {&g_fStatLife, &g_fWhoAmI};
+    for (FieldInfo& f : g_fPlayerEntity) g_player.fields.push_back(&f);
     g_player.methods = {&g_mHurt, &g_mHeal};
     g_main.fields = {&g_fMainPlayer, &g_fMainNpc};
     g_main.methods = {&g_mGetMyPlayer, &g_mDoUpdate};

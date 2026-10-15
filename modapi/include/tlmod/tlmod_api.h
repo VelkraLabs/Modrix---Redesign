@@ -271,6 +271,15 @@ typedef struct TLModHostApi {
      * empilhando com o que ele já tem e depois nos slots livres do inventário.
      * false = tipo desconhecido ou stack < 1. O resultado da entrega vai para o log. */
     bool (*give_item)(TLModContext* ctx, TLModId type, int32_t stack);
+
+    /* Cria o NPC `type` (original ou de mod) perto do jogador local. Pode ser
+     * chamado de qualquer thread, inclusive no init: o pedido espera numa fila
+     * e é atendido na thread do jogo depois de 2 s seguidos com um mundo
+     * carregado e o jogador vivo (para não nascer durante a entrada no mundo).
+     * (dx, dy) = deslocamento em pixels a partir do centro do jogador; dy < 0
+     * é acima. O ponto vira o centro-base do NPC, como em NPC.NewNPC.
+     * false = tipo desconhecido. O resultado do spawn vai para o log. */
+    bool (*spawn_npc_near_player)(TLModContext* ctx, TLModId type, float dx, float dy);
 } TLModHostApi;
 
 /* Assinatura do ponto de entrada. Retorne 0 em sucesso; qualquer outro valor

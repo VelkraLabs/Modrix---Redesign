@@ -28,6 +28,12 @@ struct Resolved {
     size_t statLifeOffset = terraria::player_off::statLife;
     // Entity.whoAmI (índice do player em Main.player). Dump: 0x10.
     size_t whoAmIOffset = terraria::player_off::whoAmI;
+    // Entity.active/position/width/height e Player.dead (centro do jogador).
+    size_t activeOffset = terraria::player_off::active;
+    size_t positionOffset = terraria::player_off::position;
+    size_t widthOffset = terraria::player_off::width;
+    size_t heightOffset = terraria::player_off::height;
+    size_t deadOffset = terraria::player_off::dead;
 
     FieldInfo* mainPlayerField = nullptr;       // static Player[] Main.player
     const MethodInfo* mainGetMyPlayer = nullptr;  // static int Main.get_myPlayer()
@@ -95,6 +101,11 @@ bool ResolveTerraria() {
     g.statLifeOffset = bridge::FieldOffset(g.playerClass, "statLife", terraria::player_off::statLife);
     // Entity.whoAmI: a busca inclui as classes-base, então funciona a partir de Player.
     g.whoAmIOffset = bridge::FieldOffset(g.playerClass, "whoAmI", terraria::player_off::whoAmI);
+    g.activeOffset = bridge::FieldOffset(g.playerClass, "active", terraria::player_off::active);
+    g.positionOffset = bridge::FieldOffset(g.playerClass, "position", terraria::player_off::position);
+    g.widthOffset = bridge::FieldOffset(g.playerClass, "width", terraria::player_off::width);
+    g.heightOffset = bridge::FieldOffset(g.playerClass, "height", terraria::player_off::height);
+    g.deadOffset = bridge::FieldOffset(g.playerClass, "dead", terraria::player_off::dead);
 
     // --- Main.player (static Player[]) e Main.get_myPlayer -----------------
     // Main.player fica em static_fields+0x678 nesta build; lido via
@@ -274,6 +285,14 @@ Il2CppObject* TLMod_GetPlayerByIndex(int32_t index) {
 int32_t TLMod_GetPlayerIndex(Il2CppObject* player) {
     if (!player) return -1;
     return FieldAt<int32_t>(player, g.whoAmIOffset);
+}
+
+bool TLMod_GetPlayerCenter(Il2CppObject* player, float* x, float* y) {
+    if (!g_ready.load() || !player || !x || !y) return false;
+    if (!FieldAt<bool>(player, g.activeOffset) || FieldAt<bool>(player, g.deadOffset)) return false;
+    *x = FieldAt<float>(player, g.positionOffset) + FieldAt<int32_t>(player, g.widthOffset) * 0.5f;
+    *y = FieldAt<float>(player, g.positionOffset + 4) + FieldAt<int32_t>(player, g.heightOffset) * 0.5f;
+    return true;
 }
 
 bool TLMod_WaitReady(int timeoutMs) {

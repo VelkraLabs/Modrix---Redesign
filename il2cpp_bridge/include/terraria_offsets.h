@@ -38,6 +38,8 @@ namespace player_off {
 constexpr size_t whoAmI = 0x10;        // int   (herdado de Entity)
 constexpr size_t active = 0x14;        // bool  (herdado de Entity)
 constexpr size_t position = 0x20;      // Vector2 (herdado de Entity)
+constexpr size_t width = 0x48;         // int   (herdado de Entity)
+constexpr size_t height = 0x4C;        // int   (herdado de Entity)
 constexpr size_t immune = 0x3A8;       // bool
 constexpr size_t immuneTime = 0x3AC;   // int
 constexpr size_t dead = 0x534;         // bool

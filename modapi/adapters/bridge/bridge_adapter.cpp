@@ -563,6 +563,12 @@ TLModPlayer BridgeGameAdapter::LocalPlayer() const {
     return TLMod_GetPlayerIndex(TLMod_GetLocalPlayer());
 }
 
+std::optional<std::pair<float, float>> BridgeGameAdapter::LocalPlayerCenter() const {
+    float x = 0, y = 0;
+    if (!TLMod_GetPlayerCenter(TLMod_GetLocalPlayer(), &x, &y)) return std::nullopt;
+    return std::make_pair(x, y);
+}
+
 int32_t BridgeGameAdapter::PlayerLife(TLModPlayer player) const {
     Il2CppObject* p = TLMod_GetPlayerByIndex(player);
     return p ? TLMod_GetStatLife(p) : -1;

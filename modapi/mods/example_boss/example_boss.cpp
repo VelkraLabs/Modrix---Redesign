@@ -14,8 +14,13 @@
 //   Main.DrawNPCDirect (0xBFC154): o runtime troca a textura da casca pela
 //     folha textures/ember_titan.png (4 quadros de 64x64 na vertical) só
 //     durante o desenho deste NPC
+//
+// Para testar no aparelho: crie um arquivo vazio chamado `spawn_on_start` na
+// pasta deste mod. Ao entrar num mundo, o Titã de Brasa aparece perto do
+// jogador, 2 s depois de o mundo carregar (uma vez por abertura do jogo).
 #include <tlmod/tlmod.hpp>
 
+#include <cstdio>
 #include <string>
 
 namespace {
@@ -77,6 +82,14 @@ private:
 
 EmberTitan g_emberTitan;  // vive enquanto o jogo roda
 
+bool FileExists(const std::string& path) {
+    if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
+        std::fclose(f);
+        return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 static bool OnLoad(tlmod::Host& host) {
@@ -95,6 +108,13 @@ static bool OnLoad(tlmod::Host& host) {
     TLModId id = host.RegisterNpc(def, &g_emberTitan);
     if (id == TLMOD_INVALID_ID) return false;
     host.Info("Titã de Brasa registrado com ID " + std::to_string(id));
+    if (FileExists(std::string(host.ModDir()) + "/spawn_on_start")) {
+        // 30 blocos à direita e 15 acima do centro do jogador (16 px por bloco).
+        if (host.SpawnNpcNearPlayer(id, 480.0f, -240.0f))
+            host.Info("spawn_on_start: Titã de Brasa ao entrar num mundo");
+        else
+            host.Warn("spawn_on_start: este runtime não tem spawn_npc_near_player");
+    }
 
     // TODO: invocação. Um item de mod (host.RegisterItem) cujo uso chame
     // host.SpawnNpc(id, x, y) perto do player.

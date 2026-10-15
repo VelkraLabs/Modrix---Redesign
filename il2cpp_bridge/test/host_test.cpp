@@ -5,12 +5,15 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "bridge.h"
+#include "terraria_offsets.h"
 
 #define CHECK(cond)                                                     \
     do {                                                                \
@@ -623,6 +626,24 @@ int main(int argc, char** argv) {
     CHECK(TLMod_GetPlayerByIndex(1) == nullptr);
     CHECK(TLMod_GetPlayerByIndex(255) == nullptr);
     CHECK(TLMod_WaitReady(0));
+
+    // Centro do jogador (spawn_npc_near_player): position + metade do tamanho.
+    {
+        auto* p = reinterpret_cast<uint8_t*>(player);
+        float pos[2] = {1000.0f, 2000.0f};
+        int32_t size[2] = {20, 42};
+        std::memcpy(p + terraria::player_off::position, pos, sizeof(pos));
+        std::memcpy(p + terraria::player_off::width, size, sizeof(size));
+        p[terraria::player_off::active] = 0;
+        float cx = 0, cy = 0;
+        CHECK(!TLMod_GetPlayerCenter(player, &cx, &cy));  // inativo
+        p[terraria::player_off::active] = 1;
+        CHECK(TLMod_GetPlayerCenter(player, &cx, &cy) && cx == 1010.0f && cy == 2021.0f);
+        p[terraria::player_off::dead] = 1;
+        CHECK(!TLMod_GetPlayerCenter(player, &cx, &cy));  // morto
+        p[terraria::player_off::dead] = 0;
+        CHECK(!TLMod_GetPlayerCenter(nullptr, &cx, &cy));
+    }
 
     CHECK(TLMod_Heal(player, 50));
     CHECK(TLMod_GetStatLife(player) == 450);

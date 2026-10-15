@@ -111,6 +111,17 @@ struct ModLoader::Impl {
     std::mutex giveMutex;
     std::vector<Give> pendingGives;
 
+    // spawn_npc_near_player: mesma fila, atendida depois de kNearSpawnDelay
+    // frames seguidos num mundo com o jogador vivo.
+    struct NearSpawn {
+        std::string modId;
+        TLModId type;
+        float dx, dy;
+    };
+    static constexpr int kNearSpawnDelay = 120;  // 2 s a 60 frames/s
+    std::vector<NearSpawn> pendingNearSpawns;    // protegido por giveMutex
+    int readyFrames = 0;                         // só a thread do jogo
+
     // ---- Texturas de mod -------------------------------------------------------
     // PNGs decodificados no LoadAll (qualquer thread) e enviados ao motor no
     // frame handler (thread principal do Unity), poucos por frame. Os mapas
@@ -217,6 +228,35 @@ struct ModLoader::Impl {
     void OnFrame() {
         ProcessShellChecks();
         ProcessTextures();
+        ProcessNearSpawns();
+        ProcessGives();
+    }
+
+    void ProcessNearSpawns() {
+        std::optional<std::pair<float, float>> center;
+        if (game->InWorld() == std::optional<bool>(true)) center = game->LocalPlayerCenter();
+        readyFrames = center ? readyFrames + 1 : 0;
+        std::vector<NearSpawn> todo;
+        {
+            std::lock_guard<std::mutex> lock(giveMutex);
+            if (pendingNearSpawns.empty() || readyFrames < kNearSpawnDelay) return;
+            todo.swap(pendingNearSpawns);
+        }
+        for (const NearSpawn& n : todo) {
+            const float x = center->first + n.dx, y = center->second + n.dy;
+            int32_t index = game->SpawnNpc(n.type, x, y);
+            const ContentEntry* e = self->registry_.Get(TLMOD_CONTENT_NPC, n.type);
+            std::string what = e ? e->key : "NPC " + std::to_string(n.type);
+            if (index >= 0)
+                Log(TLMOD_LOG_INFO, n.modId,
+                    "spawn_npc_near_player: " + what + " no slot " + std::to_string(index) + " em (" +
+                        std::to_string(static_cast<int>(x)) + ", " + std::to_string(static_cast<int>(y)) + ")");
+            else
+                Log(TLMOD_LOG_WARN, n.modId, "spawn_npc_near_player: " + what + " não foi criado (sem slot livre?)");
+        }
+    }
+
+    void ProcessGives() {
         std::vector<Give> todo;
         {
             std::lock_guard<std::mutex> lock(giveMutex);
@@ -523,6 +563,20 @@ bool Api_GiveItem(TLModContext* ctx, TLModId type, int32_t stack) {
     return true;
 }
 
+bool Api_SpawnNpcNearPlayer(TLModContext* ctx, TLModId type, float dx, float dy) {
+    if (!ctx) return false;
+    Impl* impl = ImplOf(ctx);
+    const ContentRegistry& reg = impl->self->Registry();
+    int32_t vanilla = reg.VanillaCount(TLMOD_CONTENT_NPC).value_or(0);
+    if (!reg.IsModId(TLMOD_CONTENT_NPC, type) && !(type > 0 && type < vanilla)) {
+        Log(TLMOD_LOG_ERROR, impl->ModId(ctx), "spawn_npc_near_player: tipo " + std::to_string(type) + " desconhecido");
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(impl->giveMutex);
+    impl->pendingNearSpawns.push_back({impl->ModId(ctx), type, dx, dy});
+    return true;
+}
+
 int32_t Api_SpawnNpc(TLModContext* ctx, TLModId type, float x, float y) {
     if (!ctx) return -1;
     Impl* impl = ImplOf(ctx);
@@ -567,6 +621,7 @@ ModLoader::ModLoader(GameAdapter* game)
     a.register_provider = &Api_RegisterProvider;
     a.buffer_append = &Api_BufferAppend;
     a.give_item = &Api_GiveItem;
+    a.spawn_npc_near_player = &Api_SpawnNpcNearPlayer;
 
     Impl* impl = impl_.get();
     game_->SetPlayerHurtHandler([impl](TLModPlayerHurt& ev, bool after) { return impl->DispatchHurt(ev, after); });
