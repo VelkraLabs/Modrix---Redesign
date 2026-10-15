@@ -40,6 +40,9 @@ struct NpcDef {
     int32_t damage = -1;       // < 0: o da casca
     int32_t defense = -1;      // < 0: o da casca
     bool boss = false;
+    std::string texture;       // PNG relativo à pasta do mod; vazio = o da casca
+    int32_t frameCount = 1;    // quadros empilhados na vertical
+    int32_t frameTicks = 8;    // ticks por quadro (animação automática)
 };
 
 // Comportamento de um NPC de mod. Uma instância por TIPO (não por NPC): o
@@ -115,6 +118,9 @@ public:
         c.user = behavior;
         c.on_spawn = behavior ? &SpawnTrampoline : nullptr;
         c.on_ai = behavior ? &AiTrampoline : nullptr;
+        c.texture = def.texture.empty() ? nullptr : def.texture.c_str();
+        c.frame_count = def.frameCount;
+        c.frame_ticks = def.frameTicks;
         return api_->register_npc(ctx_, &c);
     }
     int32_t SpawnNpc(TLModId type, float x, float y) const {

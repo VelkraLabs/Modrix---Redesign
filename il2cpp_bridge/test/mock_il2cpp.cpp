@@ -26,6 +26,7 @@ struct MethodInfo {
     Il2CppMethodPointer methodPointer;  // mesmo primeiro campo do MethodInfo real
     const char* name;
     int argc;
+    const char* param0 = nullptr;  // nome do tipo do 1º parâmetro (il2cpp_method_get_param)
 };
 
 struct FieldInfo {
@@ -57,6 +58,7 @@ struct Il2CppDomain {
 struct Il2CppThread {
     int dummy;
 };
+struct Il2CppType;
 
 // Il2CppArray em 64 bits: klass, monitor, bounds, max_length, depois os dados (0x20).
 struct Il2CppArray {
@@ -80,7 +82,6 @@ Il2CppImage g_corlib{"mscorlib.dll", {}};
 Il2CppImage g_csharp{"Assembly-CSharp.dll", {}};
 Il2CppAssembly g_asmCorlib{&g_corlib};
 Il2CppAssembly g_asmCsharp{&g_csharp};
-const Il2CppAssembly* g_assemblies[] = {&g_asmCorlib, &g_asmCsharp};
 Il2CppDomain g_domain{};
 Il2CppThread g_thread{};
 thread_local Il2CppThread* t_current = nullptr;
@@ -504,6 +505,173 @@ void InitItems() {
     g_vanillaTooltip = NewObject(0x38);
 }
 
+// ---- Texturas e desenho ------------------------------------------------------------
+// Imagem UnityEngine.CoreModule.dll com UnityEngine.Texture/Texture2D; o
+// invólucro XNA, Asset<Texture2D> e TextureAssets do Assembly-CSharp.
+Il2CppImage g_core{"UnityEngine.CoreModule.dll", {}};
+Il2CppAssembly g_asmCore{&g_core};
+const Il2CppAssembly* g_assemblies3[] = {&g_asmCorlib, &g_asmCsharp, &g_asmCore};
+
+// UnityEngine.Texture2D do mock: tamanho, pixels (linha de baixo primeiro) e estado.
+struct UnityTex {
+    Il2CppObject header;
+    int32_t width, height, format;
+    bool mip;
+    int32_t filter = 1, wrap = 0;  // padrão do Unity: Bilinear, Repeat
+    bool applied = false;
+    uint8_t* pixels;
+};
+Il2CppClass g_unityTexture{"UnityEngine", "Texture", {}, {}};
+Il2CppClass g_unityTexture2D{"UnityEngine", "Texture2D", {}, {}, sizeof(UnityTex)};
+MethodInfo g_mUnityCtor{nullptr, ".ctor", 4};
+MethodInfo g_mRawSize{nullptr, "GetRawImageDataSize", 0};
+MethodInfo g_mWritable{nullptr, "GetWritableImageData", 1};
+MethodInfo g_mApply{nullptr, "Apply", 2};
+MethodInfo g_mSetFilter{nullptr, "set_filterMode", 1};
+MethodInfo g_mSetWrap{nullptr, "set_wrapMode", 1};
+
+// Microsoft.Xna.Framework.Graphics.Texture2D: Width 0x44, Height 0x48, _unityTexture 0x78.
+constexpr size_t kXnaWidth = 0x44, kXnaHeight = 0x48, kXnaUnity = 0x78, kXnaSize = 0xA8;
+Il2CppClass g_xnaTexture2D{"Microsoft.Xna.Framework.Graphics", "Texture2D", {}, {}, kXnaSize};
+MethodInfo g_mXnaCtorRender{nullptr, ".ctor", 1, "UnityEngine.RenderTexture"};
+MethodInfo g_mXnaCtorUnity{nullptr, ".ctor", 1, "UnityEngine.Texture2D"};
+
+// Asset<Texture2D>: Name 0x10, State 0x18, Value 0x28.
+constexpr size_t kAssetName = 0x10, kAssetState = 0x18, kAssetValue = 0x28, kAssetSize = 0x30;
+Il2CppClass g_assetClass{"ReLogic.Content", "Asset`1", {}, {}, kAssetSize};
+FieldInfo g_fAsset[] = {{"<Name>k__BackingField", kAssetName, nullptr},
+                        {"<State>k__BackingField", kAssetState, nullptr},
+                        {"<Value>k__BackingField", kAssetValue, nullptr}};
+
+// TextureAssets.Item / .Npc: um Asset carregado por tipo, cada um com um XNA próprio.
+constexpr uint32_t kNpcTypes = 688;
+Il2CppArray* g_itemAssets = nullptr;
+Il2CppArray* g_npcAssets = nullptr;
+Il2CppArray* g_npcFrameCount = nullptr;  // int[] Main.npcFrameCount
+Il2CppClass g_textureAssets{"Terraria.GameContent", "TextureAssets", {}, {}};
+FieldInfo g_fItemAssets{"Item", 0x560, &g_itemAssets};
+FieldInfo g_fNpcAssets{"Npc", 0x570, &g_npcAssets};
+FieldInfo g_fNpcFrameCount{"npcFrameCount", 0x1138, &g_npcFrameCount};
+FieldInfo g_fNpcFrame{"frame", 0x1C0, nullptr};
+
+// PlayerDrawSet (struct): heldItem em 0x218 sem cabeçalho; o runtime devolve +0x10.
+Il2CppClass g_playerDrawSet{"Terraria.DataStructures", "PlayerDrawSet", {}, {}};
+FieldInfo g_fHeldItem{"heldItem", 0x218 + 0x10, nullptr};
+
+Il2CppObject* NewAsset() {
+    Il2CppObject* a = NewObject(kAssetSize);
+    a->klass = &g_assetClass;
+    At<int32_t>(a, kAssetState) = 2;
+    Il2CppObject* xna = NewObject(kXnaSize);
+    xna->klass = &g_xnaTexture2D;
+    At<Il2CppObject*>(a, kAssetValue) = xna;
+    return a;
+}
+
+// O que o "jogo" desenhou por último: o XNA Texture2D lido de TextureAssets e,
+// para NPC, npcFrameCount[type] e NPC.frame no momento do desenho.
+struct XnaVector2 { float x, y; };
+struct XnaColor { uint32_t packed; };
+struct XnaRect { int32_t x, y, w, h; };
+Il2CppObject* g_lastDrawn = nullptr;
+int32_t g_lastFrameCount = 0;
+XnaRect g_lastFrame{};
+std::vector<Il2CppObject*> g_drawLog;
+
+Il2CppObject* ReadItemTexture(void* item) {  // TextureAssets.Item[item.type].Value (ldr direto)
+    int32_t type = At<int32_t>(item, kItemType);
+    if (type < 0 || static_cast<uint32_t>(type) >= g_itemAssets->max_length) std::abort();
+    return At<Il2CppObject*>(Elem(g_itemAssets, static_cast<uint32_t>(type)), kAssetValue);
+}
+void DrewItem(void* item) {
+    g_lastDrawn = ReadItemTexture(item);
+    g_drawLog.push_back(g_lastDrawn);
+}
+
+void MockGridDrawItem(Il2CppObject*, Il2CppObject*, Il2CppObject*, Il2CppArray* inv, int32_t slot, XnaVector2,
+                      XnaColor, float, const MethodInfo*) {
+    DrewItem(Elem(inv, static_cast<uint32_t>(slot)));
+}
+using GridFn = decltype(&MockGridDrawItem);
+GridFn g_inventoryEntry = &MockGridDrawItem;
+void MockHotbarDrawItem(Il2CppObject* a, Il2CppObject* b, Il2CppObject* c, Il2CppArray* inv, int32_t slot, XnaVector2 p,
+                        XnaColor col, float s, const MethodInfo* m) {
+    MockGridDrawItem(a, b, c, inv, slot, p, col, s, m);
+}
+GridFn g_hotbarEntry = &MockHotbarDrawItem;
+void MockMainDrawItem(Il2CppObject*, Il2CppObject* item, int32_t, const MethodInfo*) { DrewItem(item); }
+using MainDrawItemFn = decltype(&MockMainDrawItem);
+MainDrawItemFn g_mainDrawItemEntry = &MockMainDrawItem;
+float MockDrawItemIcon(Il2CppObject* item, int32_t, Il2CppObject*, XnaVector2, float scale, float, XnaColor,
+                       const MethodInfo*) {
+    DrewItem(item);
+    return scale;
+}
+using IconFn = decltype(&MockDrawItemIcon);
+IconFn g_iconEntry = &MockDrawItemIcon;
+void MockHeldItem(void* drawinfo, const MethodInfo*) { DrewItem(At<void*>(drawinfo, 0x218)); }
+using HeldFn = decltype(&MockHeldItem);
+HeldFn g_heldEntry = &MockHeldItem;
+void MockDrawNpcDirect(Il2CppObject*, Il2CppObject*, Il2CppObject* npc, bool, XnaVector2, Il2CppObject*, XnaRect*,
+                       const MethodInfo*) {
+    int32_t type = At<int32_t>(npc, kNpcType);
+    if (type < 0 || static_cast<uint32_t>(type) >= kNpcTypes) std::abort();
+    g_lastDrawn = At<Il2CppObject*>(Elem(g_npcAssets, static_cast<uint32_t>(type)), kAssetValue);
+    g_lastFrameCount = reinterpret_cast<int32_t*>(g_npcFrameCount + 1)[type];
+    g_lastFrame = At<XnaRect>(npc, 0x1C0);
+    g_drawLog.push_back(g_lastDrawn);
+}
+using NpcDrawFn = decltype(&MockDrawNpcDirect);
+NpcDrawFn g_npcDrawEntry = &MockDrawNpcDirect;
+
+Il2CppClass g_guiInventory{"", "GUIInventory", {}, {}};
+Il2CppClass g_guiHotbar{"", "GUIHotbar", {}, {}};
+Il2CppClass g_itemSlot{"Terraria.UI", "ItemSlot", {}, {}};
+Il2CppClass g_playerDrawLayers{"Terraria.DataStructures", "PlayerDrawLayers", {}, {}};
+MethodInfo g_mInvDraw{reinterpret_cast<Il2CppMethodPointer>(&MockGridDrawItem), "DrawItem", 7};
+MethodInfo g_mHotbarDraw{reinterpret_cast<Il2CppMethodPointer>(&MockHotbarDrawItem), "DrawHotbarItem", 7};
+MethodInfo g_mMainDrawItem{reinterpret_cast<Il2CppMethodPointer>(&MockMainDrawItem), "DrawItem", 2};
+MethodInfo g_mIconDraw{reinterpret_cast<Il2CppMethodPointer>(&MockDrawItemIcon), "DrawItemIcon", 7};
+MethodInfo g_mHeldDraw{reinterpret_cast<Il2CppMethodPointer>(&MockHeldItem), "DrawPlayer_27_HeldItem", 1};
+MethodInfo g_mNpcDraw{reinterpret_cast<Il2CppMethodPointer>(&MockDrawNpcDirect), "DrawNPCDirect", 6};
+
+struct BoxedU64 {
+    Il2CppObject header;
+    uint64_t value;
+};
+BoxedU64 g_box64{};
+
+bool g_assetsLoaded = false;  // o jogo ainda não preencheu TextureAssets
+
+void InitDraw() {
+    g_core.classes = {&g_unityTexture, &g_unityTexture2D};
+    g_unityTexture.methods = {&g_mSetFilter, &g_mSetWrap};
+    g_unityTexture2D.methods = {&g_mUnityCtor, &g_mRawSize, &g_mWritable, &g_mApply};
+    g_xnaTexture2D.methods = {&g_mXnaCtorRender, &g_mXnaCtorUnity};
+    for (FieldInfo& f : g_fAsset) g_assetClass.fields.push_back(&f);
+    g_textureAssets.fields = {&g_fItemAssets, &g_fNpcAssets};
+    g_main.fields.push_back(&g_fNpcFrameCount);
+    g_npc.fields.push_back(&g_fNpcFrame);
+    g_playerDrawSet.fields = {&g_fHeldItem};
+    g_guiInventory.methods = {&g_mInvDraw};
+    g_guiHotbar.methods = {&g_mHotbarDraw};
+    g_main.methods.push_back(&g_mMainDrawItem);
+    g_main.methods.push_back(&g_mNpcDraw);
+    g_itemSlot.methods = {&g_mIconDraw};
+    g_playerDrawLayers.methods = {&g_mHeldDraw};
+    g_csharp.classes.insert(g_csharp.classes.end(), {&g_xnaTexture2D, &g_assetClass, &g_textureAssets, &g_playerDrawSet,
+                                                     &g_guiInventory, &g_guiHotbar, &g_itemSlot, &g_playerDrawLayers});
+    g_itemAssets = NewArray(static_cast<uint32_t>(kItemCount));
+    g_npcAssets = NewArray(kNpcTypes);
+    g_npcFrameCount = NewArray(kNpcTypes);  // int[] cabe no array de ponteiros
+    for (uint32_t i = 0; i < kNpcTypes; ++i) reinterpret_cast<int32_t*>(g_npcFrameCount + 1)[i] = 6;
+}
+void FillTextureAssets() {
+    for (uint32_t i = 0; i < static_cast<uint32_t>(kItemCount); ++i) Elem(g_itemAssets, i) = NewAsset();
+    for (uint32_t i = 0; i < kNpcTypes; ++i) Elem(g_npcAssets, i) = NewAsset();
+    g_assetsLoaded = true;
+}
+
 void InitSaveWorld() {
     g_item.fields.clear();
     for (FieldInfo& f : g_fItem) g_item.fields.push_back(&f);
@@ -595,6 +763,7 @@ __attribute__((visibility("default"))) void mock_il2cpp_init() {
     g_localUser.gameMenu = true;
     InitSaveWorld();
     InitItems();
+    InitDraw();
     g_initialized = true;
 }
 __attribute__((visibility("default"))) void* mock_local_player() { return g_localPlayer; }
@@ -608,6 +777,12 @@ __attribute__((visibility("default"))) bool mock_patch_function(void* target, vo
     else if (target == reinterpret_cast<void*>(&MockLoadPlayer)) g_loadPlayerEntry = reinterpret_cast<LoadPlayerFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockInternalSaveWorld)) g_saveWorldEntry = reinterpret_cast<SaveWorldFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockLoadWorld)) g_loadWorldEntry = reinterpret_cast<LoadWorldFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockGridDrawItem)) g_inventoryEntry = reinterpret_cast<GridFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockHotbarDrawItem)) g_hotbarEntry = reinterpret_cast<GridFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockMainDrawItem)) g_mainDrawItemEntry = reinterpret_cast<MainDrawItemFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockDrawItemIcon)) g_iconEntry = reinterpret_cast<IconFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockHeldItem)) g_heldEntry = reinterpret_cast<HeldFn>(replacement);
+    else if (target == reinterpret_cast<void*>(&MockDrawNpcDirect)) g_npcDrawEntry = reinterpret_cast<NpcDrawFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockItemSetDefaults)) g_itemSetDefaultsEntry = reinterpret_cast<ItemSetDefaultsFn>(replacement);
     else if (target == reinterpret_cast<void*>(&MockItemRebuildTooltip)) g_rebuildEntry = reinterpret_cast<RebuildFn>(replacement);
     else return false;
@@ -734,12 +909,70 @@ __attribute__((visibility("default"))) size_t mock_item_tooltip(void* item, char
 __attribute__((visibility("default"))) int mock_barriers() { return g_barriers; }
 __attribute__((visibility("default"))) size_t mock_gchandles() { return g_handles.size(); }
 
+// ---- Texturas e desenho ----------------------------------------------------------------
+// O jogo termina de carregar os assets (antes disso TLMod_CreateTexture devolve -1).
+__attribute__((visibility("default"))) void mock_load_texture_assets() { FillTextureAssets(); }
+// Desenhos do "jogo", pelo endereço (com hook). O inventário usa o Player.inventory.
+__attribute__((visibility("default"))) void* mock_game_draw_inventory(int32_t slot) {
+    g_inventoryEntry(nullptr, nullptr, nullptr, At<Il2CppArray*>(g_localPlayer, kPInventory), slot, {}, {}, 1.0f, &g_mInvDraw);
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) void* mock_game_draw_hotbar(int32_t slot) {
+    g_hotbarEntry(nullptr, nullptr, nullptr, At<Il2CppArray*>(g_localPlayer, kPInventory), slot, {}, {}, 1.0f, &g_mHotbarDraw);
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) void* mock_game_draw_world_item(void* item) {
+    g_mainDrawItemEntry(nullptr, static_cast<Il2CppObject*>(item), 0, &g_mMainDrawItem);
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) void* mock_game_draw_item_icon(void* item) {
+    g_iconEntry(static_cast<Il2CppObject*>(item), 0, nullptr, {}, 1.0f, 32.0f, {}, &g_mIconDraw);
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) void* mock_game_draw_held(void* item) {
+    alignas(16) uint8_t drawinfo[0x400] = {};
+    At<void*>(drawinfo, 0x218) = item;
+    g_heldEntry(drawinfo, &g_mHeldDraw);
+    return g_lastDrawn;
+}
+// Desenha Main.npc[index]; devolve a textura e preenche quadros e frame vistos no desenho.
+__attribute__((visibility("default"))) void* mock_game_draw_npc(int32_t index, int32_t* frameCount, int32_t* frame) {
+    g_npcDrawEntry(nullptr, nullptr, reinterpret_cast<Il2CppObject*>(g_npcs[index]), false, {}, nullptr, nullptr, &g_mNpcDraw);
+    *frameCount = g_lastFrameCount;
+    std::memcpy(frame, &g_lastFrame, sizeof(g_lastFrame));
+    return g_lastDrawn;
+}
+__attribute__((visibility("default"))) void* mock_item_asset_texture(int32_t type) {
+    return At<Il2CppObject*>(Elem(g_itemAssets, static_cast<uint32_t>(type)), kAssetValue);
+}
+__attribute__((visibility("default"))) void* mock_npc_asset_texture(int32_t type) {
+    return At<Il2CppObject*>(Elem(g_npcAssets, static_cast<uint32_t>(type)), kAssetValue);
+}
+__attribute__((visibility("default"))) int32_t mock_npc_frame_count(int32_t type) {
+    return reinterpret_cast<int32_t*>(g_npcFrameCount + 1)[type];
+}
+// Textura do Unity por trás de um XNA Texture2D: tamanho, filtro, wrap, Apply e pixel (x, y)
+// com y = 0 no topo da imagem (o Unity guarda de baixo para cima).
+__attribute__((visibility("default"))) bool mock_texture_info(void* xna, int32_t* w, int32_t* h, int32_t* filter,
+                                                              int32_t* wrap, bool* applied) {
+    auto* t = At<UnityTex*>(xna, kXnaUnity);
+    if (!t) return false;
+    *w = t->width, *h = t->height, *filter = t->filter, *wrap = t->wrap, *applied = t->applied;
+    return At<int32_t>(xna, kXnaWidth) == t->width && At<int32_t>(xna, kXnaHeight) == t->height;
+}
+__attribute__((visibility("default"))) uint32_t mock_texture_pixel(void* xna, int32_t x, int32_t y) {
+    auto* t = At<UnityTex*>(xna, kXnaUnity);
+    uint32_t v;
+    std::memcpy(&v, t->pixels + (static_cast<size_t>(t->height - 1 - y) * t->width + x) * 4, 4);
+    return v;
+}
+
 // ---- exports da API IL2CPP --------------------------------------------------
 const Il2CppImage* il2cpp_get_corlib() { return g_initialized ? &g_corlib : nullptr; }
 Il2CppDomain* il2cpp_domain_get() { return g_initialized ? &g_domain : nullptr; }
 const Il2CppAssembly** il2cpp_domain_get_assemblies(const Il2CppDomain*, size_t* size) {
-    *size = 2;
-    return g_assemblies;
+    *size = 3;
+    return g_assemblies3;
 }
 const Il2CppImage* il2cpp_assembly_get_image(const Il2CppAssembly* a) { return a->image; }
 const char* il2cpp_image_get_name(const Il2CppImage* img) { return img->name; }
@@ -810,6 +1043,36 @@ Il2CppObject* il2cpp_runtime_invoke(const MethodInfo* m, void* obj, void** param
         At<void*>(obj, kTextValue) = params[1];
         return nullptr;
     }
+    if (m == &g_mUnityCtor) {
+        auto* t = reinterpret_cast<UnityTex*>(obj);
+        t->width = *static_cast<int32_t*>(params[0]);
+        t->height = *static_cast<int32_t*>(params[1]);
+        t->format = *static_cast<int32_t*>(params[2]);
+        t->mip = *static_cast<bool*>(params[3]);
+        if (t->format != 4 || t->mip) std::abort();  // a ponte pede RGBA32 sem mipmap
+        t->pixels = static_cast<uint8_t*>(std::calloc(static_cast<size_t>(t->width) * t->height, 4));
+        return nullptr;
+    }
+    if (m == &g_mSetFilter) return reinterpret_cast<UnityTex*>(obj)->filter = *static_cast<int32_t*>(params[0]), nullptr;
+    if (m == &g_mSetWrap) return reinterpret_cast<UnityTex*>(obj)->wrap = *static_cast<int32_t*>(params[0]), nullptr;
+    if (m == &g_mRawSize) {
+        auto* t = reinterpret_cast<UnityTex*>(obj);
+        g_box64.value = static_cast<uint64_t>(t->width) * t->height * 4;
+        return &g_box64.header;
+    }
+    if (m == &g_mWritable) {
+        g_box64.value = reinterpret_cast<uint64_t>(reinterpret_cast<UnityTex*>(obj)->pixels);
+        return &g_box64.header;
+    }
+    if (m == &g_mApply) return reinterpret_cast<UnityTex*>(obj)->applied = true, nullptr;
+    if (m == &g_mXnaCtorUnity) {  // XNA Texture2D(UnityEngine.Texture2D)
+        auto* t = static_cast<UnityTex*>(params[0]);
+        At<int32_t>(obj, kXnaWidth) = t->width;
+        At<int32_t>(obj, kXnaHeight) = t->height;
+        At<void*>(obj, kXnaUnity) = t;
+        return nullptr;
+    }
+    if (m == &g_mXnaCtorRender) std::abort();  // a ponte escolheu o .ctor errado
     if (m == &g_mGetMouseItem) return g_held[0];
     if (m == &g_mGetGuideItem) return g_held[2];
     if (m == &g_mGetReforgeItem) return g_held[3];
@@ -837,6 +1100,20 @@ Il2CppObject* il2cpp_string_new(const char* utf8) {  // UTF-8 -> UTF-16 (BMP)
     }
     return NewString(u.c_str());
 }
+Il2CppClass* il2cpp_object_get_class(Il2CppObject* obj) { return static_cast<Il2CppClass*>(obj->klass); }
+const MethodInfo* il2cpp_class_get_methods(Il2CppClass* k, void** iter) {
+    auto i = reinterpret_cast<uintptr_t>(*iter);
+    if (i >= k->methods.size()) return nullptr;
+    *iter = reinterpret_cast<void*>(i + 1);
+    return k->methods[i];
+}
+const char* il2cpp_method_get_name(const MethodInfo* m) { return m->name; }
+uint32_t il2cpp_method_get_param_count(const MethodInfo* m) { return static_cast<uint32_t>(m->argc); }
+const Il2CppType* il2cpp_method_get_param(const MethodInfo* m, uint32_t) {
+    return reinterpret_cast<const Il2CppType*>(m->param0);
+}
+char* il2cpp_type_get_name(const Il2CppType* t) { return t ? strdup(reinterpret_cast<const char*>(t)) : nullptr; }
+void il2cpp_free(void* p) { std::free(p); }
 uint32_t il2cpp_gchandle_new(Il2CppObject* obj, bool) {
     g_handles.push_back(obj);
     return static_cast<uint32_t>(g_handles.size());

@@ -50,5 +50,6 @@ if(ANDROID)
   target_link_options(example_boss PRIVATE -Wl,-z,max-page-size=16384)
 endif()
 
-# A pasta de saída já é o mod pronto: manifest.json + lib/<plataforma>/.
+# A pasta de saída já é o mod pronto: manifest.json + lib/<plataforma>/ + textures/.
 configure_file(manifest.json ${MOD_OUT}/manifest.json COPYONLY)
+configure_file(textures/ember_titan.png ${MOD_OUT}/textures/ember_titan.png COPYONLY)

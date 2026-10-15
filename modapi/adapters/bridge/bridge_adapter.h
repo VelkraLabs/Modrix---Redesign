@@ -37,6 +37,14 @@ public:
     int32_t GiveItem(int32_t type, int32_t stack) override;
     void SetFrameHandler(std::function<void()> handler) override;
 
+    // Texturas: TLMod_CreateTexture (UnityEngine.Texture2D embrulhada numa
+    // Asset<Texture2D> do jogo) e os hooks de desenho de item e NPC
+    // (GUIInventory.DrawItem, GUIHotbar.DrawHotbarItem, Main.DrawItem,
+    // ItemSlot.DrawItemIcon, PlayerDrawLayers.DrawPlayer_27_HeldItem,
+    // Main.DrawNPCDirect), via TLMod_SetDrawCallbacks.
+    int32_t CreateTexture(const Image& image, const std::string& name) override;
+    void SetDrawHooks(DrawHooks hooks) override;
+
     // Save/load: Player.InternalSavePlayerFile (0x1044040), Player.LoadPlayer
     // (0x1049FA8), WorldFile.InternalSaveWorld (0x14F1AC8), WorldFile.LoadWorld
     // (0x14EC048), via TLMod_SetSaveCallback.

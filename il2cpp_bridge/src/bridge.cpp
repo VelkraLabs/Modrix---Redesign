@@ -137,6 +137,7 @@ Il2CppDomain* Domain() { return g.domain; }
 const Il2CppImage* Image() { return g.image; }
 Il2CppClass* MainClass() { return g.mainClass; }
 Il2CppClass* PlayerClass() { return g.playerClass; }
+const Il2CppImage* FindImage(const char* imageName) { return ::FindImage(imageName); }
 
 void LogException(const char* where, Il2CppException* exc) {
     char buf[512] = {0};
@@ -232,6 +233,7 @@ bool TLMod_Init(int timeoutMs) {
         if (bridge::ResolveNpc()) bridge::InstallNpcHooks();
         if (bridge::ResolveWorldState()) bridge::InstallWorldStateHooks();
         if (bridge::ResolveItems()) bridge::InstallItemHooks();
+        if (bridge::ResolveDraw()) bridge::InstallDrawHooks();
         if (bridge::ResolveSaves()) bridge::InstallSaveHooks();
         g_ready.store(true);
     } else {

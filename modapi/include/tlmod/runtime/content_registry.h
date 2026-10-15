@@ -41,7 +41,7 @@ struct ItemDefinition {
     TLModId shellType = kDefaultItemShell;
     std::string displayName;
     std::string tooltip;
-    std::string texture;  // caminho absoluto, já resolvido na pasta do mod
+    std::string texture;  // PNG, caminho absoluto já resolvido na pasta do mod; vazio = o da casca
     int32_t width = 0, height = 0, maxStack = 1, value = 0, rarity = 0, damage = 0, useTime = 0;
 };
 
@@ -54,6 +54,9 @@ struct NpcDefinition {
     void* user = nullptr;
     TLModNpcSpawnFn onSpawn = nullptr;
     TLModNpcAiFn onAi = nullptr;
+    std::string texture;     // caminho absoluto do PNG; vazio = o da casca
+    int32_t frameCount = 1;  // quadros na folha (vertical)
+    int32_t frameTicks = 8;  // ticks por quadro (animação automática)
 };
 
 using ContentPayload = std::variant<std::monostate, ItemDefinition, NpcDefinition>;

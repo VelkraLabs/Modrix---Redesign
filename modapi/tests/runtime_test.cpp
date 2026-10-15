@@ -20,6 +20,9 @@
 #include "tlmod/runtime/log.h"
 #include "tlmod/runtime/manifest.h"
 #include "tlmod/runtime/mod_loader.h"
+#include "tlmod/runtime/png.h"
+
+#include <zlib.h>
 
 using namespace tlmod::rt;
 namespace fs = std::filesystem;
@@ -1034,6 +1037,459 @@ static void TestItems(const fs::path& modsDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Texturas: decodificador PNG, fila na thread principal, textura por slot.
+namespace tex {
+
+// Codificador PNG de teste (independente do decodificador): linhas já no
+// formato do tipo de cor, cada uma com o filtro `filters[y % n]` aplicado.
+struct PngSpec {
+    uint32_t width = 0, height = 0;
+    uint8_t bitDepth = 8, colorType = 6, interlace = 0;
+    std::vector<std::vector<uint8_t>> rows;  // sem o byte de filtro
+    std::vector<uint8_t> plte, trns;
+    std::vector<uint8_t> filters = {0};
+};
+
+void PutBe32(std::vector<uint8_t>& out, uint32_t v) {
+    for (int s = 24; s >= 0; s -= 8) out.push_back(static_cast<uint8_t>(v >> s));
+}
+void Chunk(std::vector<uint8_t>& out, const char* type, const std::vector<uint8_t>& body) {
+    PutBe32(out, static_cast<uint32_t>(body.size()));
+    size_t start = out.size();
+    out.insert(out.end(), type, type + 4);
+    out.insert(out.end(), body.begin(), body.end());
+    PutBe32(out, static_cast<uint32_t>(crc32(0L, out.data() + start, static_cast<uInt>(out.size() - start))));
+}
+int PaethRef(int a, int b, int c) {
+    int p = a + b - c, pa = std::abs(p - a), pb = std::abs(p - b), pc = std::abs(p - c);
+    return pa <= pb && pa <= pc ? a : (pb <= pc ? b : c);
+}
+std::vector<uint8_t> Encode(const PngSpec& sp) {
+    const int channels[] = {1, 0, 3, 1, 2, 0, 4};
+    size_t bpp = std::max<size_t>(1, static_cast<size_t>(channels[sp.colorType] * sp.bitDepth / 8));
+    std::vector<uint8_t> raw;
+    std::vector<uint8_t> prev(sp.rows.empty() ? 0 : sp.rows[0].size(), 0);
+    for (size_t y = 0; y < sp.rows.size(); ++y) {
+        const std::vector<uint8_t>& r = sp.rows[y];
+        uint8_t f = sp.filters[y % sp.filters.size()];
+        raw.push_back(f);
+        for (size_t i = 0; i < r.size(); ++i) {
+            int a = i >= bpp ? r[i - bpp] : 0, b = prev[i], c = i >= bpp ? prev[i - bpp] : 0;
+            int pred = f == 1 ? a : f == 2 ? b : f == 3 ? (a + b) / 2 : f == 4 ? PaethRef(a, b, c) : 0;
+            raw.push_back(static_cast<uint8_t>(r[i] - pred));
+        }
+        prev = r;
+    }
+    uLongf zlen = compressBound(static_cast<uLong>(raw.size()));
+    std::vector<uint8_t> z(zlen);
+    compress(z.data(), &zlen, raw.data(), static_cast<uLong>(raw.size()));
+    z.resize(zlen);
+    std::vector<uint8_t> out = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+    std::vector<uint8_t> ihdr;
+    PutBe32(ihdr, sp.width);
+    PutBe32(ihdr, sp.height);
+    ihdr.insert(ihdr.end(), {sp.bitDepth, sp.colorType, 0, 0, sp.interlace});
+    Chunk(out, "IHDR", ihdr);
+    Chunk(out, "tEXt", {'C', 'o', 'm', 'm', 'e', 'n', 't', 0, 'o', 'i'});  // auxiliar: ignorado
+    if (!sp.plte.empty()) Chunk(out, "PLTE", sp.plte);
+    if (!sp.trns.empty()) Chunk(out, "tRNS", sp.trns);
+    // IDAT dividido em dois chunks (o decodificador concatena).
+    size_t half = z.size() / 2;
+    Chunk(out, "IDAT", std::vector<uint8_t>(z.begin(), z.begin() + static_cast<long>(half)));
+    Chunk(out, "IDAT", std::vector<uint8_t>(z.begin() + static_cast<long>(half), z.end()));
+    Chunk(out, "IEND", {});
+    return out;
+}
+
+uint32_t g_seed = 12345;
+uint8_t Rand() {
+    g_seed = g_seed * 1103515245u + 12345u;
+    return static_cast<uint8_t>(g_seed >> 16);
+}
+
+// Imagem RGBA esperada -> PNG no formato pedido (só cores representáveis nele).
+struct Case {
+    const char* name;
+    uint8_t colorType, bitDepth;
+};
+
+std::vector<uint8_t> WriteAll(const fs::path& file, const std::vector<uint8_t>& data) {
+    fs::create_directories(file.parent_path());
+    std::ofstream(file, std::ios::binary).write(reinterpret_cast<const char*>(data.data()),
+                                                static_cast<std::streamsize>(data.size()));
+    return data;
+}
+
+std::vector<uint8_t> SolidPng(uint32_t w, uint32_t h, uint8_t r, uint8_t g, uint8_t b) {
+    PngSpec sp;
+    sp.width = w;
+    sp.height = h;
+    for (uint32_t y = 0; y < h; ++y) {
+        std::vector<uint8_t> row;
+        for (uint32_t x = 0; x < w; ++x) row.insert(row.end(), {r, g, b, 255});
+        sp.rows.push_back(row);
+    }
+    return Encode(sp);
+}
+
+const TLModHostApi* g_api = nullptr;
+TLModContext* g_ctx = nullptr;
+TLModId g_plain = TLMOD_INVALID_ID, g_blue = TLMOD_INVALID_ID, g_missing = TLMOD_INVALID_ID;
+TLModId g_wisp = TLMOD_INVALID_ID, g_odd = TLMOD_INVALID_ID, g_rejected = TLMOD_INVALID_ID, g_oldNpc = TLMOD_INVALID_ID;
+bool g_badArgsRejected = false;
+bool WispAi(void*, TLModNpcState* npc) {
+    npc->frame = 5;  // fixo; com 2 quadros desenha o 5 % 2 = 1
+    return true;
+}
+TLModNpcDef NpcDef(const char* name, const char* texture, int32_t frames) {
+    TLModNpcDef d{};
+    d.struct_size = sizeof(d);
+    d.name = name;
+    d.display_name = name;
+    d.shell_type = 1;
+    d.texture = texture;
+    d.frame_count = frames;
+    d.frame_ticks = 0;  // <= 0 = 8
+    return d;
+}
+int Init(const TLModHostApi* api, TLModContext* ctx) {
+    g_api = api;
+    g_ctx = ctx;
+    auto item = [&](const char* name, const char* texture) {
+        TLModItemDef d{};
+        d.struct_size = sizeof(d);
+        d.name = name;
+        d.display_name = name;
+        d.texture = texture;
+        d.width = d.height = 16;
+        d.max_stack = 1;
+        return api->register_item(ctx, &d);
+    };
+    g_plain = item("plain", nullptr);
+    g_blue = item("blue", "tex/blue.png");
+    g_missing = item("missing", "tex/nao_existe.png");
+    TLModNpcDef wisp = NpcDef("wisp", "tex/wisp.png", 2);
+    wisp.on_ai = &WispAi;
+    g_wisp = api->register_npc(ctx, &wisp);
+    TLModNpcDef odd = NpcDef("odd", "tex/odd.png", 4);  // altura 10: não divide em 4 quadros
+    g_odd = api->register_npc(ctx, &odd);
+    TLModNpcDef rejected = NpcDef("rejected", "tex/rejected.png", 1);  // o jogo recusa (largura 7)
+    g_rejected = api->register_npc(ctx, &rejected);
+    // Mod antigo: struct_size sem os campos de textura; o lixo neles é ignorado.
+    TLModNpcDef old = NpcDef("old", "tex/blue.png", 1);
+    old.struct_size = static_cast<uint32_t>(offsetof(TLModNpcDef, texture));
+    g_oldNpc = api->register_npc(ctx, &old);
+    // Rejeitados: caminho fora da pasta do mod, frame_count inválido.
+    TLModNpcDef escape = NpcDef("escape", "../fora.png", 1);
+    TLModNpcDef zero = NpcDef("zero", "tex/wisp.png", 0);
+    TLModItemDef abs{};
+    abs.struct_size = sizeof(abs);
+    abs.name = "abs";
+    abs.display_name = "abs";
+    abs.texture = "/etc/passwd";
+    abs.width = abs.height = abs.max_stack = 1;
+    g_badArgsRejected = api->register_npc(ctx, &escape) == TLMOD_INVALID_ID &&
+                        api->register_npc(ctx, &zero) == TLMOD_INVALID_ID &&
+                        api->register_item(ctx, &abs) == TLMOD_INVALID_ID;
+    return 0;
+}
+
+}  // namespace tex
+
+static void TestPng(const fs::path& modsDir) {
+    using namespace tex;
+    std::printf("\n== PNG (decodificador do runtime)\n");
+
+    // Todos os tipos de cor e profundidades, com os 5 filtros alternando por
+    // linha. Imagem 13x7 (largura ímpar: bits sobrando no fim da linha).
+    const uint32_t w = 13, h = 7;
+    int okCases = 0, cases = 0;
+    struct Fmt {
+        const char* name;
+        uint8_t colorType, bitDepth;
+    };
+    const Fmt fmts[] = {{"RGBA8", 6, 8},  {"RGB8", 2, 8},   {"cinza8", 0, 8}, {"cinza+alfa8", 4, 8},
+                        {"RGBA16", 6, 16}, {"RGB16", 2, 16}, {"cinza1", 0, 1}, {"cinza2", 0, 2},
+                        {"cinza4", 0, 4},  {"paleta1", 3, 1}, {"paleta2", 3, 2}, {"paleta4", 3, 4},
+                        {"paleta8", 3, 8}};
+    for (const Fmt& f : fmts) {
+        ++cases;
+        PngSpec sp;
+        sp.width = w;
+        sp.height = h;
+        sp.colorType = f.colorType;
+        sp.bitDepth = f.bitDepth;
+        sp.filters = {0, 1, 2, 3, 4};
+        std::vector<uint8_t> expect;
+        const int levels = (1 << f.bitDepth) - 1;
+        if (f.colorType == 3) {  // paleta com alfa (tRNS) nas primeiras entradas
+            for (int i = 0; i <= std::min(levels, 255); ++i) {
+                sp.plte.insert(sp.plte.end(), {Rand(), Rand(), Rand()});
+                if (i < 3) sp.trns.push_back(static_cast<uint8_t>(i * 60));
+            }
+        }
+        for (uint32_t y = 0; y < h; ++y) {
+            std::vector<uint8_t> row(((w * static_cast<uint32_t>(f.bitDepth) *
+                                       (f.colorType == 6 ? 4 : f.colorType == 2 ? 3 : f.colorType == 4 ? 2 : 1)) + 7) / 8);
+            for (uint32_t x = 0; x < w; ++x) {
+                uint8_t px[4] = {0, 0, 0, 255};
+                if (f.bitDepth < 8) {  // 1 amostra por pixel, empacotada
+                    int v = Rand() % (levels + 1);
+                    size_t bit = x * f.bitDepth;
+                    row[bit / 8] = static_cast<uint8_t>(row[bit / 8] | (v << (8 - f.bitDepth - bit % 8)));
+                    if (f.colorType == 3) {
+                        std::copy(&sp.plte[static_cast<size_t>(v) * 3], &sp.plte[static_cast<size_t>(v) * 3] + 3, px);
+                        px[3] = static_cast<size_t>(v) < sp.trns.size() ? sp.trns[static_cast<size_t>(v)] : 255;
+                    } else {
+                        px[0] = px[1] = px[2] = static_cast<uint8_t>(v * 255 / levels);
+                    }
+                } else {
+                    int n = f.colorType == 6 ? 4 : f.colorType == 2 ? 3 : f.colorType == 4 ? 2 : 1;
+                    uint8_t s[4];
+                    for (int c = 0; c < n; ++c) {
+                        s[c] = Rand();
+                        if (f.colorType == 3) s[c] = static_cast<uint8_t>(s[c] % (sp.plte.size() / 3));
+                        if (f.bitDepth == 16) {
+                            row[(x * static_cast<uint32_t>(n) + static_cast<uint32_t>(c)) * 2] = s[c];
+                            row[(x * static_cast<uint32_t>(n) + static_cast<uint32_t>(c)) * 2 + 1] = Rand();
+                        } else {
+                            row[x * static_cast<uint32_t>(n) + static_cast<uint32_t>(c)] = s[c];
+                        }
+                    }
+                    switch (f.colorType) {
+                        case 6: std::copy(s, s + 4, px); break;
+                        case 2: std::copy(s, s + 3, px); break;
+                        case 0: px[0] = px[1] = px[2] = s[0]; break;
+                        case 4: px[0] = px[1] = px[2] = s[0], px[3] = s[1]; break;
+                        case 3:
+                            std::copy(&sp.plte[s[0] * 3u], &sp.plte[s[0] * 3u] + 3, px);
+                            px[3] = s[0] < sp.trns.size() ? sp.trns[s[0]] : 255;
+                            break;
+                    }
+                }
+                expect.insert(expect.end(), px, px + 4);
+            }
+            sp.rows.push_back(row);
+        }
+        std::string err;
+        auto img = DecodePng(Encode(sp), &err);
+        bool ok = img && img->width == static_cast<int32_t>(w) && img->height == static_cast<int32_t>(h) &&
+                  img->rgba == expect;
+        if (!ok) std::printf("      %s: %s\n", f.name, img ? "pixels diferentes" : err.c_str());
+        okCases += ok;
+    }
+    CHECK(okCases == cases);
+
+    // tRNS em RGB: a cor-chave vira transparente, as outras não.
+    {
+        PngSpec sp;
+        sp.width = 2;
+        sp.height = 1;
+        sp.colorType = 2;
+        sp.rows = {{255, 0, 255, 10, 20, 30}};
+        sp.trns = {0, 255, 0, 0, 0, 255};
+        auto img = DecodePng(Encode(sp), nullptr);
+        CHECK(img && img->rgba == std::vector<uint8_t>({255, 0, 255, 0, 10, 20, 30, 255}));
+    }
+
+    // Erros: nada lança, a mensagem explica.
+    std::vector<uint8_t> good = SolidPng(4, 4, 200, 10, 10);
+    auto fails = [](std::vector<uint8_t> data, const char* expect) {
+        std::string err;
+        bool failed = !DecodePng(data, &err);
+        if (!failed || err.find(expect) == std::string::npos)
+            std::printf("      esperado \"%s\", veio \"%s\"\n", expect, err.c_str());
+        return failed && err.find(expect) != std::string::npos;
+    };
+    CHECK(DecodePng(good, nullptr).has_value());
+    CHECK(fails({'G', 'I', 'F', '8', '9', 'a', 0, 0, 0, 0}, "assinatura"));
+    CHECK(fails(std::vector<uint8_t>(good.begin(), good.end() - 20), "truncado"));
+    {
+        std::vector<uint8_t> bad = good;
+        const char idat[] = "IDAT";
+        auto at = std::search(bad.begin(), bad.end(), idat, idat + 4);
+        *(at + 4) ^= 0x40;  // primeiro byte de dados do IDAT
+        CHECK(fails(bad, "CRC"));
+    }
+    {
+        PngSpec sp;
+        sp.width = sp.height = 2;
+        sp.interlace = 1;
+        sp.rows = {std::vector<uint8_t>(8, 1), std::vector<uint8_t>(8, 1)};
+        CHECK(fails(Encode(sp), "entrela"));
+        sp.interlace = 0;
+        sp.filters = {7};
+        CHECK(fails(Encode(sp), "filtro"));
+        sp.filters = {0};
+        sp.colorType = 3;  // paleta sem PLTE
+        sp.rows = {std::vector<uint8_t>(2, 0), std::vector<uint8_t>(2, 0)};
+        CHECK(fails(Encode(sp), "PLTE"));
+        sp.colorType = 2;
+        sp.bitDepth = 4;  // RGB não aceita 4 bits
+        CHECK(fails(Encode(sp), "profundidade"));
+    }
+    {
+        PngSpec sp;  // 5000x1: maior que kMaxImageSide
+        sp.width = 5000;
+        sp.height = 1;
+        sp.rows = {std::vector<uint8_t>(5000 * 4, 0)};
+        CHECK(fails(Encode(sp), "fora de 1..4096"));
+        sp.width = 4;  // dados a menos que o IHDR promete
+        sp.height = 4;
+        sp.rows = {std::vector<uint8_t>(16, 0)};
+        CHECK(fails(Encode(sp), "incompletos"));
+    }
+    CHECK(!LoadPng(fs::temp_directory_path() / "tlmod_nao_existe.png", nullptr));
+
+    // Os PNGs dos mods de exemplo.
+    std::string err;
+    auto ruby = LoadPng(modsDir / "example_item" / "textures" / "fictional_ruby.png", &err);
+    CHECK(ruby && ruby->width == 32 && ruby->height == 32);
+    if (ruby) {
+        auto alpha = [&](int x, int y) { return ruby->rgba[(static_cast<size_t>(y) * 32 + static_cast<size_t>(x)) * 4 + 3]; };
+        CHECK(alpha(0, 0) == 0 && alpha(31, 31) == 0 && alpha(16, 16) == 255);  // fundo transparente, gema opaca
+        CHECK(ruby->rgba[(16u * 32 + 16) * 4] > ruby->rgba[(16u * 32 + 16) * 4 + 2]);  // vermelho
+    }
+    auto boss = LoadPng(modsDir / "example_boss" / "textures" / "ember_titan.png", &err);
+    CHECK(boss && boss->width == 64 && boss->height == 256 && boss->height % 4 == 0);
+    if (boss) {  // quadros diferentes entre si (as chamas giram)
+        size_t frameBytes = 64u * 64u * 4u;
+        CHECK(!std::equal(boss->rgba.begin(), boss->rgba.begin() + static_cast<long>(frameBytes),
+                          boss->rgba.begin() + static_cast<long>(frameBytes)));
+    }
+}
+
+static void TestTextures(const fs::path& modsDir) {
+    using namespace tex;
+    using Item = FakeGame::Item;
+    std::printf("\n== texturas de mod (fila na thread principal, textura por slot)\n");
+    fs::path tmp = fs::temp_directory_path() / "tlmod_texture_test";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+    fs::copy(modsDir / "example_item", tmp / "example_item", fs::copy_options::recursive);
+    fs::copy(modsDir / "example_boss", tmp / "example_boss", fs::copy_options::recursive);
+    fs::path own = tmp / "test.tex";
+    WriteAll(own / "tex" / "blue.png", SolidPng(16, 16, 0, 0, 255));
+    WriteAll(own / "tex" / "wisp.png", SolidPng(10, 20, 0, 255, 0));  // 2 quadros de 10x10
+    WriteAll(own / "tex" / "odd.png", SolidPng(10, 10, 9, 9, 9));
+    WriteAll(own / "tex" / "rejected.png", SolidPng(7, 7, 9, 9, 9));
+
+    FakeGame game;
+    game.texturesReady = false;  // TextureAssets ainda carregando
+    game.rejectTextureWidth = 7;
+    TLModId ruby = TLMOD_INVALID_ID, boss = TLMOD_INVALID_ID;
+    {
+        ModLoader loader(&game);
+        loader.DiscoverDirectory(tmp);
+        ModManifest m = Builtin("test.tex", {"plain", "blue", "missing", "abs"});
+        m.content[TLMOD_CONTENT_NPC] = {"wisp", "odd", "rejected", "old", "escape", "zero"};
+        m.dir = own;
+        loader.AddBuiltin(m, &Init);
+        CHECK(loader.LoadAll() == 3);
+        CHECK(g_badArgsRejected);
+        ruby = loader.Registry().Find(TLMOD_CONTENT_ITEM, "tlmod.example_item:fictional_ruby").value_or(-1);
+        boss = loader.Registry().Find(TLMOD_CONTENT_NPC, "tlmod.example_boss:ember_titan").value_or(-1);
+        const NpcDefinition* bossDef = loader.Registry().Get(TLMOD_CONTENT_NPC, boss)->Npc();
+        CHECK(bossDef->frameCount == 4 && bossDef->frameTicks == 10);
+        CHECK(loader.Registry().Get(TLMOD_CONTENT_NPC, g_oldNpc)->Npc()->texture.empty());
+        CHECK(loader.Registry().Get(TLMOD_CONTENT_NPC, g_wisp)->Npc()->frameTicks == 8);
+
+        // PNGs lidos no LoadAll: rubi, boss, blue, wisp, rejected (missing e odd
+        // falharam com erro no log; old não tem textura). Nada foi ao "Unity" ainda.
+        CHECK(loader.PendingTextures() == 5 && game.textures.empty());
+
+        // Antes da textura existir, o desenho usa a da casca.
+        Item r = game.NewItem(ruby);
+        CHECK(game.Texture(r) == game.itemTexture[kDefaultItemShell]);
+
+        // De outra thread nada é criado: a fila só anda dentro do frame.
+        std::thread([&] {
+            Item other = game.NewItem(g_blue);
+            (void)game.Texture(other);
+        }).join();
+        CHECK(game.textures.empty() && game.offThreadTextures == 0);
+
+        // Frames com o jogo ainda carregando: -1, tenta de novo depois.
+        game.Frame();
+        game.Frame();
+        CHECK(game.textures.empty() && loader.PendingTextures() == 5);
+
+        // Pronto: até 4 por frame, todas na thread do frame. Ordem de carga
+        // (test.tex, example_boss, example_item), itens antes de NPCs: blue,
+        // rubi, wisp, rejected (o jogo recusa: 0 -> sai da fila, fica a da
+        // casca) no 1º frame; o boss no 2º.
+        game.texturesReady = true;
+        game.Frame();
+        CHECK(game.textures.size() == 3 && loader.PendingTextures() == 1);
+        game.Frame();
+        CHECK(game.textures.size() == 4 && loader.PendingTextures() == 0 && loader.TexturesCreated() == 4);
+        CHECK(game.textures[3].frame == game.textures[0].frame + 1);  // um frame depois
+        CHECK(game.offThreadTextures == 0);
+        game.Frame();
+        CHECK(game.textures.size() == 4);  // nada recriado
+
+        // A textura certa para cada item: pelo netID (ID de mod), não pela casca.
+        auto texOf = [&](int32_t id) -> const FakeGame::Texture2D* {
+            int32_t t = id - FakeGame::kModTexture;
+            return t > 0 && static_cast<size_t>(t) <= game.textures.size() ? &game.textures[static_cast<size_t>(t) - 1]
+                                                                            : nullptr;
+        };
+        const FakeGame::Texture2D* rubyTex = texOf(game.Texture(r));
+        CHECK(rubyTex && rubyTex->width == 32 && rubyTex->height == 32 &&
+              rubyTex->name.find("fictional_ruby") != std::string::npos);
+        const FakeGame::Texture2D* blueTex = texOf(game.Texture(game.NewItem(g_blue)));
+        CHECK(blueTex && blueTex->width == 16 && blueTex->rgba[2] == 255 && blueTex->rgba[0] == 0);
+        CHECK(game.Texture(game.NewItem(g_plain)) == game.itemTexture[kDefaultItemShell]);    // sem PNG
+        CHECK(game.Texture(game.NewItem(g_missing)) == game.itemTexture[kDefaultItemShell]);  // PNG faltando
+        CHECK(game.Texture(game.NewItem(kDefaultItemShell)) == game.itemTexture[kDefaultItemShell]);  // a Lente
+        // Inventário misto desenhado: cada slot com a sua.
+        game.player.inventory[0] = r;
+        game.player.inventory[1] = game.NewItem(kDefaultItemShell);
+        game.player.inventory[2] = game.NewItem(g_blue);
+        CHECK(texOf(game.Texture(game.player.inventory[0])) == rubyTex &&
+              game.Texture(game.player.inventory[1]) == game.itemTexture[kDefaultItemShell] &&
+              texOf(game.Texture(game.player.inventory[2])) == blueTex);
+        game.DrawAll();
+        CHECK(game.tableOverflows == 0);
+
+        // NPCs: textura e quadro por slot.
+        CHECK(game.NewNpc(2, 0, 0) == 0);  // original
+        CHECK(game.NewNpc(boss, 0, 0) == 1);
+        CHECK(game.NewNpc(g_wisp, 0, 0) == 2);
+        CHECK(game.NewNpc(g_rejected, 0, 0) == 3);
+        CHECK(game.NewNpc(g_oldNpc, 0, 0) == 4);
+        FakeGame::NpcSprite s0 = game.DrawNpc(0), s1 = game.DrawNpc(1), s2 = game.DrawNpc(2);
+        CHECK(s0.texture == 2 && s0.frameHeight == FakeGame::kShellNpcFrameHeight);
+        const FakeGame::Texture2D* bossTex = texOf(s1.texture);
+        CHECK(bossTex && bossTex->width == 64 && bossTex->height == 256 && s1.frameHeight == 64 && s1.frameY == 0);
+        CHECK(texOf(s2.texture) && texOf(s2.texture)->height == 20 && s2.frameHeight == 10);
+        CHECK(game.DrawNpc(3).texture == 1 && game.DrawNpc(4).texture == 1);  // recusada / mod antigo: casca
+
+        // Boss na introdução: o mod fixa o quadro 0 por 120 ticks.
+        for (int t = 0; t < 60; ++t) game.UpdateNpcs();
+        CHECK(game.DrawNpc(1).frameY == 0);
+        // Wisp fixa frame = 5 em on_ai: 5 % 2 = quadro 1.
+        CHECK(game.DrawNpc(2).frameY == 10);
+        // Depois da intro (tick 120) a animação é automática: quadro = ticks / 10 % 4.
+        for (int t = 60; t < 135; ++t) game.UpdateNpcs();
+        CHECK(game.DrawNpc(1).frameY == (135 / 10 % 4) * 64);
+        game.UpdateNpcs(), game.UpdateNpcs(), game.UpdateNpcs(), game.UpdateNpcs(), game.UpdateNpcs();
+        CHECK(game.DrawNpc(1).frameY == (140 / 10 % 4) * 64);
+        // Um segundo boss tem o próprio relógio: começa do quadro 0.
+        CHECK(game.NewNpc(boss, 0, 0) == 5);
+        CHECK(game.DrawNpc(5).texture == s1.texture && game.DrawNpc(5).frameY == 0 && game.DrawNpc(1).frameY != 0);
+        // Slot reaproveitado por um NPC original: volta à textura da casca.
+        game.SetDefaults(1, 7);
+        CHECK(game.DrawNpc(1).texture == 7);
+        CHECK(!game.vanillaSetDefaultsOverflow);
+    }
+    // Sem o runtime, o desenho não chama ninguém.
+    CHECK(!game.drawHooks.itemTexture && !game.drawHooks.npcTexture);
+    CHECK(game.Texture(game.player.inventory[0]) == game.itemTexture[kDefaultItemShell]);
+    fs::remove_all(tmp);
+}
+
+// ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -1049,6 +1505,8 @@ int main(int argc, char** argv) {
     TestBossChecklist(argv[1]);
     TestSaves(argv[1]);
     TestItems(argv[1]);
+    TestPng(argv[1]);
+    TestTextures(argv[1]);
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

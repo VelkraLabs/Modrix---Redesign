@@ -1,6 +1,7 @@
 // Mod de exemplo: registra um item fictício. No jogo ele roda numa casca (a
-// Lente, padrão): o jogo desenha a Lente, mas o nome, o tooltip, o valor, a
-// raridade e a pilha máxima são os daqui.
+// Lente, padrão): as tabelas do jogo só veem a Lente, mas o nome, o tooltip, o
+// valor, a raridade, a pilha máxima e a imagem (textures/fictional_ruby.png,
+// 32x32) são os daqui.
 //
 // Para testar no aparelho: crie um arquivo vazio chamado `give_on_start` na
 // pasta deste mod. Ao entrar num mundo, o jogador recebe 3 Rubis Fictícios
@@ -28,6 +29,7 @@ static bool OnLoad(tlmod::Host& host) {
     ruby.maxStack = 999;
     ruby.value = 5000;  // 50 moedas de prata
     ruby.rarity = 2;
+    ruby.texture = "textures/fictional_ruby.png";  // relativo à pasta do mod
 
     TLModId id = host.RegisterItem(ruby);
     if (id == TLMOD_INVALID_ID) return false;  // motivo já está no log do runtime

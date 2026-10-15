@@ -19,7 +19,7 @@ python3 tools/offset_diff.py --dump novo/dump.cs --script novo/script.json
 
 | origem no TLMod | regra |
 |---|---|
-| `terraria_offsets.h` `player_off`, `npc_off`, `main_static_off`, `local_user_off`, `item_off`, `chest_off`, `loadout_off`, `file_data_off`, `player_file_data_off`, `world_gen_static_off`, `item_tooltip_off`, `item_tooltip_static_off` | offset do campo (com herança) e tipo, comparado com a 1ª palavra do comentário |
+| `terraria_offsets.h` `player_off`, `npc_off`, `main_static_off`, `local_user_off`, `item_off`, `chest_off`, `loadout_off`, `file_data_off`, `player_file_data_off`, `world_gen_static_off`, `item_tooltip_off`, `item_tooltip_static_off`, `texture_assets_static_off`, `xna_texture2d_off`, `player_draw_set_off` | offset do campo (com herança) e tipo, comparado com a 1ª palavra do comentário |
 | `terraria_offsets.h` `rva::Classe_Metodo` | RVA; desambigua overloads com `argc::` |
 | `terraria_offsets.h` `argc::` | número de parâmetros (mudou = o typedef do hook precisa mudar) |
 | `terraria_offsets.h` `kMaxNPCs`, `kNpcVanillaCount`, `kMaxChests`, `kItemVanillaCount`, `kDefaultItemShell`, `k*Class`, `kAssembly` | const do jogo, existência da classe e da imagem |
@@ -35,6 +35,19 @@ Ao criar um namespace novo em `terraria_offsets.h`, acrescente a regra lá.
 - **Código de saída:** `0` nada mudou, `1` há diferenças, `2` erro.
 
 **Testes:** `python3 tools/test_offset_diff.py -v`. Usam um dump sintético; o dump real não fica no repositório.
+
+## make_example_textures.py
+
+Gera os PNGs dos mods de exemplo (`example_item/textures/fictional_ruby.png`, 32x32, e
+`example_boss/textures/ember_titan.png`, 4 quadros de 64x64), em pixel art determinística e só com a
+biblioteca padrão. Os PNGs ficam versionados; rode de novo só se mudar o desenho:
+
+```sh
+python3 tools/make_example_textures.py
+```
+
+`asset_texture2d_fields` (`Asset<Texture2D>`, genérico) não entra no `offset_diff`: o `dump.cs` mostra
+`0x0` nos campos de genéricos, e os offsets vêm da instância no `il2cpp.h`.
 
 ## rename_prefix.py
 

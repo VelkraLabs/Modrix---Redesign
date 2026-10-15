@@ -228,6 +228,96 @@ int TestItems(void* lib) {
     return 0;
 }
 
+// --- Texturas de mod: criação pelo Unity e troca por desenho -----------------------
+int32_t g_rubyTex = 0, g_sheetTex = 0, g_modNpcIndex = -1;
+int32_t DrawItemTexture(Il2CppObject*, int32_t netId) { return netId == kModItem ? g_rubyTex : 0; }
+bool DrawNpcTexture(Il2CppObject*, int32_t index, TLModNpcDraw* out) {
+    if (index != g_modNpcIndex) return false;
+    *out = TLModNpcDraw{g_sheetTex, 4, 2};
+    return true;
+}
+
+int TestDraw(void* lib) {
+    auto sym = [&](const char* name) { return dlsym(lib, name); };
+    auto load_assets = reinterpret_cast<void (*)()>(sym("mock_load_texture_assets"));
+    auto draw_inv = reinterpret_cast<void* (*)(int32_t)>(sym("mock_game_draw_inventory"));
+    auto draw_hotbar = reinterpret_cast<void* (*)(int32_t)>(sym("mock_game_draw_hotbar"));
+    auto draw_world = reinterpret_cast<void* (*)(void*)>(sym("mock_game_draw_world_item"));
+    auto draw_icon = reinterpret_cast<void* (*)(void*)>(sym("mock_game_draw_item_icon"));
+    auto draw_held = reinterpret_cast<void* (*)(void*)>(sym("mock_game_draw_held"));
+    auto draw_npc = reinterpret_cast<void* (*)(int32_t, int32_t*, int32_t*)>(sym("mock_game_draw_npc"));
+    auto item_tex = reinterpret_cast<void* (*)(int32_t)>(sym("mock_item_asset_texture"));
+    auto npc_tex = reinterpret_cast<void* (*)(int32_t)>(sym("mock_npc_asset_texture"));
+    auto frame_count = reinterpret_cast<int32_t (*)(int32_t)>(sym("mock_npc_frame_count"));
+    auto tex_info = reinterpret_cast<bool (*)(void*, int32_t*, int32_t*, int32_t*, int32_t*, bool*)>(sym("mock_texture_info"));
+    auto tex_pixel = reinterpret_cast<uint32_t (*)(void*, int32_t, int32_t)>(sym("mock_texture_pixel"));
+    auto new_npc = reinterpret_cast<int32_t (*)(int32_t, int32_t, int32_t)>(sym("mock_game_new_npc"));
+    CHECK(load_assets && draw_inv && draw_hotbar && draw_world && draw_icon && draw_held && draw_npc && item_tex &&
+          npc_tex && frame_count && tex_info && tex_pixel && new_npc);
+
+    // 2x2 RGBA, linha 0 = topo: vermelho, verde / azul, branco.
+    const uint32_t kRed = 0xFF0000FF, kGreen = 0xFF00FF00, kBlue = 0xFFFF0000, kWhite = 0xFFFFFFFF;
+    const uint32_t px[] = {kRed, kGreen, kBlue, kWhite};
+    const uint8_t* rgba = reinterpret_cast<const uint8_t*>(px);
+    CHECK(TLMod_CreateTexture(rgba, 2, 2, "cedo") == -1);  // TextureAssets ainda vazio: tentar depois
+    load_assets();
+    g_rubyTex = TLMod_CreateTexture(rgba, 2, 2, "test:ruby");
+    CHECK(g_rubyTex == 1);
+    CHECK(TLMod_CreateTexture(rgba, 0, 2, "zero") == 0 && TLMod_CreateTexture(nullptr, 2, 2, "nulo") == 0);
+    // Folha de NPC 8x32: 4 quadros de 8x8.
+    std::vector<uint32_t> sheet(8 * 32, kBlue);
+    g_sheetTex = TLMod_CreateTexture(reinterpret_cast<const uint8_t*>(sheet.data()), 8, 32, "test:boss");
+    int32_t w = 0, h = 0;
+    CHECK(g_sheetTex == 2 && TLMod_TextureSize(g_sheetTex, &w, &h) && w == 8 && h == 32 && !TLMod_TextureSize(3, &w, &h));
+
+    TLModItemCallbacks off{};
+    TLMod_SetItemCallbacks(&off);  // itens montados à mão abaixo
+    Il2CppObject* player = TLMod_GetLocalPlayer();
+    auto make = [&](int32_t slot, int32_t type, int32_t netId) {
+        Il2CppObject* it = TLMod_ItemSlot(player, TLMOD_ITEMS_INVENTORY, 0, slot);
+        TLModItemFields f{type, netId, 1, 0, false};
+        TLMod_WriteItem(it, &f);
+        return it;
+    };
+    Il2CppObject* ruby = make(0, kShell, kModItem);  // item de mod: casca 38
+    Il2CppObject* lens = make(1, kShell, kShell);    // uma Lente de verdade
+    Il2CppObject* noTex = make(2, kShell, kModItem + 1);  // de mod, sem textura
+    void* lensTex = item_tex(kShell);
+
+    TLModDrawCallbacks cbs{&DrawItemTexture, &DrawNpcTexture};
+    TLMod_SetDrawCallbacks(&cbs);
+    void* modTex = draw_inv(0);
+    CHECK(modTex != lensTex && modTex != nullptr);
+    bool applied = false;
+    int32_t filter = -1, wrap = -1;
+    CHECK(tex_info(modTex, &w, &h, &filter, &wrap, &applied) && w == 2 && h == 2 && applied);
+    CHECK(filter == 0 && wrap == 1);  // Point (pixel art) e Clamp
+    // O Unity guarda de baixo para cima: o topo do PNG continua no topo.
+    CHECK(tex_pixel(modTex, 0, 0) == kRed && tex_pixel(modTex, 1, 0) == kGreen && tex_pixel(modTex, 0, 1) == kBlue);
+    CHECK(item_tex(kShell) == lensTex);           // a casca voltou depois do desenho
+    CHECK(draw_inv(1) == lensTex);                // a Lente de verdade continua Lente
+    CHECK(draw_inv(2) == lensTex);                // de mod sem textura: a da casca
+    CHECK(draw_hotbar(0) == modTex && draw_world(ruby) == modTex && draw_icon(ruby) == modTex);
+    CHECK(draw_held(ruby) == modTex && draw_held(lens) == lensTex && draw_world(noTex) == lensTex);
+    CHECK(item_tex(kShell) == lensTex);
+
+    // NPC: folha de 4 quadros; o 3º (frame 2). Main.npcFrameCount[4] e o
+    // NPC.frame voltam ao que eram depois do desenho.
+    int32_t vanillaIndex = new_npc(0, 0, 4), modIndex = new_npc(10, 10, 4);
+    g_modNpcIndex = modIndex;
+    void* eyeTex = npc_tex(4);
+    int32_t frames = 0, frame[4] = {};
+    void* bossTex = draw_npc(modIndex, &frames, frame);
+    CHECK(bossTex != eyeTex && frames == 4 && frame[0] == 0 && frame[1] == 16 && frame[2] == 8 && frame[3] == 8);
+    CHECK(npc_tex(4) == eyeTex && frame_count(4) == 6);
+    CHECK(draw_npc(vanillaIndex, &frames, frame) == eyeTex && frames == 6);
+
+    TLMod_SetDrawCallbacks(nullptr);
+    CHECK(draw_inv(0) == lensTex && draw_npc(modIndex, &frames, frame) == eyeTex);
+    for (int32_t slot = 0; slot < 3; ++slot) make(slot, 0, 0);  // o teste de save usa o mesmo inventário
+    return 0;
+}
+
 int TestSaves(void* lib) {
     auto sym = [&](const char* name) { return dlsym(lib, name); };
     auto save_player = reinterpret_cast<void (*)()>(sym("mock_game_save_player"));
@@ -464,6 +554,7 @@ int main(int argc, char** argv) {
     CHECK(TLMod_ReadStaticBool(hard, &b) && b);
 
     if (int rc = TestItems(lib)) return rc;
+    if (int rc = TestDraw(lib)) return rc;
     if (int rc = TestSaves(lib)) return rc;
 
     std::printf("TODOS OS TESTES PASSARAM\n");

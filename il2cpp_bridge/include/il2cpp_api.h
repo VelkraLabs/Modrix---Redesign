@@ -18,6 +18,7 @@ struct Il2CppClass;
 struct Il2CppThread;
 struct Il2CppArray;
 struct FieldInfo;
+struct Il2CppType;
 struct Il2CppObject;
 typedef Il2CppObject Il2CppException;
 
@@ -56,7 +57,14 @@ struct MethodInfo {
     X(Il2CppObject*, il2cpp_string_new, (const char*))                                      \
     X(uint32_t, il2cpp_gchandle_new, (Il2CppObject*, bool))                                 \
     X(Il2CppObject*, il2cpp_gchandle_get_target, (uint32_t))                                \
-    X(void, il2cpp_gc_wbarrier_set_field, (Il2CppObject*, void**, void*))
+    X(void, il2cpp_gc_wbarrier_set_field, (Il2CppObject*, void**, void*))                  \
+    X(Il2CppClass*, il2cpp_object_get_class, (Il2CppObject*))                               \
+    X(const MethodInfo*, il2cpp_class_get_methods, (Il2CppClass*, void**))                  \
+    X(const char*, il2cpp_method_get_name, (const MethodInfo*))                             \
+    X(uint32_t, il2cpp_method_get_param_count, (const MethodInfo*))                         \
+    X(const Il2CppType*, il2cpp_method_get_param, (const MethodInfo*, uint32_t))            \
+    X(char*, il2cpp_type_get_name, (const Il2CppType*))                                     \
+    X(void, il2cpp_free, (void*))
 
 namespace il2cpp {
 

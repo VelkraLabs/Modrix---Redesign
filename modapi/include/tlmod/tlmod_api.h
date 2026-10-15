@@ -87,7 +87,7 @@ typedef struct TLModItemDef {
     const char* name;          /* chave local [a-z0-9_]{1,64}; declarada em manifest content.items */
     const char* display_name;  /* nome exibido */
     const char* tooltip;       /* pode ser NULL */
-    const char* texture;       /* caminho relativo à pasta do mod; pode ser NULL */
+    const char* texture;       /* PNG relativo à pasta do mod (ex.: "textures/x.png"); NULL = o da casca */
     int32_t width;             /* hitbox em pixels */
     int32_t height;
     int32_t max_stack;         /* 1 = não empilha */
@@ -127,6 +127,10 @@ typedef struct TLModNpcState {
     TLModPlayer target;
     float ai[4];
     float local[8];
+    /* Acrescentado depois (o runtime aloca esta struct; mods antigos não o
+     * veem): quadro da folha de textura do mod a desenhar, 0..frame_count-1.
+     * -1 = automático (avança a cada frame_ticks). O mod pode mudar em on_ai. */
+    int32_t frame;
 } TLModNpcState;
 
 typedef void (*TLModNpcSpawnFn)(void* user, TLModNpcState* npc);
@@ -147,6 +151,12 @@ typedef struct TLModNpcDef {
     void* user;                /* repassado aos callbacks */
     TLModNpcSpawnFn on_spawn; /* opcional: logo após o NPC entrar no mundo */
     TLModNpcAiFn on_ai;       /* opcional: comportamento por tick */
+    /* Acrescentados depois de on_ai (o runtime só lê se struct_size cobre):
+     * textura própria, um PNG relativo à pasta do mod com frame_count quadros
+     * empilhados na vertical (todos da mesma altura). NULL = a da casca. */
+    const char* texture;
+    int32_t frame_count;      /* >= 1; a altura do PNG precisa ser múltipla */
+    int32_t frame_ticks;      /* ticks por quadro na animação automática (60 = 1 s); <= 0 = 8 */
 } TLModNpcDef;
 
 /* Progresso do mundo atual. Valores só são acrescentados ao fim (ABI). */

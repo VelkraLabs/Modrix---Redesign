@@ -69,6 +69,11 @@ public:
     // NPC de mod que ocupa o slot de Main.npc (TLMOD_INVALID_ID = original).
     TLModId NpcInSlot(int32_t index) const;
 
+    // Texturas de mod: PNGs lidos no LoadAll, esperando a vez no frame handler
+    // (thread principal), e quantas o jogo já criou.
+    size_t PendingTextures() const;
+    int32_t TexturesCreated() const;
+
     // Itens de mod fora do arquivo do jogo (arquivo paralelo). Os ganchos de
     // save/load só entram no fim de LoadAll, com todos os IDs já atribuídos;
     // configurar (SetCloudDirectory) antes disso.
@@ -91,6 +96,8 @@ public:
     struct Impl;  // detalhes (contextos, dispatch de eventos, bibliotecas abertas)
 
 private:
+    void LoadTextures();
+
     GameAdapter* game_;
     ContentRegistry registry_;
     std::vector<ModRecord> mods_;

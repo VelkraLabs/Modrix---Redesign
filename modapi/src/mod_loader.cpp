@@ -1,8 +1,10 @@
 #include "tlmod/runtime/mod_loader.h"
 
 #include <algorithm>
-#include <iterator>
+#include <atomic>
 #include <cstddef>
+#include <deque>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <queue>
@@ -83,6 +85,8 @@ struct ModLoader::Impl {
     struct NpcSlot {
         TLModId type = TLMOD_INVALID_ID;
         float local[8] = {};
+        uint32_t ticks = 0;  // ticks de AI desde o spawn (animação automática)
+        int32_t frame = -1;  // TLModNpcState.frame: -1 = automático
     };
     std::vector<NpcSlot> npcSlots;
     uint64_t modNpcSpawns = 0;
@@ -107,7 +111,68 @@ struct ModLoader::Impl {
     std::mutex giveMutex;
     std::vector<Give> pendingGives;
 
+    // ---- Texturas de mod -------------------------------------------------------
+    // PNGs decodificados no LoadAll (qualquer thread) e enviados ao motor no
+    // frame handler (thread principal do Unity), poucos por frame. Os mapas
+    // tipo -> id são montados no LoadAll, antes de os ganchos existirem; depois
+    // só os valores (atômicos) mudam, então o desenho lê sem trava.
+    struct TextureSlot {
+        std::atomic<int32_t> id{0};
+    };
+    std::map<int32_t, TextureSlot> itemTextures;  // ID do item de mod -> textura
+    std::map<int32_t, TextureSlot> npcTextures;   // ID do NPC de mod -> textura
+    struct PendingTexture {
+        std::string modId;
+        std::string what;  // "mod:nome (arquivo)" para o log
+        Image image;
+        TextureSlot* slot;
+    };
+    std::deque<PendingTexture> pendingTextures;  // só a thread principal mexe depois do LoadAll
+    static constexpr int kTexturesPerFrame = 4;
+    int32_t texturesCreated = 0;
+
+    void ProcessTextures() {
+        for (int n = 0; n < kTexturesPerFrame && !pendingTextures.empty(); ++n) {
+            PendingTexture& t = pendingTextures.front();
+            int32_t id = game->CreateTexture(t.image, t.what);
+            if (id < 0) return;  // o jogo ainda não carregou as texturas: próximo frame
+            if (id == 0) {
+                Log(TLMOD_LOG_ERROR, t.modId, "textura " + t.what + ": o jogo recusou; fica a da casca");
+            } else {
+                t.slot->id.store(id, std::memory_order_release);
+                ++texturesCreated;
+                Log(TLMOD_LOG_DEBUG, t.modId, "textura " + t.what + " -> id " + std::to_string(id));
+            }
+            pendingTextures.pop_front();
+        }
+    }
+
+    int32_t ItemTexture(int32_t type) const {
+        auto it = itemTextures.find(type);
+        return it == itemTextures.end() ? 0 : it->second.id.load(std::memory_order_acquire);
+    }
+
+    bool NpcTexture(int32_t index, GameAdapter::NpcDraw& out) const {
+        if (!ValidSlot(index)) return false;
+        const NpcSlot& slot = npcSlots[static_cast<size_t>(index)];
+        if (slot.type == TLMOD_INVALID_ID) return false;
+        auto it = npcTextures.find(slot.type);
+        if (it == npcTextures.end()) return false;
+        int32_t id = it->second.id.load(std::memory_order_acquire);
+        const NpcDefinition* def = ModNpcDef(slot.type);
+        if (id <= 0 || !def) return false;
+        out.texture = id;
+        out.frameCount = def->frameCount;
+        if (slot.frame >= 0)
+            out.frame = slot.frame % def->frameCount;
+        else
+            out.frame = static_cast<int32_t>((slot.ticks / static_cast<uint32_t>(def->frameTicks)) %
+                                             static_cast<uint32_t>(def->frameCount));
+        return true;
+    }
+
     void OnFrame() {
+        ProcessTextures();
         std::vector<Give> todo;
         {
             std::lock_guard<std::mutex> lock(giveMutex);
@@ -139,14 +204,17 @@ struct ModLoader::Impl {
     bool ReadModNpc(int32_t index, TLModNpcState& st) const {
         if (!game->ReadNpc(index, st)) return false;
         st.index = index;
-        st.type = npcSlots[static_cast<size_t>(index)].type;  // o jogo só vê a casca
-        std::copy(std::begin(npcSlots[static_cast<size_t>(index)].local),
-                  std::end(npcSlots[static_cast<size_t>(index)].local), st.local);
+        const NpcSlot& slot = npcSlots[static_cast<size_t>(index)];
+        st.type = slot.type;  // o jogo só vê a casca
+        std::copy(std::begin(slot.local), std::end(slot.local), st.local);
+        st.frame = slot.frame;
         return true;
     }
     void WriteModNpc(int32_t index, const TLModNpcState& st) {
         game->WriteNpc(index, st);
-        std::copy(std::begin(st.local), std::end(st.local), npcSlots[static_cast<size_t>(index)].local);
+        NpcSlot& slot = npcSlots[static_cast<size_t>(index)];
+        std::copy(std::begin(st.local), std::end(st.local), slot.local);
+        slot.frame = st.frame < 0 ? -1 : st.frame;
     }
 
     // Pré-NewNPC: ID de mod -> casca original. O ID de mod nunca chega ao jogo.
@@ -164,7 +232,8 @@ struct ModLoader::Impl {
             Log(TLMOD_LOG_WARN, e->modId, "spawn de " + e->key + " falhou: sem slot livre");
             return;
         }
-        npcSlots[static_cast<size_t>(index)] = NpcSlot{requested, {}};
+        npcSlots[static_cast<size_t>(index)] = NpcSlot{};
+        npcSlots[static_cast<size_t>(index)].type = requested;
         ++modNpcSpawns;
         Log(TLMOD_LOG_DEBUG, e->modId,
             "spawn " + e->key + " no slot " + std::to_string(index) + " (casca " + std::to_string(spawned) + ")");
@@ -187,9 +256,10 @@ struct ModLoader::Impl {
     // Pré-AI, por tick: só NPCs de mod com on_ai pagam o custo de ler/escrever.
     bool OnNpcAi(int32_t index) {
         if (!ValidSlot(index)) return false;
-        TLModId type = npcSlots[static_cast<size_t>(index)].type;
-        if (type == TLMOD_INVALID_ID) return false;
-        const NpcDefinition* def = ModNpcDef(type);
+        NpcSlot& slot = npcSlots[static_cast<size_t>(index)];
+        if (slot.type == TLMOD_INVALID_ID) return false;
+        ++slot.ticks;  // relógio da animação automática, mesmo sem on_ai
+        const NpcDefinition* def = ModNpcDef(slot.type);
         if (!def || !def->onAi) return false;
         TLModNpcState st{};
         if (!ReadModNpc(index, st)) return false;
@@ -332,6 +402,16 @@ TLModId Api_RegisterNpc(TLModContext* ctx, const TLModNpcDef* def) {
     npc.user = def->user;
     npc.onSpawn = def->on_spawn;
     npc.onAi = def->on_ai;
+    // texture/frame_count/frame_ticks vieram depois: só se struct_size os cobre.
+    constexpr size_t kTextureEnd = offsetof(TLModNpcDef, frame_ticks) + sizeof(int32_t);
+    if (def->struct_size >= kTextureEnd && def->texture) {
+        if (!IsSafeRelativePath(def->texture))
+            return err("texture deve ser caminho relativo dentro da pasta do mod");
+        if (def->frame_count < 1 || def->frame_count > 256) return err("frame_count deve estar em 1..256");
+        npc.texture = (mod.manifest.dir / def->texture).lexically_normal().string();
+        npc.frameCount = def->frame_count;
+        npc.frameTicks = def->frame_ticks > 0 ? def->frame_ticks : 8;
+    }
 
     std::string error;
     auto id = reg.Register(TLMOD_CONTENT_NPC, mod.manifest.id, name, std::move(npc), &error);
@@ -460,6 +540,7 @@ ModLoader::~ModLoader() {
     game_->SetPersistenceHooks({});
     game_->SetItemHooks({});
     game_->SetFrameHandler(nullptr);
+    game_->SetDrawHooks({});
 }
 
 std::vector<std::string> ModLoader::Providers() const {
@@ -615,6 +696,35 @@ std::vector<std::string> ModLoader::ResolveOrder(std::vector<ModRecord>& mods) {
     return order;
 }
 
+void ModLoader::LoadTextures() {
+    auto load = [&](const ContentEntry& e, const std::string& file, int32_t frameCount,
+                    std::map<int32_t, Impl::TextureSlot>& slots) {
+        std::string error;
+        std::optional<Image> img = LoadPng(file, &error);
+        std::string what = e.key + " (" + std::filesystem::path(file).filename().string() + ")";
+        if (!img) {
+            Log(TLMOD_LOG_ERROR, e.modId, "textura de " + e.key + ": " + error + "; fica a da casca");
+            return;
+        }
+        if (img->height % frameCount != 0) {
+            Log(TLMOD_LOG_ERROR, e.modId,
+                "textura de " + e.key + ": altura " + std::to_string(img->height) + " não é múltipla de " +
+                    std::to_string(frameCount) + " quadros; fica a da casca");
+            return;
+        }
+        Impl::TextureSlot& slot = slots[e.id];
+        impl_->pendingTextures.push_back({e.modId, what, std::move(*img), &slot});
+    };
+    for (const ContentEntry& e : registry_.Entries(TLMOD_CONTENT_ITEM))
+        if (const ItemDefinition* d = e.Item(); d && !d->texture.empty()) load(e, d->texture, 1, impl_->itemTextures);
+    for (const ContentEntry& e : registry_.Entries(TLMOD_CONTENT_NPC))
+        if (const NpcDefinition* d = e.Npc(); d && !d->texture.empty())
+            load(e, d->texture, d->frameCount, impl_->npcTextures);
+}
+
+size_t ModLoader::PendingTextures() const { return impl_->pendingTextures.size(); }
+int32_t ModLoader::TexturesCreated() const { return impl_->texturesCreated; }
+
 size_t ModLoader::LoadAll() {
     if (loaded_) return 0;
     loaded_ = true;
@@ -726,6 +836,15 @@ size_t ModLoader::LoadAll() {
     items.remapType = [impl](int32_t t) { return impl->RemapItemType(t); };
     items.definition = [impl](int32_t t) { return impl->ModItemDef(t); };
     game_->SetItemHooks(std::move(items));
+
+    // Texturas: lê e decodifica os PNGs agora; o envio ao motor fica na fila do
+    // frame handler (thread principal). Um PNG ruim só custa a textura: o
+    // conteúdo continua com a da casca.
+    LoadTextures();
+    GameAdapter::DrawHooks draw;
+    draw.itemTexture = [impl](int32_t t) { return impl->ItemTexture(t); };
+    draw.npcTexture = [impl](int32_t i, GameAdapter::NpcDraw& out) { return impl->NpcTexture(i, out); };
+    game_->SetDrawHooks(std::move(draw));
     game_->SetFrameHandler([impl] { impl->OnFrame(); });
 
     // Save/load só agora, com o registro completo: antes disso uma chave de

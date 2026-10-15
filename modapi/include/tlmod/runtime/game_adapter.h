@@ -6,6 +6,7 @@
 #include <string>
 
 #include "tlmod/runtime/content_registry.h"
+#include "tlmod/runtime/png.h"
 #include "tlmod/tlmod_api.h"
 
 namespace tlmod::rt {
@@ -147,7 +148,28 @@ public:
     // Devolve quantas unidades entraram.
     virtual int32_t GiveItem(int32_t type, int32_t stack) = 0;
     // Uma vez por frame, na thread do jogo (menu e mundo). Nulo desliga.
+    // No Terraria mobile é a thread principal do Unity (Main.DoUpdate): a única
+    // em que a API do Unity (CreateTexture) pode ser chamada.
     virtual void SetFrameHandler(std::function<void()> handler) = 0;
+
+    // --- Texturas de mod -----------------------------------------------------------
+    // Cria a textura no motor a partir de RGBA8 (linha 0 = topo). SÓ dentro do
+    // frame handler. Devolve o id (> 0), 0 se falhou, -1 se o jogo ainda não está
+    // pronto (tentar num próximo frame).
+    virtual int32_t CreateTexture(const Image& image, const std::string& name) = 0;
+    struct NpcDraw {
+        int32_t texture = 0;     // id de CreateTexture
+        int32_t frameCount = 1;  // quadros na folha (vertical)
+        int32_t frame = 0;       // quadro a desenhar
+    };
+    // Na hora de desenhar (thread principal): qual textura usar.
+    struct DrawHooks {
+        // Item com ID de mod (netID): id da textura, 0 = a da casca.
+        std::function<int32_t(int32_t itemType)> itemTexture;
+        // NPC no slot `index`: true + out = a textura do mod.
+        std::function<bool(int32_t npcIndex, NpcDraw& out)> npcTexture;
+    };
+    virtual void SetDrawHooks(DrawHooks hooks) = 0;
 
     // --- Save/load ---------------------------------------------------------------
     // Ganchos em volta do save e do load de personagem e mundo (no Terraria:

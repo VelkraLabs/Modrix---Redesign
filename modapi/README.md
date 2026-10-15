@@ -91,8 +91,9 @@ textura, hitbox, sons e, se o mod quiser, a própria AI. O jogo indexa arrays po
 Estado por NPC: `ai[0..3]` são do jogo, e a AI da casca usa esses campos quando roda. `local[8]` é
 privado do mod, fica guardado no runtime e o jogo não toca. Veja `mods/example_boss`.
 
-Ainda falta: nome exibido, barra e música de boss (`boss`), textura própria, sincronizar a tabela de
-slots e o `local[]` em multiplayer, e confirmar no jogo que `NewNPC` aceita `source` nulo.
+Ainda falta: nome exibido, barra e música de boss (`boss`), sincronizar a tabela de slots e o
+`local[]` em multiplayer, e confirmar no jogo que `NewNPC` aceita `source` nulo. Textura própria:
+ver [Texturas de mod](#texturas-de-mod).
 
 ## Itens de mod no jogo (casca)
 
@@ -140,14 +141,81 @@ inclusive no init, e a entrega acontece no próximo frame com um mundo carregado
 ele já tem.
 
 **Para testar no aparelho:** crie um arquivo vazio `give_on_start` na pasta do mod de exemplo
-(`.../tlmod/mods/example_item/give_on_start`). Ao entrar num mundo vêm 3 Rubis Fictícios, com o
-desenho da Lente, mas com nome, tooltip, valor (50 de prata), raridade e pilha (999) do mod.
+(`.../tlmod/mods/example_item/give_on_start`). Ao entrar num mundo vêm 3 Rubis Fictícios, com a
+imagem do mod (`textures/fictional_ruby.png`) e nome, tooltip, valor (50 de prata), raridade e pilha
+(999) do mod.
 
 O que ainda não está aqui:
-- textura própria (o jogo desenha a casca, `TextureAssets.Item[type]`);
 - receitas e loja;
 - sincronizar a tabela de IDs em multiplayer;
 - telas que leem o nome direto de `Lang` por `type` em vez de `Item.Name` mostrariam o nome da casca.
+
+## Texturas de mod
+
+Item e NPC podem trazer um PNG da pasta do mod: `TLModItemDef.texture` e `TLModNpcDef.texture`
+(caminho relativo, ex.: `"textures/fictional_ruby.png"`). Para NPCs, `frame_count` quadros empilhados
+na vertical, todos da mesma altura, e `frame_ticks` ticks por quadro na animação automática.
+`TLModNpcState.frame` fixa um quadro em `on_ai`; `-1` volta ao automático. Sem PNG, ou se o PNG
+falhar, fica a textura da casca e o erro vai para o log.
+
+### Onde as texturas ficam nesta build (confirmado no dump, não no PC)
+
+- **Tabelas.** `Terraria.GameContent.TextureAssets.Item` e `.Npc` (estáticos `0x560` e `0x570`) são
+  `Asset<Texture2D>[]` do tamanho `ItemID.Count` / `NPCID.Count`. O `Asset` (ReLogic) guarda a textura
+  em `Value` (`+0x28`) e o estado em `State` (`+0x18`, 2 = carregado).
+- **O desenho lê o campo direto**, sem `get_Value` nem `Main.LoadItem`: `GUIInventory.DrawItem` faz
+  `ldr [static+0x560]` → `ldr [asset+0x28]`. Por isso a troca é do `Asset` inteiro, na posição da casca.
+- **`Texture2D` é o do XNA da versão mobile.** `Microsoft.Xna.Framework.Graphics.Texture2D` é um
+  invólucro de `UnityEngine.Texture2D` (`_unityTexture`, `+0x78`), com suporte a atlas (`PackedEntry`,
+  `_textureAtlas`). O `.ctor(UnityEngine.Texture2D)` (`0xB38544`) copia largura e altura e marca
+  `_textureLoaded`, sem atlas.
+- **`ImageConversion.LoadImage` não existe nesta build**: o stripping do Unity removeu
+  `ImageConversion`, `LoadRawTextureData` e `SetPixels32`. O runtime decodifica o PNG em C++ (zlib) e a
+  ponte escreve os pixels por `Texture2D.GetWritableImageData` (privado) + `Apply`. O Unity guarda
+  as linhas de baixo para cima, então a ponte inverte. Filtro `Point` (pixel art) e `Clamp`.
+
+### Fluxo
+
+```
+LoadAll (thread do loader)   lê e decodifica cada PNG; valida altura % frame_count
+Main.DoUpdate (hook, thread principal do Unity)
+  └ fila: até 4 texturas por frame -> UnityEngine.Texture2D -> XNA Texture2D -> Asset<Texture2D>
+    (-1 enquanto TextureAssets não carregou: tenta no próximo frame; 0 = falhou, fica a casca)
+desenho de um item/NPC de mod (hooks abaixo)
+  └ TextureAssets.Item[casca] (ou .Npc[casca]) = Asset do mod; desenho original; devolve o da casca
+```
+
+Item de mod = `netID` na faixa de mods; NPC de mod = slot de `Main.npc` marcado pelo runtime. A
+textura é escolhida por item e por slot, então um item ou NPC original da mesma casca continua com a
+textura dele. Para NPCs, durante o desenho, a ponte também troca `Main.npcFrameCount[casca]` e
+`NPC.frame` (o retângulo do quadro na folha do mod) e os devolve depois.
+
+| hook | RVA | o que desenha |
+|---|---|---|
+| `GUIInventory.DrawItem` | `0x95E6E4` | inventário, baús, bancos |
+| `GUIHotbar.DrawHotbarItem` | `0x83BD64` | barra rápida |
+| `Main.DrawItem` | `0xCFA928` | item no chão |
+| `ItemSlot.DrawItemIcon` | `0x1632310` | ícone genérico (`ItemSlot.Draw`, `UIItemIcon`) |
+| `PlayerDrawLayers.DrawPlayer_27_HeldItem` | `0x15C0EDC` | item na mão / em uso |
+| `Main.DrawNPCDirect` | `0xBFC154` | NPCs do mundo (`Main.DrawNPC` termina nele) |
+
+**Ainda mostram a casca.** Telas que leem `TextureAssets.Item` por conta própria, fora dos hooks
+acima (lista tirada das leituras de `TextureAssets.Item` no binário): receitas (`GUICrafting.MaterialItemDraw`, `GUICraftGuidePopup.DrawItem`), loja
+(`GUIShop.DrawPurchaseButton`, `GUITransactionButton.Draw`), reforja (`GUIReforgePopup.DrawItem`),
+pesquisa da Jornada (`GUIResearch.DrawResearchItem`, `UIDynamicItemCollection`), item no chat
+(`ItemTagHandler`), botões rápidos (`GUIQuickActionButton`) e o ícone de interação
+(`Main.DrawInterface_40_InteractItemIcon`). Também ficam com a casca o bestiário e os créditos, que
+usam a outra sobrecarga de `DrawNPCDirect` (`0xBCB734`) com NPCs que não são de `Main.npc`.
+`Item.GetDrawHitbox` e `Player.GetItemDrawFrame` também medem a textura da casca fora do desenho;
+o tamanho do PNG não muda essas medidas, então escolha uma casca de tamanho parecido.
+
+### Mods de exemplo
+
+- `mods/example_item/textures/fictional_ruby.png`: 32x32, o Rubi Fictício.
+- `mods/example_boss/textures/ember_titan.png`: 64x256, 4 quadros de 64x64; `frameTicks = 10`. Na
+  introdução o mod fixa o quadro 0 (`npc.frame = 0`); depois a animação é automática.
+
+Os dois são gerados por `tools/make_example_textures.py`.
 
 ## Itens de mod no save
 
@@ -253,7 +321,7 @@ No Android, o runtime procura mods em `$TLMOD_MODS_DIR`; se não houver, em
 
 ## Ainda não implementado
 
-- **Textura própria de item**, receitas e loja (o item de mod usa a textura da casca).
+- **Receitas e loja**, e textura própria nas telas listadas em [Texturas de mod](#texturas-de-mod).
 - **Multiplayer.** O servidor precisa enviar a tabela chave → ID aos clientes.
 - **Outros tipos.** NPC, projectile, tile, wall e buff já têm faixa de ID, mas ainda não têm
   `register_*` na API.

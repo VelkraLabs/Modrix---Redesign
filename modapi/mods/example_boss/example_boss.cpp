@@ -11,6 +11,9 @@
 //     └ hook em NPC.AI (RVA 0xDCE54C): o runtime chama OnAI deste mod
 //   NPC.SetDefaults (0xDAF1BC) no slot (morte e reuso, Transform, rede)
 //     └ o runtime desmarca o slot: o comportamento deste mod para ali
+//   Main.DrawNPCDirect (0xBFC154): o runtime troca a textura da casca pela
+//     folha textures/ember_titan.png (4 quadros de 64x64 na vertical) só
+//     durante o desenho deste NPC
 #include <tlmod/tlmod.hpp>
 
 #include <string>
@@ -42,9 +45,14 @@ public:
         npc.local[kTimer] += 1.0f;
         switch (static_cast<int>(npc.local[kPhase])) {
             case kIntro:
-                // TODO: animação de entrada. Por enquanto: fica parado.
+                // TODO: animação de entrada. Por enquanto: fica parado, olhando
+                // para a frente (quadro 0 fixo); depois a animação é automática.
                 npc.vx = npc.vy = 0.0f;
-                if (npc.local[kTimer] >= kIntroTicks) Enter(npc, kPhase1);
+                npc.frame = 0;
+                if (npc.local[kTimer] >= kIntroTicks) {
+                    npc.frame = -1;
+                    Enter(npc, kPhase1);
+                }
                 return true;
 
             case kPhase1:
@@ -80,6 +88,9 @@ static bool OnLoad(tlmod::Host& host) {
     def.damage = 40;
     def.defense = 14;
     def.boss = true;
+    def.texture = "textures/ember_titan.png";  // 64x256: 4 quadros empilhados
+    def.frameCount = 4;
+    def.frameTicks = 10;  // 6 quadros por segundo; OnAI pode fixar um com npc.frame
 
     TLModId id = host.RegisterNpc(def, &g_emberTitan);
     if (id == TLMOD_INVALID_ID) return false;

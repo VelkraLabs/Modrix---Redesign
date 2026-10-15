@@ -55,6 +55,9 @@ FIELD_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "world_gen_static_off": ("Terraria", "WorldGen", "static"),
     "item_tooltip_off": ("Terraria.UI", "ItemTooltip", "instance"),
     "item_tooltip_static_off": ("Terraria.UI", "ItemTooltip", "static"),
+    "texture_assets_static_off": ("Terraria.GameContent", "TextureAssets", "static"),
+    "xna_texture2d_off": ("Microsoft.Xna.Framework.Graphics", "Texture2D", "instance"),
+    "player_draw_set_off": ("Terraria.DataStructures", "PlayerDrawSet", "instance"),
 }
 
 # Prefixo de rva::/argc:: (antes do primeiro "_") -> (namespace C#, classe).
@@ -67,6 +70,10 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
     "CreativeUI": ("Terraria.GameContent.Creative", "CreativeUI"),
     "Item": ("Terraria", "Item"),
     "Lang": ("Terraria", "Lang"),
+    "GUIInventory": ("", "GUIInventory"),
+    "GUIHotbar": ("", "GUIHotbar"),
+    "ItemSlot": ("Terraria.UI", "ItemSlot"),
+    "PlayerDrawLayers": ("Terraria.DataStructures", "PlayerDrawLayers"),
 }
 
 # Constantes do header que espelham uma const do jogo.
@@ -93,6 +100,8 @@ CLASS_NAME_CONSTANTS: Dict[str, str] = {
     "kWorldFileClass": "Terraria.IO",
     "kItemTooltipClass": "Terraria.UI",
     "kLocalizedTextClass": "Terraria.Localization",
+    "kTextureAssetsClass": "Terraria.GameContent",
+    "kXnaTexture2DClass": "Microsoft.Xna.Framework.Graphics",
 }
 
 # content_registry.cpp DefaultRanges: tipo -> const com a contagem original.

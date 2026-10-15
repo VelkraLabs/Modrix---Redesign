@@ -115,6 +115,48 @@ constexpr size_t None = 0x0;                 // ItemTooltip (sem linhas)
 constexpr size_t _globalValidatorKey = 0x10; // ulong
 }  // namespace item_tooltip_static_off
 
+// --- Texturas (confirmado no código desta build, não no PC) ------------------------
+// Terraria.GameContent.TextureAssets: Asset<Texture2D>[] por tipo. O desenho
+// lê TextureAssets.Item[item.type] e TextureAssets.Npc[npc.type] e, em seguida,
+// o campo Value do Asset direto (sem chamar get_Value): ver GUIInventory.DrawItem
+// (0x95F200: ldr [static+0x560]; ldr [asset+0x28]). Main.LoadItem/LoadNPC só
+// pedem o arquivo se o Asset estiver NotLoaded.
+// Texture2D aqui é Microsoft.Xna.Framework.Graphics.Texture2D da versão mobile:
+// um invólucro de UnityEngine.Texture2D (_unityTexture) com atlas (PackedEntry,
+// _textureAtlas). O .ctor(UnityEngine.Texture2D) (0xB38544) copia width/height,
+// guarda a textura e marca _textureLoaded, sem atlas.
+// UnityEngine.ImageConversion (LoadImage) e Texture2D.LoadRawTextureData/
+// SetPixels32 foram removidos pelo stripping desta build: os pixels entram por
+// Texture2D.GetWritableImageData (privado) + Apply.
+constexpr const char* kTextureAssetsClass = "TextureAssets";     // Terraria.GameContent
+constexpr const char* kXnaTexture2DClass = "Texture2D";          // Microsoft.Xna.Framework.Graphics
+namespace texture_assets_static_off {
+constexpr size_t Item = 0x560;  // Asset<Texture2D>[] (ItemID.Count)
+constexpr size_t Npc = 0x570;   // Asset<Texture2D>[] (NPCID.Count)
+}  // namespace texture_assets_static_off
+namespace xna_texture2d_off {
+constexpr size_t Width = 0x44;          // int
+constexpr size_t Height = 0x48;         // int
+constexpr size_t _unityTexture = 0x78;  // Texture2D (UnityEngine)
+}  // namespace xna_texture2d_off
+// ReLogic.Content.Asset<Texture2D> é genérico: o dump.cs mostra 0x0 nos campos;
+// os offsets são os da instância (il2cpp.h, ReLogic_Content_Asset_Texture2D__Fields).
+// A ponte resolve pelo nome na classe da instância. AssetState.Loaded = 2.
+namespace asset_texture2d_fields {
+constexpr size_t Name = 0x10;   // <Name>k__BackingField
+constexpr size_t State = 0x18;  // <State>k__BackingField
+constexpr size_t Value = 0x28;  // <Value>k__BackingField
+}  // namespace asset_texture2d_fields
+constexpr int32_t kAssetStateLoaded = 2;
+constexpr int32_t kTextureFormatRGBA32 = 4;  // UnityEngine.TextureFormat
+constexpr int32_t kFilterModePoint = 0;      // UnityEngine.FilterMode (arte em pixel)
+constexpr int32_t kWrapModeClamp = 1;        // UnityEngine.TextureWrapMode
+// PlayerDrawSet é struct: os offsets abaixo são sem o cabeçalho de objeto
+// (o il2cpp_field_get_offset devolve +0x10 para campos de tipo-valor).
+namespace player_draw_set_off {
+constexpr size_t heldItem = 0x218;  // Item: o que DrawPlayer_27_HeldItem desenha na mão
+}  // namespace player_draw_set_off
+
 // --- Terraria.IO.FileData / PlayerFileData -----------------------------------
 // Caminho do arquivo que o jogo grava/lê (o .plr de um personagem, o .wld de
 // um mundo). Mundo ativo: Main.ActiveWorldFileData.
@@ -160,6 +202,7 @@ constexpr size_t damage = 0x17C;    // int
 constexpr size_t defense = 0x180;   // int
 constexpr size_t life = 0x1A0;      // int
 constexpr size_t lifeMax = 0x1A4;   // int
+constexpr size_t frame = 0x1C0;     // Rectangle (X, Y, Width, Height): quadro da folha a desenhar
 }  // namespace npc_off
 
 // --- Campos estáticos de Terraria.Main -------------------------------------
@@ -172,6 +215,7 @@ constexpr size_t netMode = 0x81C;  // int Main.netMode
 constexpr size_t chest = 0x5F8;    // Chest[] Main.chest (8000 slots; nulo = sem baú)
 constexpr size_t ActiveWorldFileData = 0x730;  // WorldFileData Main.ActiveWorldFileData
 constexpr size_t CreativeMenu = 0x50;          // CreativeUI Main.CreativeMenu
+constexpr size_t npcFrameCount = 0x1138;       // int[] Main.npcFrameCount (quadros na folha, por tipo)
 }  // namespace main_static_off
 
 // --- Estado do mundo -------------------------------------------------------
@@ -275,6 +319,22 @@ constexpr uintptr_t Lang_GetTooltip = 0x11F5414;
 constexpr uintptr_t Item_get_Name = 0xBA8724;
 constexpr uintptr_t Item_Prefix = 0xBA9A80;           // bool Item.Prefix(int prefixWeWant)
 constexpr uintptr_t Item_IsTheSameAs = 0xBB87D0;      // netID == && type ==
+
+// --- Desenho: onde esta build lê TextureAssets.Item / TextureAssets.Npc ----------
+// Inventário, baús e bancos (GUIInventory.ItemDraw -> DrawItem).
+constexpr uintptr_t GUIInventory_DrawItem = 0x95E6E4;
+constexpr uintptr_t GUIHotbar_DrawHotbarItem = 0x83BD64;  // barra rápida
+constexpr uintptr_t Main_DrawItem = 0xCFA928;             // item no chão (Main.DrawItems)
+// Ícone genérico (ItemSlot.Draw, UIItemIcon, partículas de transferência, tiles).
+constexpr uintptr_t ItemSlot_DrawItemIcon = 0x1632310;
+// Item na mão / em uso (LegacyPlayerRenderer.DrawPlayer_UseNormalLayers).
+constexpr uintptr_t PlayerDrawLayers_DrawPlayer_27_HeldItem = 0x15C0EDC;
+// void Main.DrawNPCDirect(SpriteBatch, NPC, bool behindTiles, Vector2 screenPos,
+// LightMap, Rectangle*): o caminho do mundo, Main.DrawNPC (0xCD4410) termina
+// aqui com `b`. O overload sem LightMap (0xBCB734) é outra cópia inteira, chamada
+// só pelo bestiário (UnlockableNPCEntryIcon.Draw) e pelos créditos
+// (NPCSegment.Draw), com NPCs próprios fora de Main.npc: ficam com a casca.
+constexpr uintptr_t Main_DrawNPCDirect = 0xBFC154;
 }  // namespace rva
 
 // Número de parâmetros C# (sem contar `this`), usado em
@@ -304,6 +364,12 @@ constexpr int Lang_GetTooltip = 1;
 constexpr int Item_get_Name = 0;
 constexpr int Item_Prefix = 1;
 constexpr int Item_IsTheSameAs = 1;
+constexpr int GUIInventory_DrawItem = 7;
+constexpr int GUIHotbar_DrawHotbarItem = 7;
+constexpr int Main_DrawItem = 2;
+constexpr int ItemSlot_DrawItemIcon = 7;
+constexpr int PlayerDrawLayers_DrawPlayer_27_HeldItem = 1;
+constexpr int Main_DrawNPCDirect = 6;
 }  // namespace argc
 
 }  // namespace terraria

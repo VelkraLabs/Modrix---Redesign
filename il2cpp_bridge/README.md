@@ -29,6 +29,15 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
    `type` fica sempre na faixa original; o ID de mod vai em `netID`. Nome e tooltip são objetos gerenciados
    criados pela ponte (`il2cpp_string_new`, `il2cpp_object_new` de `ItemTooltip`/`LocalizedText`), presos por
    GC handle e gravados com `il2cpp_gc_wbarrier_set_field`.
+9. Texturas de mod (`src/draw_hooks.cpp`). `TLMod_CreateTexture` cria `UnityEngine.Texture2D` (RGBA32, sem
+   mipmap, filtro Point, Clamp), escreve os pixels por `GetWritableImageData` + `Apply` (`LoadImage`,
+   `LoadRawTextureData` e `SetPixels32` foram removidos pelo stripping desta build), embrulha num
+   `Texture2D` do XNA (`.ctor(UnityEngine.Texture2D)`) e num `Asset<Texture2D>` carregado. Só na thread
+   principal do Unity (o runtime chama no frame do `Main.DoUpdate`). Hooks em `GUIInventory.DrawItem`,
+   `GUIHotbar.DrawHotbarItem`, `Main.DrawItem`, `ItemSlot.DrawItemIcon`,
+   `PlayerDrawLayers.DrawPlayer_27_HeldItem` e `Main.DrawNPCDirect`: se o item (netID de mod) ou o NPC é
+   de mod e tem textura (`TLMod_SetDrawCallbacks`), o elemento da casca em `TextureAssets.Item`/`.Npc` é
+   trocado pelo Asset do mod só durante o desenho; para NPCs também `Main.npcFrameCount[casca]` e `NPC.frame`.
 
 ## Build
 

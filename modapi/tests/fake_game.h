@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "tlmod/runtime/game_adapter.h"
@@ -154,7 +155,65 @@ public:
     void SetFrameHandler(std::function<void()> h) override { frameHandler = std::move(h); }
     // Main.DoUpdate: um frame na thread do jogo.
     void Frame() {
+        frameThread = std::this_thread::get_id();
+        inFrame = true;
         if (frameHandler) frameHandler();
+        inFrame = false;
+        ++frames;
+    }
+    int frames = 0;
+
+    // --- Texturas (Unity) ---------------------------------------------------------
+    // Como na ponte: só dentro do frame (thread principal); -1 enquanto as
+    // texturas do jogo não carregaram. Fora do frame conta em offThreadTextures.
+    struct Texture2D {
+        std::string name;
+        int32_t width = 0, height = 0;
+        std::vector<uint8_t> rgba;
+        int frame = 0;  // em qual Frame() foi criada
+    };
+    std::vector<Texture2D> textures;  // id = posição + 1
+    bool texturesReady = true;        // TextureAssets já carregado?
+    int32_t rejectTextureWidth = -1;  // simula o jogo recusando (CreateTexture -> 0)
+    std::atomic<int> offThreadTextures{0};
+    std::thread::id frameThread;
+    bool inFrame = false;
+    int32_t CreateTexture(const tlmod::rt::Image& img, const std::string& name) override {
+        if (!inFrame || std::this_thread::get_id() != frameThread) {
+            ++offThreadTextures;
+            return 0;
+        }
+        if (!texturesReady) return -1;
+        if (img.width == rejectTextureWidth) return 0;
+        textures.push_back({name, img.width, img.height, img.rgba, frames});
+        return static_cast<int32_t>(textures.size());
+    }
+    DrawHooks drawHooks;
+    void SetDrawHooks(DrawHooks h) override { drawHooks = std::move(h); }
+    // Textura que o desenho usa: as da casca são o tipo; as de mod, kModTexture + id.
+    static constexpr int32_t kModTexture = 1000000;
+    // Um NPC desenhado: textura e retângulo do quadro na folha (como NPC.frame).
+    struct NpcSprite {
+        int32_t texture = 0;
+        int32_t frameY = 0, frameHeight = 0;
+    };
+    static constexpr int32_t kShellNpcFrames = 6, kShellNpcFrameHeight = 40;
+    NpcSprite DrawNpc(int32_t i) {
+        NpcSprite sp;
+        const TLModNpcState& s = npcs[static_cast<size_t>(i)].s;
+        NpcDraw d;
+        if (drawHooks.npcTexture && drawHooks.npcTexture(i, d) && d.texture > 0 &&
+            static_cast<size_t>(d.texture) <= textures.size()) {
+            const Texture2D& t = textures[static_cast<size_t>(d.texture) - 1];
+            sp.texture = kModTexture + d.texture;
+            sp.frameHeight = t.height / d.frameCount;
+            sp.frameY = d.frame * sp.frameHeight;
+            return sp;
+        }
+        sp.texture = s.shell_type;  // TextureAssets.Npc[type] e a animação da casca
+        sp.frameHeight = kShellNpcFrameHeight;
+        sp.frameY = (static_cast<int32_t>(s.ai[0]) / 8 % kShellNpcFrames) * kShellNpcFrameHeight;
+        return sp;
     }
 
     // Item.SetDefaults(type), com os ganchos do adaptador em volta (como o hook da ponte).
@@ -204,7 +263,14 @@ public:
     // Item.Name: _nameOverride ?? Lang.GetItemNameValue(type).
     std::string Name(const Item& it) { return it.nameOverride.empty() ? At(itemNames, it.type) : it.nameOverride; }
     // TextureAssets.Item[type]: o que o desenho do inventário lê.
-    int32_t Texture(const Item& it) { return At(itemTexture, it.type); }
+    // Com o TLMod, um item de mod (netID na faixa de mods) pode trazer a própria.
+    int32_t Texture(const Item& it) {
+        if (it.netID >= kItemCount && drawHooks.itemTexture) {
+            int32_t id = drawHooks.itemTexture(it.netID);
+            if (id > 0) return kModTexture + id;
+        }
+        return At(itemTexture, it.type);
+    }
     // Item.IsTheSameAs: empilhar, depositar, pegar do chão.
     static bool IsTheSameAs(const Item& a, const Item& b) { return a.netID == b.netID && a.type == b.type; }
     // Item.Refresh: netDefaults(netID) mantendo pilha, prefixo e favorito.

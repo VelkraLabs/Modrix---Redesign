@@ -334,6 +334,70 @@ bool TLMod_SetItemDefaults(Il2CppObject* item, int32_t type);
 // Item.Prefix(prefix): aplica o prefixo como o load do jogo faz.
 bool TLMod_ApplyItemPrefix(Il2CppObject* item, int32_t prefix);
 
+// ===========================================================================
+// Texturas de mod
+// ===========================================================================
+//
+// Nesta build o desenho lê TextureAssets.Item[item.type] / TextureAssets.Npc[npc.type]
+// (Asset<Texture2D>) e o Value do Asset direto. Um item/NPC de mod tem o type da
+// casca; nos hooks de desenho abaixo, se o item/NPC for de mod e tiver textura,
+// a ponte troca o Asset dessa posição pelo do mod só durante aquele desenho e
+// devolve o original no fim. Para NPCs troca também Main.npcFrameCount[type] e
+// NPC.frame (o quadro da folha do mod).
+//
+//   GUIInventory.DrawItem         inventário, baús, bancos
+//   GUIHotbar.DrawHotbarItem      barra rápida
+//   Main.DrawItem                 item no chão
+//   ItemSlot.DrawItemIcon         ícone genérico (ItemSlot.Draw, UIItemIcon...)
+//   PlayerDrawLayers.DrawPlayer_27_HeldItem   item na mão
+//   Main.DrawNPCDirect            NPCs do mundo (Main.DrawNPC)
+
+// Cria a textura no Unity: UnityEngine.Texture2D(w, h, RGBA32, sem mipmap),
+// filtro Point, Clamp; copia os pixels (rgba, linha 0 = topo, como no PNG; o
+// Unity guarda de baixo para cima), Apply(); embrulha num
+// Microsoft.Xna.Framework.Graphics.Texture2D e num Asset<Texture2D> carregado.
+// SÓ NA THREAD PRINCIPAL DO UNITY (ex.: no TLModFrameCallback).
+// Devolve o id (> 0), 0 se falhou, -1 se o jogo ainda não carregou TextureAssets
+// (tentar de novo num frame seguinte).
+int32_t TLMod_CreateTexture(const uint8_t* rgba, int32_t width, int32_t height, const char* name);
+bool TLMod_TextureSize(int32_t id, int32_t* width, int32_t* height);
+
+typedef struct TLModNpcDraw {
+    int32_t texture;      // id de TLMod_CreateTexture
+    int32_t frame_count;  // quadros empilhados na vertical (>= 1)
+    int32_t frame;        // quadro a desenhar (0..frame_count-1)
+} TLModNpcDraw;
+
+typedef struct TLModDrawCallbacks {
+    // Item com netID fora da faixa original prestes a ser desenhado: id da
+    // textura do mod, ou 0 para desenhar a da casca.
+    int32_t (*item_texture)(Il2CppObject* item, int32_t net_id);
+    // NPC prestes a ser desenhado (index em Main.npc; -1 se não for um deles).
+    // true + out preenchido = desenhar com a textura do mod.
+    bool (*npc_texture)(Il2CppObject* npc, int32_t index, TLModNpcDraw* out);
+} TLModDrawCallbacks;
+void TLMod_SetDrawCallbacks(const TLModDrawCallbacks* callbacks);  // copia; nulo desliga
+
+// Structs do XNA passadas por valor nos hooks de desenho (layout do il2cpp.h).
+typedef struct TLModXnaVector2 { float x, y; } TLModXnaVector2;
+typedef struct TLModXnaColor { uint32_t packedValue; } TLModXnaColor;
+typedef struct TLModXnaRectangle { int32_t x, y, width, height; } TLModXnaRectangle;
+
+void TLMod_Hooked_GUIInventoryDrawItem(Il2CppObject* self, Il2CppObject* spriteBatch, Il2CppObject* layout,
+                                       Il2CppArray* inv, int32_t slot, TLModXnaVector2 position,
+                                       TLModXnaColor lightColor, float scale, const MethodInfo* method);
+void TLMod_Hooked_GUIHotbarDrawHotbarItem(Il2CppObject* self, Il2CppObject* spriteBatch, Il2CppObject* layout,
+                                          Il2CppArray* inv, int32_t slot, TLModXnaVector2 position,
+                                          TLModXnaColor lightColor, float scale, const MethodInfo* method);
+void TLMod_Hooked_MainDrawItem(Il2CppObject* self, Il2CppObject* item, int32_t whoami, const MethodInfo* method);
+float TLMod_Hooked_ItemSlotDrawItemIcon(Il2CppObject* item, int32_t context, Il2CppObject* spriteBatch,
+                                        TLModXnaVector2 screenPositionForItemCenter, float scale, float sizeLimit,
+                                        TLModXnaColor environmentColor, const MethodInfo* method);
+void TLMod_Hooked_DrawPlayerHeldItem(void* drawinfo, const MethodInfo* method);
+void TLMod_Hooked_MainDrawNPCDirect(Il2CppObject* self, Il2CppObject* spriteBatch, Il2CppObject* npc, bool behindTiles,
+                                    TLModXnaVector2 screenPos, Il2CppObject* lightMap, TLModXnaRectangle* lightRegion,
+                                    const MethodInfo* method);
+
 // Handlers que os hooks apontam (exportados como TLMod_Hooked_PlayerHurt).
 void TLMod_Hooked_ItemSetDefaults(Il2CppObject* self, int32_t type, bool noMatCheck, Il2CppObject* variant,
                                   const MethodInfo* method);

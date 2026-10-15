@@ -13,6 +13,7 @@ Il2CppDomain* Domain();
 const Il2CppImage* Image();  // Assembly-CSharp.dll
 Il2CppClass* MainClass();    // Terraria.Main
 Il2CppClass* PlayerClass();  // Terraria.Player
+const Il2CppImage* FindImage(const char* imageName);  // ex.: "UnityEngine.CoreModule.dll"
 
 void LogException(const char* where, Il2CppException* exc);
 
@@ -40,6 +41,10 @@ void InstallWorldStateHooks();
 // Itens de mod: SetDefaults/RebuildTooltip (item_hooks.cpp).
 bool ResolveItems();
 void InstallItemHooks();
+
+// Texturas de mod e hooks de desenho (draw_hooks.cpp).
+bool ResolveDraw();
+void InstallDrawHooks();
 
 // Save/load de personagem e mundo (save_hooks.cpp).
 bool ResolveSaves();

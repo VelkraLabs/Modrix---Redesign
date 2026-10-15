@@ -16,11 +16,13 @@ add_library(tlmod_runtime STATIC
   src/manifest.cpp
   src/content_registry.cpp
   src/item_persistence.cpp
+  src/png.cpp
   src/dynlib.cpp
   src/mod_loader.cpp)
 target_include_directories(tlmod_runtime PUBLIC include PRIVATE src)
 target_compile_options(tlmod_runtime PRIVATE ${TLMOD_WARNINGS})
-target_link_libraries(tlmod_runtime PUBLIC ${CMAKE_DL_LIBS})
+find_package(ZLIB REQUIRED)  # PNG das texturas de mod (no Android, a libz.so do sistema)
+target_link_libraries(tlmod_runtime PUBLIC ${CMAKE_DL_LIBS} ZLIB::ZLIB)
 set_target_properties(tlmod_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # --- Overlay: lógica do painel (todas as plataformas) -------------------------
@@ -136,6 +138,9 @@ if(NOT ANDROID)
     target_compile_options(bridge_save_test PRIVATE ${TLMOD_WARNINGS})
     target_link_libraries(bridge_save_test PRIVATE tlmod_bridge_adapter ${CMAKE_DL_LIBS} Threads::Threads)
     add_dependencies(bridge_save_test il2cpp_mock)
+    target_compile_definitions(bridge_save_test PRIVATE
+      TLMOD_EXAMPLE_RUBY_PNG="${CMAKE_CURRENT_SOURCE_DIR}/mods/example_item/textures/fictional_ruby.png"
+      TLMOD_EXAMPLE_BOSS_PNG="${CMAKE_CURRENT_SOURCE_DIR}/mods/example_boss/textures/ember_titan.png")
     add_test(NAME bridge_save_test COMMAND bridge_save_test $<TARGET_FILE:il2cpp_mock>)
   endif()
 

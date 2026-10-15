@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <tuple>
@@ -16,6 +17,7 @@
 #include "tlmod/runtime/item_persistence.h"
 #include "tlmod/runtime/log.h"
 #include "tlmod/runtime/mod_loader.h"
+#include "tlmod/runtime/png.h"
 
 using namespace tlmod::rt;
 namespace fs = std::filesystem;
@@ -51,9 +53,18 @@ int GemsInit(const TLModHostApi* api, TLModContext* ctx) {
         d.max_stack = 999;
         d.value = 500;
         d.rarity = 3;
+        if (std::string(name) == "ruby") d.texture = "fictional_ruby.png";  // o PNG do mod de exemplo
         if (api->register_item(ctx, &d) == TLMOD_INVALID_ID) return 1;
     }
-    return 0;
+    TLModNpcDef n{};
+    n.struct_size = sizeof(n);
+    n.name = "golem";
+    n.display_name = "golem";
+    n.shell_type = 4;
+    n.texture = "ember_titan.png";  // a folha do boss de exemplo: 4 quadros de 64x64
+    n.frame_count = 4;
+    n.frame_ticks = 10;
+    return api->register_npc(ctx, &n) == TLMOD_INVALID_ID ? 1 : 0;
 }
 
 std::u16string U16(const std::string& ascii) { return std::u16string(ascii.begin(), ascii.end()); }
@@ -100,6 +111,17 @@ int main(int argc, char** argv) {
     auto saved_ids = reinterpret_cast<size_t (*)(const int32_t**)>(sym("mock_saved_ids"));
     auto add_chest = reinterpret_cast<void (*)(int32_t, int32_t, int32_t)>(sym("mock_add_chest"));
     auto remove_chest = reinterpret_cast<void (*)(int32_t)>(sym("mock_remove_chest"));
+    auto frame = reinterpret_cast<int (*)()>(sym("mock_game_frame"));
+    auto load_assets = reinterpret_cast<void (*)()>(sym("mock_load_texture_assets"));
+    auto draw_inv = reinterpret_cast<void* (*)(int32_t)>(sym("mock_game_draw_inventory"));
+    auto draw_hotbar = reinterpret_cast<void* (*)(int32_t)>(sym("mock_game_draw_hotbar"));
+    auto draw_npc = reinterpret_cast<void* (*)(int32_t, int32_t*, int32_t*)>(sym("mock_game_draw_npc"));
+    auto new_npc = reinterpret_cast<int32_t (*)(int32_t, int32_t, int32_t)>(sym("mock_game_new_npc"));
+    auto update_npcs = reinterpret_cast<void (*)()>(sym("mock_game_update_npcs"));
+    auto item_tex = reinterpret_cast<void* (*)(int32_t)>(sym("mock_item_asset_texture"));
+    auto npc_tex = reinterpret_cast<void* (*)(int32_t)>(sym("mock_npc_asset_texture"));
+    auto tex_info = reinterpret_cast<bool (*)(void*, int32_t*, int32_t*, int32_t*, int32_t*, bool*)>(sym("mock_texture_info"));
+    auto tex_pixel = reinterpret_cast<uint32_t (*)(void*, int32_t, int32_t)>(sym("mock_texture_pixel"));
     CHECK(mock_init && mock_patch_function && save_player && load_player && save_world && load_world &&
           set_world_path && saved_ids && add_chest && remove_chest);
     auto maxSaved = [&] {
@@ -126,6 +148,10 @@ int main(int argc, char** argv) {
     m.name = "gems";
     m.version = *SemVer::Parse("1.0.0");
     m.content[TLMOD_CONTENT_ITEM] = {"ruby", "topaz"};
+    m.content[TLMOD_CONTENT_NPC] = {"golem"};
+    m.dir = dir;
+    fs::copy_file(TLMOD_EXAMPLE_RUBY_PNG, dir / "fictional_ruby.png");
+    fs::copy_file(TLMOD_EXAMPLE_BOSS_PNG, dir / "ember_titan.png");
     loader.AddBuiltin(m, &GemsInit);
     CHECK(loader.LoadAll() == 1);
     const TLModId ruby = loader.Registry().Find(TLMOD_CONTENT_ITEM, "test.gems:ruby").value_or(-1);
@@ -190,6 +216,46 @@ int main(int argc, char** argv) {
     load_world(false);
     CHECK(IsMod(Get(nullptr, TLMOD_ITEMS_CHEST, 0, 6), topaz) && Get(nullptr, TLMOD_ITEMS_CHEST, 0, 6).stack == 40);
     CHECK(loader.Persistence().Orphans(wld).empty());
+
+    // ---- Texturas: fila no Main.DoUpdate, troca no desenho ------------------------------
+    CHECK(frame && load_assets && draw_inv && draw_hotbar && draw_npc && new_npc && update_npcs && item_tex &&
+          npc_tex && tex_info && tex_pixel);
+    CHECK(loader.PendingTextures() == 2);
+    frame();  // TextureAssets ainda vazio: a ponte devolve -1, a fila espera
+    CHECK(loader.PendingTextures() == 2 && loader.TexturesCreated() == 0);
+    load_assets();
+    frame();
+    CHECK(loader.PendingTextures() == 0 && loader.TexturesCreated() == 2);
+    void* lensTex = item_tex(kShell);
+    void* rubyTex = draw_inv(4);  // o rubi no slot 4 do inventário
+    int32_t w = 0, h = 0, filter = -1, wrap = -1;
+    bool applied = false;
+    CHECK(rubyTex && rubyTex != lensTex && tex_info(rubyTex, &w, &h, &filter, &wrap, &applied));
+    CHECK(w == 32 && h == 32 && applied && item_tex(kShell) == lensTex);
+    // Os pixels que chegaram ao Unity são os do PNG (topo continua no topo).
+    auto png = LoadPng(TLMOD_EXAMPLE_RUBY_PNG, nullptr);
+    bool same = png.has_value();
+    for (int32_t y = 0; same && y < 32; ++y)
+        for (int32_t x = 0; same && x < 32; ++x) {
+            uint32_t want;
+            std::memcpy(&want, &png->rgba[(static_cast<size_t>(y) * 32 + static_cast<size_t>(x)) * 4], 4);
+            same = tex_pixel(rubyTex, x, y) == want;
+        }
+    CHECK(same);
+    Put(player, TLMOD_ITEMS_INVENTORY, 0, 6, kShell, 1);  // uma Lente de verdade
+    Put(player, TLMOD_ITEMS_INVENTORY, 0, 7, topaz, 1);   // de mod, sem PNG
+    CHECK(draw_hotbar(4) == rubyTex && draw_inv(6) == lensTex && draw_inv(7) == lensTex);
+
+    const TLModId golem = loader.Registry().Find(TLMOD_CONTENT_NPC, "test.gems:golem").value_or(-1);
+    const int32_t eye = new_npc(0, 0, 4), boss = new_npc(50, 50, golem);
+    CHECK(eye >= 0 && boss >= 0 && loader.NpcInSlot(boss) == golem);
+    int32_t frames = 0, rect[4] = {};
+    void* sheet = draw_npc(boss, &frames, rect);
+    CHECK(sheet && sheet != npc_tex(4) && tex_info(sheet, &w, &h, &filter, &wrap, &applied) && w == 64 && h == 256);
+    CHECK(frames == 4 && rect[0] == 0 && rect[1] == 0 && rect[2] == 64 && rect[3] == 64);
+    for (int t = 0; t < 25; ++t) update_npcs();  // 25 ticks / 10 por quadro = quadro 2
+    CHECK(draw_npc(boss, &frames, rect) == sheet && rect[1] == 128);
+    CHECK(draw_npc(eye, &frames, rect) == npc_tex(4) && frames != 4);
 
     fs::remove_all(dir);
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,

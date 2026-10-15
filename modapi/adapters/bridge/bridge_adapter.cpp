@@ -168,6 +168,32 @@ void OnItemRebuildTooltip(Il2CppObject* item, int32_t netId) {
 }
 
 // Só na thread do jogo (dentro de Main.DoUpdate).
+// --- Desenho: textura de mod por item/NPC ------------------------------------------
+// Chamados pelos hooks de desenho da ponte (thread principal), um por item ou
+// NPC de mod desenhado. Nada pode lançar para dentro do jogo.
+std::atomic<GameAdapter::DrawHooks*> g_drawHooks{nullptr};
+
+int32_t OnItemTexture(Il2CppObject*, int32_t netId) {
+    GameAdapter::DrawHooks* h = g_drawHooks.load(std::memory_order_acquire);
+    try {
+        return h && h->itemTexture ? h->itemTexture(netId) : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+bool OnNpcTexture(Il2CppObject*, int32_t index, TLModNpcDraw* out) {
+    GameAdapter::DrawHooks* h = g_drawHooks.load(std::memory_order_acquire);
+    if (!h || !h->npcTexture || !out) return false;
+    try {
+        GameAdapter::NpcDraw d;
+        if (!h->npcTexture(index, d)) return false;
+        *out = TLModNpcDraw{d.texture, d.frameCount, d.frame};
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 void OnFrame() {
     static TLModStaticField* fields[TLMOD_PROGRESS_COUNT] = {};
     static bool resolved = false;
@@ -379,6 +405,21 @@ void BridgeGameAdapter::SetItemHooks(ItemHooks hooks) {
 void BridgeGameAdapter::SetFrameHandler(std::function<void()> handler) {
     g_frameHandler.store(handler ? new std::function<void()>(std::move(handler)) : nullptr,
                          std::memory_order_release);
+}
+
+// Antigos ficam vazados de propósito: um desenho em andamento pode estar com eles.
+void BridgeGameAdapter::SetDrawHooks(DrawHooks hooks) {
+    bool any = hooks.itemTexture || hooks.npcTexture;
+    g_drawHooks.store(any ? new DrawHooks(std::move(hooks)) : nullptr, std::memory_order_release);
+    TLModDrawCallbacks cb{&OnItemTexture, &OnNpcTexture};
+    TLMod_SetDrawCallbacks(any ? &cb : nullptr);
+}
+
+int32_t BridgeGameAdapter::CreateTexture(const Image& image, const std::string& name) {
+    if (image.width <= 0 || image.height <= 0 ||
+        image.rgba.size() != static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 4)
+        return 0;
+    return TLMod_CreateTexture(image.rgba.data(), image.width, image.height, name.c_str());
 }
 
 int32_t BridgeGameAdapter::GiveItem(int32_t type, int32_t stack) {
