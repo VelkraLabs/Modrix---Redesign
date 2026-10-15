@@ -5,13 +5,14 @@
 //
 // Não compilado no teste de host, que chama Modrix_Init diretamente.
 #include "bridge.h"
+#include "hook_shadowhook.h"
 
 __attribute__((constructor)) static void ModrixBridgeOnLoad() {
-    // Plugue o instalador de hook antes de iniciar, por exemplo com Dobby:
-    //   Modrix_SetHookInstaller([](void* t, void* r, void** o) {
-    //       return DobbyHook(t, (dobby_dummy_func_t)r, (dobby_dummy_func_t*)o) == 0;
-    //   });
-    // e o callback do mod:
+    // O construtor só registra o instalador. O shadowhook_init e o hook em
+    // Player.Hurt acontecem depois, na thread de Modrix_Init, quando o
+    // IL2CPP já resolveu o MethodInfo de Hurt.
+    Modrix_SetHookInstaller(&Modrix_ShadowHookInstaller);
+    // O callback do mod entra aqui, por exemplo:
     //   Modrix_SetHurtCallback(MyMod_OnPlayerHurt);
     Modrix_StartInitThread();
 }

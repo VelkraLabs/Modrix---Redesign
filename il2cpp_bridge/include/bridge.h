@@ -39,9 +39,11 @@ struct ModrixHurtEvent {
 //   post (after == true):  só observa; o retorno é ignorado.
 typedef bool (*ModrixHurtCallback)(ModrixHurtEvent* ev, bool after);
 
-// Função para instalar um inline hook. A ponte não traz engine de hook: plugue
-// aqui Dobby (DobbyHook), ShadowHook (shadowhook_hook_func_addr), And64InlineHook etc.
-// Deve gravar em *original um trampoline que chama a função original.
+// Função para instalar um inline hook. No Android a ponte usa o ShadowHook
+// (src/hook_shadowhook.cpp); no teste de host, um instalador falso.
+// Deve gravar em *original o endereço que chama a função original. O slot
+// `original` aponta para memória global da ponte, válida pelo processo todo:
+// a engine pode guardá-lo e reescrevê-lo depois (ShadowHook, modo multi).
 typedef bool (*ModrixHookInstaller)(void* target, void* replacement, void** original);
 
 // Configuração (chamar antes de Modrix_Init / Modrix_StartInitThread).

@@ -36,7 +36,15 @@ Resolved g;
 const char* g_libName = "libil2cpp.so";
 ModrixHookInstaller g_installer = nullptr;
 std::atomic<ModrixHurtCallback> g_hurtCallback{nullptr};
-std::atomic<PlayerHurtFn> g_origHurt{nullptr};
+// Slot do endereço "original" de Player.Hurt. Precisa viver o processo
+// inteiro: o ShadowHook (modo multi) grava aqui o próximo elo da cadeia de
+// proxies e pode reescrevê-lo depois, quando outro hook no mesmo alvo sai.
+// Por isso é lido atomicamente a cada chamada, nunca copiado.
+void* g_origHurtSlot = nullptr;
+
+PlayerHurtFn LoadOrigHurt() {
+    return reinterpret_cast<PlayerHurtFn>(__atomic_load_n(&g_origHurtSlot, __ATOMIC_ACQUIRE));
+}
 std::atomic<bool> g_ready{false};
 
 // Evita reentrada se o próprio callback do mod provocar outro Hurt.
@@ -134,13 +142,11 @@ bool InstallHurtHook() {
         return false;
     }
     void* target = reinterpret_cast<void*>(g.playerHurt->methodPointer);
-    void* original = nullptr;
-    if (!g_installer(target, reinterpret_cast<void*>(&Modrix_Hooked_PlayerHurt), &original) ||
-        !original) {
+    if (!g_installer(target, reinterpret_cast<void*>(&Modrix_Hooked_PlayerHurt), &g_origHurtSlot) ||
+        !LoadOrigHurt()) {
         LOGE("falha ao instalar hook em Player.Hurt (%p)", target);
         return false;
     }
-    g_origHurt.store(reinterpret_cast<PlayerHurtFn>(original));
     LOGI("hook em Player.Hurt instalado (%p)", target);
     return true;
 }
@@ -247,7 +253,7 @@ bool Modrix_Heal(Il2CppObject* player, int32_t amount) {
     return true;
 }
 
-PlayerHurtFn Modrix_OriginalPlayerHurt(void) { return g_origHurt.load(); }
+PlayerHurtFn Modrix_OriginalPlayerHurt(void) { return LoadOrigHurt(); }
 
 // ---------------------------------------------------------------------------
 // Handler do hook de Player.Hurt (RVA 0xFA15B8 nesta build).
@@ -257,7 +263,7 @@ PlayerHurtFn Modrix_OriginalPlayerHurt(void) { return g_origHurt.load(); }
 double Modrix_Hooked_PlayerHurt(Il2CppObject* self, Il2CppObject* damageSource, int32_t damage,
                                 int32_t hitDirection, bool pvp, bool quiet, bool crit,
                                 int32_t cooldownCounter, bool dodgeable, const MethodInfo* method) {
-    PlayerHurtFn orig = g_origHurt.load();
+    PlayerHurtFn orig = LoadOrigHurt();
     ModrixHurtCallback cb = g_hurtCallback.load();
     if (!orig) return 0.0;  // não deveria acontecer: o hook só existe com trampoline
     if (!cb || t_hurtDepth > 0) {
