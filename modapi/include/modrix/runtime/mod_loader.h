@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@ enum class ModState {
     Loaded,      // init retornou 0
     Failed,      // biblioteca não abriu, símbolo ausente ou init != 0
     Skipped,     // uma dependência obrigatória não carregou
+    Disabled,    // desligado pelo usuário (configuração); nem é aberto
 };
 const char* ToString(ModState s);
 
@@ -44,6 +46,13 @@ public:
 
     // Mod compilado junto com o runtime (sem biblioteca externa).
     void AddBuiltin(ModManifest manifest, ModrixModInitFn init);
+
+    // Mods desligados pelo usuário (lidos da configuração antes de LoadAll).
+    // Não são abertos; quem depende deles (obrigatoriamente) fica Skipped.
+    // Ligar/desligar só vale na próxima abertura do jogo: um mod carregado
+    // nunca é descarregado com o jogo rodando.
+    void SetDisabled(std::set<std::string> ids) { disabled_ = std::move(ids); }
+    const std::set<std::string>& Disabled() const { return disabled_; }
 
     // Valida, resolve dependências, ordena e chama o init de cada mod.
     // Pode ser chamado uma vez. Retorna quantos mods carregaram.
@@ -81,6 +90,7 @@ private:
     std::vector<std::string> order_;
     std::unique_ptr<Impl> impl_;
     bool loaded_ = false;
+    std::set<std::string> disabled_;
 };
 
 }  // namespace modrix::rt

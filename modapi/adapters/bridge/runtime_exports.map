@@ -1,4 +1,6 @@
 {
+    global:
+        JNI_OnLoad;   /* guarda a JavaVM quando a .so vem por System.loadLibrary */
     local:
         *;
 };

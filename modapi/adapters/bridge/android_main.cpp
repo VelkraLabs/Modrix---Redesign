@@ -14,6 +14,9 @@
 #include "bridge_adapter.h"
 #include "modrix/runtime/log.h"
 #include "modrix/runtime/mod_loader.h"
+#include "modrix/overlay/config_store.h"
+#include "modrix/overlay/panel.h"
+#include "overlay_android.h"
 
 namespace {
 
@@ -55,6 +58,13 @@ void* RuntimeMain(void*) {
 
     std::filesystem::path dir = ModsDir();
     modrix::rt::Log(MODRIX_LOG_INFO, "runtime", "pasta de mods: " + dir.string());
+
+    // Mods desligados no painel: lidos ANTES de carregar (valem nesta abertura).
+    static modrix::overlay::ConfigStore config(dir.parent_path() / "modrix_config.json");
+    std::string configError;
+    if (!config.Load(&configError)) modrix::rt::Log(MODRIX_LOG_WARN, "runtime", configError);
+    loader.SetDisabled(config.Disabled());
+
     loader.DiscoverDirectory(dir);
     size_t n = loader.LoadAll();
     modrix::rt::Log(MODRIX_LOG_INFO, "runtime",
@@ -63,6 +73,13 @@ void* RuntimeMain(void*) {
         if (m.state != modrix::rt::ModState::Loaded)
             modrix::rt::Log(MODRIX_LOG_WARN, m.manifest.id, std::string(ToString(m.state)) + ": " + m.error);
     }
+
+    // Painel dentro do jogo (Views Android presas à Activity).
+    static modrix::overlay::LoaderDataSource source(loader);
+    static modrix::overlay::PanelController panel(source, config);
+    std::string overlayError;
+    if (!modrix::overlay::StartOverlay(&panel, 60000, &overlayError))
+        modrix::rt::Log(MODRIX_LOG_ERROR, "overlay", "painel não instalado: " + overlayError);
     return nullptr;
 }
 

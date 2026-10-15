@@ -37,6 +37,7 @@ const char* ToString(ModState s) {
         case ModState::Loaded: return "carregado";
         case ModState::Failed: return "falhou";
         case ModState::Skipped: return "pulado";
+        case ModState::Disabled: return "desativado";
     }
     return "?";
 }
@@ -550,13 +551,22 @@ size_t ModLoader::LoadAll() {
         ModRecord& rec = *it;
         size_t index = static_cast<size_t>(it - mods_.begin());
 
+        if (disabled_.count(rec.manifest.id)) {
+            rec.state = ModState::Disabled;
+            rec.error = "desativado nas configurações";
+            Log(MODRIX_LOG_INFO, rec.manifest.id, rec.error);
+            continue;
+        }
+
         // Dependência obrigatória que não carregou -> pula. Opcional que falhou
         // não impede: o mod deve funcionar sem ela.
         for (const Dependency& d : rec.manifest.dependencies) {
             const ModRecord* dep = Find(d.id);
             if (!d.optional && !(dep && dep->state == ModState::Loaded)) {
                 rec.state = ModState::Skipped;
-                rec.error = "dependência \"" + d.id + "\" não carregou";
+                rec.error = dep && dep->state == ModState::Disabled
+                                ? "dependência \"" + d.id + "\" está desativada"
+                                : "dependência \"" + d.id + "\" não carregou";
                 break;
             }
         }
