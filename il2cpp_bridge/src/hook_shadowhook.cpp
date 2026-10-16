@@ -9,7 +9,6 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <string>
 
 #include <shadowhook.h>
@@ -28,10 +27,21 @@ namespace {
 constexpr const char* kNothingName = "libshadowhook_nothing.so";
 std::string g_nothingPath;  // escrito antes do shadowhook_init, só lido depois
 
+// Lê o arquivo inteiro (POSIX: iostream traria ~200 KB de libc++ estática).
+bool ReadFile(const char* path, std::string* out) {
+    int fd = ::open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    char buf[4096];
+    ssize_t n;
+    while ((n = ::read(fd, buf, sizeof(buf))) > 0) out->append(buf, static_cast<size_t>(n));
+    ::close(fd);
+    return n == 0;
+}
+
 std::string PackageName() {
-    std::ifstream in("/proc/self/cmdline", std::ios::binary);
-    std::string name;
-    std::getline(in, name, '\0');
+    std::string cmdline;
+    ReadFile("/proc/self/cmdline", &cmdline);
+    std::string name = cmdline.substr(0, cmdline.find('\0'));
     return name.substr(0, name.find(':'));
 }
 
@@ -62,9 +72,8 @@ std::string PrivateDir() {
 }
 
 bool SameContent(const std::string& path, const unsigned char* data, size_t size) {
-    std::ifstream in(path, std::ios::binary);
-    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    return bytes.size() == size && std::memcmp(bytes.data(), data, size) == 0;
+    std::string bytes;
+    return ReadFile(path.c_str(), &bytes) && bytes.size() == size && std::memcmp(bytes.data(), data, size) == 0;
 }
 
 // Grava a biblioteca auxiliar (atômico, somente leitura) e devolve o caminho.
