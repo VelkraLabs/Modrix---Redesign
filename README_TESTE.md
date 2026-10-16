@@ -1,45 +1,39 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**4ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**5ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-A 3ª versão funcionou no aparelho (Samsung SM-A075M, Android 16): 31 hooks instalados, os 3 mods
-carregados, os rubis entregues e o Titã invocado. Esta versão acrescenta um mod para testar mais
-rápido:
+A 4ª versão funcionou no aparelho, aba Ferramentas incluída. Esta versão corrige o tooltip do item
+de mod na Jornada:
 
-- **`tlmod.devtools`, a aba Ferramentas no painel:**
-  - **Hora do dia:** Amanhecer, Meio-dia, Anoitecer e Meia-noite, mais **Congelar hora**.
-  - **Jogador:** **Curar** (vida e mana), **Invencível** e **Matar inimigos** próximos (com loot).
-  - **Invocar NPC ou boss:** busca por nome ou ID, botões para 16 bosses e os NPCs de mod.
-  - **Dar item:** busca por nome (com ou sem acento, ou o nome interno em inglês, como `Zenith`)
-    ou por ID, com +1, +10 e +100. Sem busca, lista os itens de mod.
-- É um mod separado: liga e desliga na aba Mods como os outros. Para jogar sem ele, desligue ou
-  apague a pasta `tlmod/mods/devtools`.
-- O painel ficou um pouco mais largo (400 dp) para caber a quarta aba.
+- **Antes:** o Rubi Fictício mostrava "Pesquise mais 25 para liberar a Duplicação". Esse número é
+  o da Lente, o item do jogo que serve de casca para o rubi. A pesquisa do rubi já era recusada,
+  então a linha prometia algo impossível.
+- **Agora:** a linha não aparece mais no tooltip de itens de mod. Os itens do jogo continuam com
+  ela, e a pesquisa continua recusando o item de mod, de propósito: pesquisá-lo consumiria o rubi
+  e liberaria a duplicação da Lente.
+
+**Sobre o preço do rubi:** "11 prata 23 cobre" na loja do Mercador está certo. O valor do rubi é
+50 de prata, e a loja paga 1/5 disso, 10 de prata. O jogo ainda ajusta o preço pela felicidade do
+NPC (vizinhos, bioma): com o Mercador feliz, a venda sobe para cerca de 11 de prata. Os itens do
+jogo seguem a mesma conta.
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 389336 bytes, `3b926f4793a7d0ee…` | 392896 bytes, `5d970bf878748390…` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 860144 bytes, `8b1a4fbbf4e5b29c…` | 891632 bytes, `fd0b69e26678aaef…` |
-| `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 bytes, `0a4c5092953f7910…` | 233520 bytes, `a22ec19635ff1ea5…` |
-| `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | (novo) | 490824 bytes, `03049ce0171c3785…` |
-| `tlmod/mods/devtools/manifest.json` | (novo) | 701 bytes, `74cb60b82025d083…` |
-| `tlmod/mods/example_boss/lib/android-arm64/libexample_boss.so` | 225664 bytes, `d00db2b66ba43853…` | 225664 bytes, `e07ca2d00d92d86d…` |
-| `tlmod/mods/example_item/lib/android-arm64/libexample_item.so` | 224944 bytes, `2e569a44f298c360…` | 224944 bytes, `e77a6be77d5620e0…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 392896 bytes, `5d970bf878748390…` | 394080 bytes, `f6f6f39a335d65a6…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
-Iguais ao pacote anterior: manifestos e texturas dos mods de exemplo, os marcadores e o
-`tlmod_config.json`.
+Todo o resto é idêntico, byte a byte, ao pacote anterior: a `libtlmod_runtime.so`, as `.so` dos
+4 mods, os manifestos, as texturas, os marcadores e o `tlmod_config.json`.
 
-**Para atualizar o aparelho:** troque as duas `.so` no seu carregador e copie a pasta `tlmod/`
-de novo. Ela agora tem `mods/devtools`, e as `.so` dos outros mods foram recompiladas.
-Se você desligou algum mod no painel, guarde o seu `tlmod_config.json` antes de copiar a pasta.
+**Para atualizar o aparelho:** troque só a `libtlmod_bridge.so` no seu carregador.
+A pasta `tlmod/` que já está no aparelho pode ficar como está.
 
 ## Conteúdo
 
@@ -76,7 +70,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `5a623b3` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `f48e0fe` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -184,7 +178,8 @@ Com a aba, quase toda a checklist abaixo pode ser feita sem esperar o jogo:
 - **Loot e morte:** toque em Matar inimigos, ou em Invencível para lutar sem morrer.
 - **Itens:** busque `rubi` (o item de mod) ou qualquer item do jogo, como `zenite`, `estrela` ou `4956`,
   e toque em +1/+10/+100. Os rubis também aparecem na lista sem busca.
-- **Loja:** dê um rubi e venda num NPC (deve valer 50 de prata).
+- **Loja:** invoque o Mercador (busque `mercador` ou `17` em Invocar), abra a loja e venda um rubi: rende cerca de 10 de prata (1/5 do valor de 50 de prata; a felicidade do NPC muda um pouco, como
+  11 prata 23 cobre).
 
 Os marcadores `give_on_start` e `spawn_on_start` continuam no pacote; com a aba, você pode apagá-los.
 
@@ -238,11 +233,13 @@ dependem do jogo real.
 **Rubi Fictício**
 - [ ] Os 3 rubis chegam ao entrar no mundo, empilhados, com ícone, nome e tooltip do mod
 - [ ] O ícone aparece também no cursor, no lixo, em baús, no hotbar e no item caído no chão
-- [ ] O valor de venda numa loja é 50 de prata
+- [ ] Vendido numa loja, rende cerca de 10 de prata (1/5 do valor de 50 de prata, ajustado pela felicidade
+      do NPC); recomprar custa cerca de 50 de prata, com o mesmo ajuste
 - [ ] Salvar, sair e entrar de novo mantém os rubis, e aparece `<personagem>.plr.tlmod.json` ao lado do save
 - [ ] O personagem abre no jogo **sem** o TLMod sem corromper; os rubis não aparecem lá e voltam
       quando o TLMod é usado de novo
-- [ ] Na Jornada, a pesquisa recusa o item de mod
+- [ ] Na Jornada, a pesquisa recusa o item de mod, e o tooltip dele **não** mostra "Pesquise mais N para
+      liberar a Duplicação" (itens do jogo continuam mostrando)
 - [ ] Saves na nuvem: os itens de mod voltam (arquivo em `tlmod/cloud_saves/`)
 
 **Titã de Brasa**
@@ -267,7 +264,7 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 392896 | `5d970bf878748390ea76ae11eb268e5edf0197762381b90603eb147579a61a96` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 394080 | `f6f6f39a335d65a6eaff5635e01c713f9bdfe842e024d2a4a0cf3cdac5303452` |
 | `lib/arm64-v8a/libtlmod_runtime.so` | 891632 | `fd0b69e26678aaefbeb5bdccc21b951b2af57eb2295a80808575fba116b0347d` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
