@@ -58,7 +58,7 @@ public:
     }
     std::optional<std::string> Command(const std::string&, const std::string&, const std::string&,
                                        std::string*) const override {
-        return std::string("{\"toast\":\"10x Estrela Cadente no invent\u00e1rio\"}");
+        return std::string("{\"toast\":\"10x Estrela Cadente entregue (o que n\u00e3o couber cai no ch\u00e3o)\"}");
     }
 
 private:

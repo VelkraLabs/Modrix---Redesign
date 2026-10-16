@@ -427,6 +427,21 @@ public:
         return stack - left;
     }
 
+    // Itens no chão (Main.item), na ordem em que caíram.
+    std::vector<Item> worldItems;
+    int32_t DropItemNearPlayer(int32_t type, int32_t stack) override {
+        Item proto = NewItem(type, 1);
+        if (proto.IsAir()) return 0;
+        int32_t left = stack;
+        while (left > 0) {
+            Item it = proto;
+            it.stack = std::min(left, std::max(1, proto.maxStack));
+            left -= it.stack;
+            worldItems.push_back(it);
+        }
+        return stack;
+    }
+
     // --- Saves ---------------------------------------------------------------------
     // Mesmo layout de item do jogo (Player.InternalSavePlayerFile, WorldFile.SaveChests:
     // netID int32, stack, prefix byte). No load tudo passa por SetDefaults (netDefaults):

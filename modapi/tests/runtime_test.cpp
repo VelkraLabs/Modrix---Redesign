@@ -1019,6 +1019,23 @@ static void TestItems(const fs::path& modsDir) {
     CHECK(g_api->give_item(g_ctx, 8, 10));
     game.Frame();
     CHECK(game.player.inventory[4].type == 8 && game.player.inventory[4].netID == 8 && game.player.inventory[4].stack == 10);
+    // Inventário cheio: o que não coube cai no chão, em pilhas de até maxStack.
+    std::vector<size_t> filled;
+    for (size_t i = 0; i < 50; ++i)
+        if (game.player.inventory[i].IsAir()) game.player.inventory[i] = game.NewItem(216, 1), filled.push_back(i);
+    CHECK(g_api->give_item(g_ctx, ruby, 2000));  // 998 completam a pilha de 1; 999 + 3 no chão
+    game.Frame();
+    CHECK(game.player.inventory[3].stack == 999 && game.worldItems.size() == 2);
+    CHECK(game.worldItems[0].netID == ruby && game.worldItems[0].type == kDefaultItemShell &&
+          game.worldItems[0].stack == 999 && game.worldItems[1].netID == ruby && game.worldItems[1].stack == 3);
+    CHECK(g_api->give_item(g_ctx, 8, 3));
+    game.Frame();
+    CHECK(game.player.inventory[4].stack == 13);  // empilhou: nada no chão
+    CHECK(game.worldItems.size() == 2);
+    for (size_t i : filled) game.player.inventory[i] = {};
+    game.player.inventory[3].stack = 1;
+    game.player.inventory[4].stack = 10;
+    game.worldItems.clear();
 
     // Interface desenhando tudo, várias vezes: nenhuma tabela lida fora do tamanho.
     for (int i = 0; i < 3; ++i) game.DrawAll();
@@ -2075,7 +2092,7 @@ static void TestDevTools(const fs::path& modsDir) {
     // Dar item: chega no próximo frame dentro de um mundo.
     game.inWorld = true;
     auto r = cmd("give 38 5");
-    CHECK(r && toast(r) == "5x Lente no invent\xc3\xa1rio");
+    CHECK(r && toast(r) == "5x Lente entregue (o que n\xc3\xa3o couber cai no ch\xc3\xa3o)");
     game.Frame();
     CHECK(game.player.inventory[0].type == 38 && game.player.inventory[0].stack == 5);
 

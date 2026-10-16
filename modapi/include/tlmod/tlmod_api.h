@@ -280,8 +280,10 @@ typedef struct TLModHostApi {
     /* Dá `stack` unidades do item `type` (original ou de mod) ao jogador
      * local. Pode ser chamado de qualquer thread, inclusive no init: a entrega
      * acontece na thread do jogo, no próximo frame com um mundo carregado,
-     * empilhando com o que ele já tem e depois nos slots livres do inventário.
-     * false = tipo desconhecido ou stack < 1. O resultado da entrega vai para o log. */
+     * empilhando com o que ele já tem e depois nos slots livres do inventário;
+     * o que não couber cai no chão, sobre o jogador (ele pega quando abrir
+     * espaço). false = tipo desconhecido ou stack < 1. O resultado da entrega
+     * vai para o log. */
     bool (*give_item)(TLModContext* ctx, TLModId type, int32_t stack);
 
     /* Cria o NPC `type` (original ou de mod) perto do jogador local. Pode ser

@@ -98,6 +98,7 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
 # Constantes do header que espelham uma const do jogo.
 CONST_CHECKS: Dict[str, Tuple[str, str, str]] = {
     "kMaxNPCs": ("Terraria", "Main", "maxNPCs"),
+    "kMaxWorldItems": ("Terraria", "Main", "maxItems"),
     "kNpcVanillaCount": ("Terraria.ID", "NPCID", "Count"),
     "kMaxChests": ("Terraria", "Main", "maxChests"),
     "kItemVanillaCount": ("Terraria.ID", "ItemID", "Count"),

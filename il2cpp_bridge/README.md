@@ -53,8 +53,9 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
    um `Item` de sonda montado com o `SetDefaults` do jogo. Só na thread do `Main.DoUpdate`.
 12. Ferramentas de teste (`src/tools.cpp`, `TLMod_KillHostileNpcs` em `src/npc_hooks.cpp`), sem hook: nomes de itens
    e NPCs (`Lang.GetItemNameValue`/`GetNPCNameValue` e `ItemID/NPCID.Search.GetName`), hora (`Main.dayTime`,
-   `Main.time`, `Main.SkipToTime`), vida/mana cheias e matar hostis com `NPC.StrikeNPCNoInteraction`. Só na thread
-   do jogo; usadas pelo mod `tlmod.devtools`.
+   `Main.time`, `Main.SkipToTime`), vida/mana cheias, matar hostis com `NPC.StrikeNPCNoInteraction` e item no chão
+   sobre o jogador (`TLMod_DropItemAtPlayer`, pelo `Item.NewItem`: o que não coube no inventário no `give_item`).
+   Só na thread do jogo; usadas pelo mod `tlmod.devtools` e pelo runtime.
 
 ## Log
 

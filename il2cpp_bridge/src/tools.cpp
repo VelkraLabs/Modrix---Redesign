@@ -1,5 +1,5 @@
 // Ferramentas de teste (mod tlmod.devtools): nomes de itens e NPCs, hora do
-// mundo, vida/mana do jogador. Tudo por il2cpp_runtime_invoke ou campo, sem
+// mundo, vida/mana do jogador, item no chão (o que não coube no inventário). Tudo por il2cpp_runtime_invoke ou campo, sem
 // hook; só na thread do jogo. Matar NPCs fica em npc_hooks.cpp (usa Main.npc).
 #include <algorithm>
 #include <cstring>
@@ -27,7 +27,12 @@ struct ToolsResolved {
     size_t statLifeMax2 = terraria::player_off::statLifeMax2;
     size_t statMana = terraria::player_off::statMana;
     size_t statManaMax2 = terraria::player_off::statManaMax2;
+    size_t position = terraria::player_off::position;
+    size_t width = terraria::player_off::width;
+    size_t height = terraria::player_off::height;
     bool player = false;
+    const MethodInfo* newItem = nullptr;  // static int Item.NewItem(IEntitySource, int X, ...)
+    FieldInfo* mainItem = nullptr;        // static Item[] Main.item
 };
 ToolsResolved t;
 
@@ -78,10 +83,16 @@ bool ResolveTools() {
     t.statLifeMax2 = FieldOffset(player, "statLifeMax2", terraria::player_off::statLifeMax2);
     t.statMana = FieldOffset(player, "statMana", terraria::player_off::statMana);
     t.statManaMax2 = FieldOffset(player, "statManaMax2", terraria::player_off::statManaMax2);
+    t.position = FieldOffset(player, "position", terraria::player_off::position);
+    t.width = FieldOffset(player, "width", terraria::player_off::width);
+    t.height = FieldOffset(player, "height", terraria::player_off::height);
     t.player = true;
-    LOGI("ferramentas: nomes %s/%s, nomes internos %s, hora %s, SkipToTime %s",
+    if (Il2CppClass* item = api.il2cpp_class_from_name(img, terraria::kNamespace, terraria::kItemClass))
+        t.newItem = api.il2cpp_class_get_method_from_name(item, "NewItem", terraria::argc::Item_NewItem);
+    t.mainItem = api.il2cpp_class_get_field_from_name(main, "item");
+    LOGI("ferramentas: nomes %s/%s, nomes internos %s, hora %s, SkipToTime %s, item no chão %s",
          t.itemName ? "ok" : "-", t.npcName ? "ok" : "-", t.getName && t.itemSearch && t.npcSearch ? "ok" : "-",
-         t.dayTime && t.time ? "ok" : "-", t.skipToTime ? "ok" : "-");
+         t.dayTime && t.time ? "ok" : "-", t.skipToTime ? "ok" : "-", t.newItem && t.mainItem ? "ok" : "-");
     return t.itemName && t.npcName && t.dayTime && t.time;
 }
 
@@ -135,6 +146,30 @@ bool TLMod_RestorePlayer(Il2CppObject* player) {
     FieldAt<int32_t>(player, t.statLife) = FieldAt<int32_t>(player, t.statLifeMax2);
     FieldAt<int32_t>(player, t.statMana) = FieldAt<int32_t>(player, t.statManaMax2);
     return true;
+}
+
+Il2CppObject* TLMod_DropItemAtPlayer(Il2CppObject* player, int32_t type) {
+    if (!player || !t.player || !t.newItem || !t.mainItem || type <= 0) return nullptr;
+    Il2CppObject* source = nullptr;
+    int32_t x = static_cast<int32_t>(FieldAt<float>(player, t.position));
+    int32_t y = static_cast<int32_t>(FieldAt<float>(player, t.position + 4));
+    int32_t w = FieldAt<int32_t>(player, t.width), h = FieldAt<int32_t>(player, t.height);
+    int32_t stack = 1, pfix = 0;
+    bool noBroadcast = false, noGrabDelay = false, reverseLookup = false;
+    void* params[] = {source, &x, &y, &w, &h, &type, &stack, &noBroadcast, &pfix, &noGrabDelay, &reverseLookup};
+    Il2CppException* exc = nullptr;
+    Il2CppObject* boxed = api.il2cpp_runtime_invoke(t.newItem, nullptr, params, &exc);
+    if (exc || !boxed) {
+        if (exc) bridge::LogException("Item.NewItem", exc);
+        return nullptr;
+    }
+    int32_t index = *static_cast<int32_t*>(api.il2cpp_object_unbox(boxed));
+    Il2CppArray* items = reinterpret_cast<Il2CppArray*>(StaticObject(t.mainItem));
+    // 400 (Main.maxItems): o jogo não criou (geração de mundo, ou o tipo em cache).
+    if (!items || index < 0 || index >= terraria::kMaxWorldItems ||
+        static_cast<uint32_t>(index) >= api.il2cpp_array_length(items))
+        return nullptr;
+    return ArrayData<Il2CppObject*>(items)[index];
 }
 
 }  // extern "C"

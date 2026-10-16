@@ -206,6 +206,24 @@ int TestTools(void* lib) {
     std::memcpy(&mana, player + terraria::player_off::statMana, 4);
     CHECK(mana == 200 && !TLMod_RestorePlayer(nullptr));
 
+    // Item no chão sobre o jogador (o que não coube no inventário).
+    float pos[2] = {};
+    std::memcpy(pos, player + terraria::player_off::position, sizeof(pos));
+    auto* drop = reinterpret_cast<uint8_t*>(TLMod_DropItemAtPlayer(TLMod_GetLocalPlayer(), 38));
+    int32_t dropType = 0, dropStack = 0;
+    float dropPos[2] = {-1, -1};
+    if (drop) {
+        std::memcpy(&dropType, drop + terraria::item_off::type, 4);
+        std::memcpy(&dropStack, drop + terraria::item_off::stack, 4);
+        std::memcpy(dropPos, drop + 0x20, sizeof(dropPos));  // Entity.position
+    }
+    CHECK(drop && dropType == 38 && dropStack == 1);
+    CHECK(dropPos[0] == static_cast<float>(static_cast<int32_t>(pos[0])) &&
+          dropPos[1] == static_cast<float>(static_cast<int32_t>(pos[1])));
+    // Um ID de mod direto no NewItem estoura as tabelas do jogo: a ponte devolve nulo.
+    CHECK(!TLMod_DropItemAtPlayer(TLMod_GetLocalPlayer(), 8192));
+    CHECK(!TLMod_DropItemAtPlayer(nullptr, 38) && !TLMod_DropItemAtPlayer(TLMod_GetLocalPlayer(), 0));
+
     // NPCs: só o hostil perto morre. Os slots voltam a ficar livres no fim.
     struct Setup {
         int slot;

@@ -152,7 +152,7 @@ Item.RebuildTooltip           netID de mod: o tooltip vem da definição (Lang.G
 Em `damage > 0` numa casca que não se usa, o item vira arma de golpe corpo a corpo.
 `give_item(ctx, tipo, quantidade)` dá um item ao jogador local: pode ser chamado de qualquer thread,
 inclusive no init, e a entrega acontece no próximo frame com um mundo carregado, empilhando com o que
-ele já tem.
+ele já tem. O que não couber no inventário cai no chão, sobre o jogador.
 
 **Para testar no aparelho:** crie um arquivo vazio `give_on_start` na pasta do mod de exemplo
 (`.../tlmod/mods/example_item/give_on_start`). Ao entrar num mundo vêm 3 Rubis Fictícios, com a

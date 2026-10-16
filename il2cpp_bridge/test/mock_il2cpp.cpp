@@ -283,6 +283,7 @@ bool PatchScreens(void* target, void* replacement);
 bool InvokeScreens(const MethodInfo* m, void* obj, void** params, Il2CppObject** result);
 void InitScreens();
 void InitTools();
+Il2CppObject* NewMockItem();
 
 int g_framesRun = 0;
 void MockMainDoUpdate(Il2CppObject*, Il2CppObject*, const MethodInfo*) { ++g_framesRun; }
@@ -868,6 +869,13 @@ FieldInfo g_fNpcTools[] = {{"width", kNpcWidth, nullptr},     {"height", kNpcHei
                            {"dontTakeDamage", kNpcDontTakeDamage, nullptr}};
 MethodInfo g_mStrikeNoInteraction{nullptr, "StrikeNPCNoInteraction", 6};
 Il2CppObject g_keyNotFound{};
+// Item.NewItem: Main.item[i] montado pelo SetDefaults (com hook) sobre o retângulo.
+// Como o jogo, indexa tabelas por type: um ID fora dos originais lança.
+MethodInfo g_mNewItem{nullptr, "NewItem", 11};
+Il2CppArray* g_worldItems = nullptr;  // Main.item
+FieldInfo g_fMainItem{"item", 0x5A0, &g_worldItems};
+int32_t g_worldItemCount = 0;
+Il2CppObject g_indexOutOfRange{};
 
 // Nomes como o jogo em português daria (alguns fixos, o resto genérico).
 std::string MockItemName(int32_t id) {
@@ -900,6 +908,10 @@ void InitTools() {
     for (FieldInfo& f : g_fPlayerMana) g_player.fields.push_back(&f);
     for (FieldInfo& f : g_fNpcTools) g_npc.fields.push_back(&f);
     g_npc.methods.push_back(&g_mStrikeNoInteraction);
+    g_item.methods.push_back(&g_mNewItem);
+    g_worldItems = NewArray(401);
+    for (uint32_t i = 0; i < 401; ++i) Elem(g_worldItems, i) = NewMockItem();
+    g_main.fields.push_back(&g_fMainItem);
     g_csharp.classes.insert(g_csharp.classes.end(), {&g_lang, &g_idDictionary, &g_npcIdClass});
     I32(g_localPlayer, 0x708) = 20;   // statMana
     I32(g_localPlayer, 0x710) = 200;  // statManaMax2
@@ -924,6 +936,22 @@ bool InvokeTools(const MethodInfo* m, void* obj, void** params, Il2CppObject** r
         ++g_skipToTimeCalls;
         g_time = *static_cast<int32_t*>(params[0]);
         g_dayTime = *static_cast<bool*>(params[1]);
+        return true;
+    }
+    if (m == &g_mNewItem) {
+        const int32_t x = *static_cast<int32_t*>(params[1]), y = *static_cast<int32_t*>(params[2]);
+        const int32_t type = *static_cast<int32_t*>(params[5]);
+        if (type <= 0 || type >= kItemCount) {
+            *exc = &g_indexOutOfRange;
+            return true;
+        }
+        Il2CppObject* item = static_cast<Il2CppObject*>(Elem(g_worldItems, static_cast<uint32_t>(g_worldItemCount)));
+        g_itemSetDefaultsEntry(item, type, false, nullptr, &g_mItemSetDefaults3);
+        At<int32_t>(item, kItemStack) = *static_cast<int32_t*>(params[6]);
+        At<float>(item, 0x20) = static_cast<float>(x);  // position (Entity)
+        At<float>(item, 0x24) = static_cast<float>(y);
+        g_box.value = g_worldItemCount++;
+        *ret = &g_box.header;
         return true;
     }
     if (m == &g_mStrikeNoInteraction) {
@@ -985,6 +1013,11 @@ __attribute__((visibility("default"))) void mock_il2cpp_init() {
 }
 __attribute__((visibility("default"))) void* mock_local_player() { return g_localPlayer; }
 __attribute__((visibility("default"))) int mock_skip_to_time_calls() { return g_skipToTimeCalls; }
+// Itens criados por Item.NewItem, em ordem (Main.item[0..count)).
+__attribute__((visibility("default"))) int32_t mock_world_item_count() { return g_worldItemCount; }
+__attribute__((visibility("default"))) void* mock_world_item(int32_t i) {
+    return Elem(g_worldItems, static_cast<uint32_t>(i));
+}
 __attribute__((visibility("default"))) bool mock_patch_function(void* target, void* replacement) {
     if (PatchScreens(target, replacement)) return true;
     if (target == reinterpret_cast<void*>(&MockPlayerHurt)) g_hurtEntry = reinterpret_cast<HurtFn>(replacement);

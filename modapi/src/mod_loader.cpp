@@ -323,15 +323,21 @@ struct ModLoader::Impl {
             todo.swap(pendingGives);
         }
         for (const Give& g : todo) {
-            int32_t given = game->GiveItem(g.type, g.stack);
+            const int32_t given = game->GiveItem(g.type, g.stack);
+            // O que não coube cai no chão, sobre o jogador.
+            const int32_t dropped = given < g.stack ? game->DropItemNearPlayer(g.type, g.stack - given) : 0;
             const ContentEntry* e = self->registry_.Get(TLMOD_CONTENT_ITEM, g.type);
-            std::string what = e ? e->key : "item " + std::to_string(g.type);
+            std::string what = std::to_string(g.stack) + "x " + (e ? e->key : "item " + std::to_string(g.type));
             if (given == g.stack)
-                Log(TLMOD_LOG_INFO, g.modId, "give_item: " + std::to_string(given) + "x " + what + " entregue");
+                Log(TLMOD_LOG_INFO, g.modId, "give_item: " + what + " entregue");
+            else if (given + dropped == g.stack)
+                Log(TLMOD_LOG_INFO, g.modId,
+                    "give_item: " + what + " entregue (" + std::to_string(given) + " no inventário, " +
+                        std::to_string(dropped) + " no chão perto do jogador)");
             else
                 Log(TLMOD_LOG_WARN, g.modId,
-                    "give_item: só " + std::to_string(given) + " de " + std::to_string(g.stack) + "x " + what +
-                        " couberam no inventário");
+                    "give_item: " + what + ": só " + std::to_string(given) + " no inventário e " +
+                        std::to_string(dropped) + " no chão; o resto não foi entregue");
         }
     }
 

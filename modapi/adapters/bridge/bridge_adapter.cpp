@@ -525,6 +525,28 @@ int32_t BridgeGameAdapter::GiveItem(int32_t type, int32_t stack) {
     return stack - left;
 }
 
+int32_t BridgeGameAdapter::DropItemNearPlayer(int32_t type, int32_t stack) {
+    Il2CppObject* player = TLMod_GetLocalPlayer();
+    if (!player || stack < 1) return 0;
+    const int32_t shell = RemapItem(type);
+    int32_t left = stack;
+    TLModItemFields f{};
+    TLModItemStats st{};
+    while (left > 0) {
+        // O NewItem do jogo indexa tabelas por type: cria a casca, e o item de
+        // mod é montado por cima (SetDefaults -> hook), como no inventário.
+        Il2CppObject* item = TLMod_DropItemAtPlayer(player, shell);
+        if (!item) break;
+        if (type != shell && !TLMod_SetItemDefaults(item, type)) break;
+        if (!TLMod_ReadItem(item, &f) || f.netID != type) break;
+        TLMod_ReadItemStats(item, &st);
+        f.stack = std::min(left, std::max(1, st.maxStack));
+        left -= f.stack;
+        TLMod_WriteItem(item, &f);
+    }
+    return stack - left;
+}
+
 void BridgeGameAdapter::SetPersistenceHooks(PersistenceHooks hooks) {
     bool any = hooks.beforeSave || hooks.afterSave || hooks.afterLoad;
     // Os antigos não são liberados: um save pode estar no meio, em outra thread.

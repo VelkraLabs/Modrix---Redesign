@@ -194,6 +194,23 @@ int main(int argc, char** argv) {
     CHECK(st.maxStack == 999 && st.value == 500 && st.rare == 3);
     CHECK(Get(player, TLMOD_ITEMS_HELD, 0, 0).type == 0);
 
+    // O que não coube no inventário cai no chão (Main.item): a casca pelo NewItem do
+    // jogo e o item de mod montado por cima, em pilhas de até maxStack.
+    {
+        auto world_count = reinterpret_cast<int32_t (*)()>(sym("mock_world_item_count"));
+        auto world_item = reinterpret_cast<void* (*)(int32_t)>(sym("mock_world_item"));
+        CHECK(world_count && world_item);
+        const int32_t first = world_count();
+        CHECK(adapter.DropItemNearPlayer(ruby, 1500) == 1500 && world_count() == first + 2);
+        TLModItemFields a{}, b{};
+        TLMod_ReadItem(static_cast<Il2CppObject*>(world_item(first)), &a);
+        TLMod_ReadItem(static_cast<Il2CppObject*>(world_item(first + 1)), &b);
+        CHECK(IsMod(a, ruby) && a.stack == 999 && IsMod(b, ruby) && b.stack == 501);
+        CHECK(adapter.DropItemNearPlayer(8, 3) == 3 && world_count() == first + 3);
+        TLMod_ReadItem(static_cast<Il2CppObject*>(world_item(first + 2)), &a);
+        CHECK(a.type == 8 && a.netID == 8 && a.stack == 3);
+    }
+
     // ---- Mundo: baús pela posição -------------------------------------------------
     add_chest(3, 77, 88);
     Put(nullptr, TLMOD_ITEMS_CHEST, 3, 6, topaz, 40);

@@ -28,6 +28,9 @@ constexpr const char* kNpcClass = "NPC";        // TypeDefIndex 1022 (dump.cs)
 // Main.maxNPCs (const = 200): tamanho de Main.npc[]. NewNPC devolve esse
 // valor quando não há slot livre.
 constexpr int32_t kMaxNPCs = 200;
+// Main.maxItems (const = 400): itens no mundo. Item.NewItem devolve esse valor
+// quando não cria o item.
+constexpr int32_t kMaxWorldItems = 400;
 // NPCID.Count (const = 688). IDs negativos (-65..-1) também são originais.
 constexpr int32_t kNpcVanillaCount = 688;
 
@@ -288,6 +291,7 @@ constexpr size_t Search = 0x10;  // IdDictionary NPCID.Search ("EyeofCthulhu" <-
 // il2cpp_field_static_get_value e não este número diretamente.
 namespace main_static_off {
 constexpr size_t npc = 0x5B0;      // NPC[] Main.npc (200 slots)
+constexpr size_t item = 0x5A0;     // Item[] Main.item (itens no mundo: 400 + 1 de folga)
 constexpr size_t dayTime = 0x4B8;  // bool   Main.dayTime
 constexpr size_t time = 0x4C0;     // double Main.time (ticks desde 4:30 de dia ou 19:30 de noite)
 constexpr size_t player = 0x678;   // Player[] Main.player (255 slots)
@@ -474,6 +478,11 @@ constexpr uintptr_t Main_SkipToTime = 0xD72700;         // static void SkipToTim
 // double NPC.StrikeNPCNoInteraction(int Damage, float knockBack, int hitDirection,
 //                                   bool crit, bool noEffect, bool fromNet)
 constexpr uintptr_t NPC_StrikeNPCNoInteraction = 0xEE2BF0;
+// static int Item.NewItem(IEntitySource source, int X, int Y, int Width, int Height, int Type,
+//     int Stack, bool noBroadcast, int pfix, bool noGrabDelay, bool reverseLookup): o item no
+// mundo, dentro do retângulo; devolve o índice em Main.item (400 = não criou). Ignora o
+// source (o registrador x0 é sobrescrito no prólogo): vai nulo, como no NPC.NewNPC.
+constexpr uintptr_t Item_NewItem = 0xBA8CDC;
 }  // namespace rva
 
 // Número de parâmetros C# (sem contar `this`), usado em
@@ -490,6 +499,7 @@ constexpr int Lang_GetNPCNameValue = 1;
 constexpr int IdDictionary_GetName = 1;
 constexpr int Main_SkipToTime = 2;
 constexpr int NPC_StrikeNPCNoInteraction = 6;
+constexpr int Item_NewItem = 11;  // o único overload de 11 (os outros têm 8, 9 e 10)
 constexpr int Main_DoUpdate = 1;
 constexpr int Player_InternalSavePlayerFile = 1;
 constexpr int Player_LoadPlayer = 2;

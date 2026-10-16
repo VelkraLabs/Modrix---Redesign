@@ -208,6 +208,12 @@ bool TLMod_SetWorldTime(bool day, double time, bool jump);
 
 // Vida e mana cheias (statLife = statLifeMax2, statMana = statManaMax2).
 bool TLMod_RestorePlayer(Il2CppObject* player);
+// Item.NewItem sobre o jogador (o retângulo dele, como Player.QuickSpawnItem):
+// 1 unidade de `type`, sem prefixo, no chão; o jogador pega se couber. O jogo
+// indexa tabelas por `type` no NewItem: só tipos originais (para um item de
+// mod, a casca, e depois TLMod_SetItemDefaults no item devolvido). Devolve
+// Main.item[índice], ou nulo se o jogo não criou.
+Il2CppObject* TLMod_DropItemAtPlayer(Il2CppObject* player, int32_t type);
 
 // Mata, pelo caminho normal do jogo (NPC.StrikeNPCNoInteraction, com loot), os
 // NPCs hostis ativos cujo centro está a até `radius` pixels de (x, y). Pula

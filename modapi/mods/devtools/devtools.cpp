@@ -201,7 +201,8 @@ public:
             int32_t stack = 0;
             if (!(in >> id >> stack) || stack < 1) return false;
             if (!host_.GiveItem(id, stack)) return false;
-            toast = std::to_string(stack) + "x " + NameOf(TLMOD_CONTENT_ITEM, id) + " no inventário";
+            toast = std::to_string(stack) + "x " + NameOf(TLMOD_CONTENT_ITEM, id) +
+                    " entregue (o que não couber cai no chão)";
         } else if (verb == "spawn") {
             std::vector<TLModId> ids;
             for (TLModId id; in >> id;) ids.push_back(id);

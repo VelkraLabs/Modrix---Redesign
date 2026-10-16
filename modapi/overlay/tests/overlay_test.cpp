@@ -330,7 +330,7 @@ static void TestModTab(const fs::path& modsSrc, const fs::path& tmp) {
     CHECK(panel.Tick(20) && panel.SnapshotJson().find("\"give 38 10\"") != std::string::npos);
     game.inWorld = true;
     CHECK(panel.HandleAction("mod_command", "give 38 10"));
-    CHECK(panel.ModTabs()[0].notice == "10x Lente no invent\xc3\xa1rio");
+    CHECK(panel.ModTabs()[0].notice == "10x Lente entregue (o que n\xc3\xa3o couber cai no ch\xc3\xa3o)");
     CHECK(!panel.HandleAction("mod_command", "abracadabra") &&
           panel.ModTabs()[0].notice.rfind("N\xc3\xa3o deu certo", 0) == 0);
     panel.Tick(30);

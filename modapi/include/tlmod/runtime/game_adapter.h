@@ -163,6 +163,11 @@ public:
     // depois usa slots livres do inventário principal. Só na thread do jogo.
     // Devolve quantas unidades entraram.
     virtual int32_t GiveItem(int32_t type, int32_t stack) = 0;
+    // Põe `stack` unidades de `type` no chão, sobre o jogador local (o que não
+    // coube no inventário): pilhas de até maxStack, montadas como no GiveItem.
+    // Ele pega de volta quando abrir espaço. Só na thread do jogo. Devolve
+    // quantas unidades foram para o chão.
+    virtual int32_t DropItemNearPlayer(int32_t type, int32_t stack) = 0;
     // O que um item original `type` passa para quem o usa como casca (ItemID.Sets
     // e o SetDefaults dele). nullopt = o jogo ainda não pode responder (no
     // Terraria: fora da thread do jogo ou antes do primeiro frame); o runtime
