@@ -722,6 +722,35 @@ int main(int argc, char** argv) {
     TLModStaticField* boss1 = TLMod_FindStaticField("Terraria", "NPC", "downedBoss1");
     TLModStaticField* hard = TLMod_FindStaticField("Terraria", "Main", "hardMode");
     CHECK(boss1 && hard && !TLMod_FindStaticField("Terraria", "NPC", "downedNothing"));
+
+    // Log da ponte para o runtime: as linhas de antes (init, hooks, o aviso
+    // acima) chegam primeiro, com a hora original; as novas vão direto.
+    {
+        static std::vector<std::pair<int, std::string>> lines;
+        static int64_t firstTime = 0;
+        lines.clear();
+        TLMod_SetLogCallback([](int level, int64_t timeMs, const char* msg) {
+            if (lines.empty()) firstTime = timeMs;
+            lines.emplace_back(level, msg);
+        });
+        auto has = [](int level, const char* text) {
+            for (const auto& l : lines)
+                if (l.first == level && l.second.find(text) != std::string::npos) return true;
+            return false;
+        };
+        CHECK(has(1, "Terraria.Player=") && has(2, "downedNothing"));  // reenviadas
+        CHECK(firstTime > 1600000000000LL);
+        size_t replayed = lines.size();
+        CHECK(!TLMod_FindStaticField("Terraria", "Main", "campoNovo"));
+        CHECK(lines.size() == replayed + 1 && has(2, "campoNovo"));  // direto, sem esperar
+        TLMod_SetLogCallback(nullptr);
+        CHECK(!TLMod_FindStaticField("Terraria", "Main", "semCallback"));
+        CHECK(lines.size() == replayed + 1);  // desligado: fica guardada
+        lines.clear();
+        TLMod_SetLogCallback([](int level, int64_t, const char* msg) { lines.emplace_back(level, msg); });
+        CHECK(lines.size() == 1 && has(2, "semCallback"));  // só o que veio depois do último envio
+        TLMod_SetLogCallback(nullptr);
+    }
     bool b = true;
     CHECK(TLMod_ReadStaticBool(boss1, &b) && !b);
     mock_set_flag("downedBoss1", true);

@@ -19,6 +19,8 @@ add_library(tlmod_runtime STATIC
   src/png.cpp
   src/item_shell.cpp
   src/dynlib.cpp
+  src/sha256.cpp
+  src/library_cache.cpp
   src/mod_loader.cpp)
 target_include_directories(tlmod_runtime PUBLIC include PRIVATE src)
 target_compile_options(tlmod_runtime PRIVATE ${TLMOD_WARNINGS})

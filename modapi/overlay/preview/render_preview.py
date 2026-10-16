@@ -7,7 +7,7 @@ e lê exatamente o JSON que o PanelController entrega ao Java, inclusive o
 tema. Serve para ver o resultado antes do aparelho; não é uma captura de tela.
 
     overlay_snapshot sample_checklist.json out/
-    python3 render_preview.py out/snapshot_checklist.json out/snapshot_mods.json preview.png
+    python3 render_preview.py out/snapshot_checklist.json out/snapshot_mods.json out/snapshot_log.json preview.png
 """
 
 import json
@@ -19,6 +19,7 @@ DENSITY = 2.0                   # px por dp (a imagem sai em ~xhdpi)
 SCREEN_DP = (900, 420)          # celular na horizontal, em dp
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT_MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 
 
 def dp(v):
@@ -36,10 +37,10 @@ def rgba(hex_argb):
 _fonts = {}
 
 
-def font(sp, bold=False):
-    key = (sp, bold)
+def font(sp, bold=False, mono=False):
+    key = (sp, bold, mono)
     if key not in _fonts:
-        _fonts[key] = ImageFont.truetype(FONT_BOLD if bold else FONT, dp(sp))
+        _fonts[key] = ImageFont.truetype(FONT_MONO if mono else (FONT_BOLD if bold else FONT), dp(sp))
     return _fonts[key]
 
 
@@ -69,8 +70,27 @@ class Painter:
         self.d.text(xy, s, font=f, fill=self.color(color_key), anchor=anchor)
         return line_h(f)
 
-    def text_w(self, s, size_key, bold=False):
-        return self.d.textlength(s, font=font(self.t[size_key], bold))
+    def text_w(self, s, size_key, bold=False, mono=False):
+        return self.d.textlength(s, font=font(self.t[size_key], bold, mono))
+
+    def wrap(self, s, size_key, max_w, bold=False, mono=False):
+        """Quebra como o TextView: por palavra; palavra maior que a linha é cortada por caractere."""
+        out, cur = [], ""
+        for word in s.split(" "):
+            cand = word if not cur else cur + " " + word
+            if self.text_w(cand, size_key, bold, mono) <= max_w:
+                cur = cand
+                continue
+            if cur:
+                out.append(cur)
+            cur = ""
+            for ch in word:
+                if cur and self.text_w(cur + ch, size_key, bold, mono) > max_w:
+                    out.append(cur)
+                    cur = ""
+                cur += ch
+        out.append(cur)
+        return out
 
     def pill(self, right, cy, label, color_key):
         """Rótulo arredondado (status, Hardmode): padding 8/2 dp, cantos de 10 dp."""
@@ -137,6 +157,8 @@ def render_panel(snap, layer, scroll_to_end=False):
         cp = Painter(layer_, t)
         if snap["tab"] == "mods":
             return layer_, draw_mods(cp, snap["mods"], x0, x1, top)
+        if snap["tab"] == "log":
+            return layer_, draw_log(cp, snap["log"], x0, x1, top)
         return layer_, draw_checklist(cp, snap["checklist"], x0, x1, top)
 
     content, end_y = draw_content(content_y)
@@ -153,16 +175,19 @@ def render_panel(snap, layer, scroll_to_end=False):
     p.text((x1 - dp(4), y + dp(2)), "✕", "title_sp", "text_dim", False, "ra")
     y += hh + dp(4)
 
-    # Abas (pesos iguais, padding 10/6, ativa com fundo arredondado).
+    # Abas (Java: largura do texto + parte igual da sobra, padding 10/6, ativa com fundo arredondado).
     y += dp(8)
     tabs = snap["tabs"]
-    tw = (x1 - x0) / len(tabs)
-    for i, tab in enumerate(tabs):
-        bx = x0 + i * tw
+    natural = [p.text_w(tab["label"], "text_sp", tab["active"]) + dp(20) for tab in tabs]
+    extra = max(0, (x1 - x0) - sum(natural)) / len(tabs)
+    bx = x0
+    for tab, nw in zip(tabs, natural):
+        tw = nw + extra
         if tab["active"]:
             p.rounded((bx, y, bx + tw, y + th), 8, "tab_active_bg")
         p.text((bx + tw / 2, y + th / 2), tab["label"], "text_sp", "text" if tab["active"] else "text_dim",
                tab["active"], "mm")
+        bx += tw
     y += th + dp(8)
 
     assert y == content_y
@@ -178,21 +203,24 @@ def draw_mods(p, mods, x0, x1, y):
         h = p.text((x0 + dp(4), y), mods["notice"], "small_sp", "accent")
         y += h + dp(8)
     for r in mods["rows"]:
-        lines = [(r["title"], "text_sp", "text", True)]
+        max_w = (x1 - dp(10) - dp(48)) - (x0 + dp(10))
+        lines = [(ellipsize(p, r["title"], "text_sp", True, max_w), "text_sp", "text", True)]
         state = r["state"]
-        lines.append((r["subtitle"], "small_sp", "text_dim" if state == "loaded" else
-                      ("unknown" if state == "disabled" else "error"), False))
-        if r.get("detail"):
-            lines.append((r["detail"], "small_sp", "error", False))
+        lines.append((ellipsize(p, r["subtitle"], "small_sp", False, max_w), "small_sp", "text_dim" if state == "loaded"
+                      else ("unknown" if state == "disabled" else "error"), False))
+        if r.get("detail"):  # Java: erro inteiro, quebra linha (padding 2 dp em cima e embaixo)
+            wrapped = p.wrap(r["detail"], "small_sp", max_w)
+            lines.append(("", None, None, None))
+            lines += [(s, "small_sp", "error", False) for s in wrapped]
+            lines.append(("", None, None, None))
         if r.get("pending"):
-            lines.append((r["pending"], "small_sp", "accent", False))
-        text_h = sum(line_h(font(t[s], b)) for _, s, _, b in lines)
+            lines.append((ellipsize(p, r["pending"], "small_sp", False, max_w), "small_sp", "accent", False))
+        text_h = sum(line_h(font(t[s], b)) if s else dp(2) for _, s, _, b in lines)
         row_h = max(text_h, dp(22)) + dp(16)
         p.rounded((x0, y, x1, y + row_h), 8, "row_bg")
         ty = y + dp(8)
-        max_w = (x1 - dp(10) - dp(48)) - (x0 + dp(10))
         for s, size, color, bold in lines:
-            ty += p.text((x0 + dp(10), ty), ellipsize(p, s, size, bold, max_w), size, color, bold)
+            ty += p.text((x0 + dp(10), ty), s, size, color, bold) if size else dp(2)
         # Interruptor: trilho 40x22 dp, botão de 18 dp.
         tx1 = x1 - dp(10)
         cy = y + row_h / 2
@@ -202,6 +230,32 @@ def draw_mods(p, mods, x0, x1, y):
         p.d.ellipse([kx, cy - dp(9), kx + dp(18), cy + dp(9)], fill=p.color("text"))
         y += row_h + dp(6)
     return y - dp(6)
+
+
+def draw_log(p, log, x0, x1, y):
+    t = p.t
+    # Caminho do arquivo (small, text_dim, padding 4/0/4/6).
+    for s in p.wrap(log.get("file") or "Sem arquivo de log", "small_sp", x1 - x0 - dp(8)):
+        y += p.text((x0 + dp(4), y), s, "small_sp", "text_dim")
+    y += dp(6)
+    if not log["lines"]:
+        mh = line_h(font(t["text_sp"]))
+        p.text(((x0 + x1) / 2, y + dp(48) + mh / 2), log["empty"], "text_sp", "text_dim", False, "mm")
+        return y + dp(96) + mh
+    # Um bloco só, monoespaçado, cor por nível (Java: SpannableStringBuilder num TextView).
+    f = font(t["small_sp"], False, True)
+    lh = line_h(f)
+    rows = []
+    for line in log["lines"]:
+        key = {"E": "error", "W": "pending"}.get(line["level"], "text")
+        rows += [(s, key) for s in p.wrap(line["text"], "small_sp", x1 - x0 - dp(16), False, True)]
+    h = len(rows) * lh + dp(12)
+    p.rounded((x0, y, x1, y + h), 8, "row_bg")
+    ty = y + dp(6)
+    for s, key in rows:
+        p.d.text((x0 + dp(8), ty), s, font=f, fill=p.color(key))
+        ty += lh
+    return y + h
 
 
 def ellipsize(p, s, size, bold, max_w):
@@ -279,6 +333,8 @@ def main():
         if snap["tab"] == "checklist":
             screens.append(render_screen(snap, "Aba Boss Checklist"))
             screens.append(render_screen(snap, "Aba Boss Checklist (rolada até o fim)", True))
+        elif snap["tab"] == "log":
+            screens.append(render_screen(snap, "Aba Log (acompanha o fim)", True))
         else:
             screens.append(render_screen(snap, "Aba Mods"))
     gap = dp(10)

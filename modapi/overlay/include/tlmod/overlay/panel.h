@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "tlmod/runtime/log.h"
 #include "tlmod/runtime/mod_loader.h"
 
 namespace tlmod::overlay {
@@ -39,6 +40,9 @@ public:
     virtual std::vector<ModInfo> Mods() const = 0;
     virtual std::optional<std::string> Query(const std::string& modId, const std::string& channel,
                                              std::string* error) const = 0;
+    // Últimas linhas do log (da mais antiga para a mais nova) e o arquivo onde ele é gravado.
+    virtual std::vector<rt::LogEntry> LogTail(size_t /*max*/) const { return {}; }
+    virtual std::string LogFile() const { return {}; }
 };
 
 // Fonte real: lê do ModLoader (depois de LoadAll).
@@ -48,6 +52,8 @@ public:
     std::vector<ModInfo> Mods() const override;
     std::optional<std::string> Query(const std::string& modId, const std::string& channel,
                                      std::string* error) const override;
+    std::vector<rt::LogEntry> LogTail(size_t max) const override { return rt::RecentLog(max); }
+    std::string LogFile() const override { return rt::LogFilePath().string(); }
 
 private:
     const rt::ModLoader& loader_;
@@ -56,14 +62,14 @@ private:
 // ---------------------------------------------------------------------------
 // View-model
 // ---------------------------------------------------------------------------
-enum class Tab { Mods, Checklist };
+enum class Tab { Mods, Checklist, Log };
 
 struct ModRow {
     std::string id;
     std::string title;      // nome do manifest
     std::string subtitle;   // "v0.1.0 · Carregado"
     std::string state;      // loaded | error | disabled | skipped | rejected
-    std::string detail;     // mensagem de erro, se houver
+    std::string detail;     // mensagem de erro inteira, se houver (o renderizador quebra linha, não corta)
     bool enabled = true;    // valor do interruptor (configuração)
     std::string pending;    // "Será desativado ao reiniciar o jogo" ou vazio
 };
@@ -91,6 +97,16 @@ struct ChecklistView {
     std::vector<BossRow> rows;
 };
 
+struct LogLine {
+    std::string text;   // linha formatada (LogEntry::Format)
+    std::string level;  // "D" | "I" | "W" | "E"
+};
+
+struct LogView {
+    std::string file;             // caminho do tlmod.log, ou vazio se não há arquivo
+    std::vector<LogLine> lines;   // da mais antiga para a mais nova
+};
+
 // Canal do Boss Checklist que o painel consome.
 constexpr const char* kChecklistMod = "tlmod.boss_checklist";
 constexpr const char* kChecklistChannel = "checklist";
@@ -99,6 +115,9 @@ class PanelController {
 public:
     // Intervalo de atualização da aba Boss Checklist com o painel aberto.
     static constexpr int64_t kChecklistRefreshMs = 1000;
+    // Aba Log: quantas linhas e de quanto em quanto tempo, com o painel aberto nela.
+    static constexpr size_t kLogTailLines = 150;
+    static constexpr int64_t kLogRefreshMs = 1000;
 
     PanelController(const PanelDataSource& source, ConfigStore& config);
 
@@ -109,7 +128,7 @@ public:
     // Inverte o interruptor do mod e salva. Não carrega nem descarrega nada.
     bool ToggleMod(const std::string& modId, std::string* error = nullptr);
     // Ponto de entrada do renderizador: "toggle_open", "close",
-    // "tab" (arg "mods" | "checklist"), "toggle_mod" (arg = id do mod).
+    // "tab" (arg "mods" | "checklist" | "log"), "toggle_mod" (arg = id do mod).
     bool HandleAction(const std::string& action, const std::string& arg);
 
     // Chamado periodicamente pelo renderizador (ex.: a cada 250 ms).
@@ -123,6 +142,7 @@ public:
     const std::vector<ModRow>& ModRows() const { return modRows_; }
     const std::string& ModsNotice() const { return modsNotice_; }
     const ChecklistView& Checklist() const { return checklist_; }
+    const LogView& LogTab() const { return log_; }
     // Quantas vezes o canal do checklist foi consultado (para testes).
     int ChecklistQueries() const { return checklistQueries_; }
 
@@ -132,6 +152,7 @@ public:
 private:
     void RebuildMods();
     void RefreshChecklist();
+    void RefreshLog();
     void Bump();
 
     const PanelDataSource& source_;
@@ -149,6 +170,10 @@ private:
     bool checklistDirty_ = true;
     int64_t lastChecklistMs_ = INT64_MIN / 2;
     int checklistQueries_ = 0;
+
+    LogView log_;
+    bool logDirty_ = true;
+    int64_t lastLogMs_ = INT64_MIN / 2;
 };
 
 // Rótulos em português usados no view-model (expostos para testes).

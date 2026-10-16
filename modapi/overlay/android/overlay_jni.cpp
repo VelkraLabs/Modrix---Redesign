@@ -224,9 +224,9 @@ bool Start(JNIEnv* env, PanelController* panel, int timeoutMs, std::string* erro
     return !Failed(env, "TLModOverlay.install", error);
 }
 
-}  // namespace
-
-bool StartOverlay(PanelController* panel, int timeoutMs, std::string* error) {
+// Roda `fn(env)` numa thread anexada à VM (anexa e solta se preciso).
+template <typename Fn>
+bool WithEnv(const char* threadName, std::string* error, Fn fn) {
     JavaVM* vm = FindVm();
     if (!vm) {
         if (error) *error = "JavaVM não encontrada";
@@ -235,7 +235,7 @@ bool StartOverlay(PanelController* panel, int timeoutMs, std::string* error) {
     JNIEnv* env = nullptr;
     bool attached = false;
     if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_EDETACHED) {
-        JavaVMAttachArgs args{JNI_VERSION_1_6, "TLModOverlay", nullptr};
+        JavaVMAttachArgs args{JNI_VERSION_1_6, threadName, nullptr};
         if (vm->AttachCurrentThread(&env, &args) != JNI_OK) {
             if (error) *error = "AttachCurrentThread falhou";
             return false;
@@ -243,9 +243,48 @@ bool StartOverlay(PanelController* panel, int timeoutMs, std::string* error) {
         attached = true;
     }
     env->PushLocalFrame(64);
-    bool ok = Start(env, panel, timeoutMs, error);
+    bool ok = fn(env);
     env->PopLocalFrame(nullptr);
     if (attached) vm->DetachCurrentThread();
+    return ok;
+}
+
+}  // namespace
+
+std::string AppCodeCacheDir(int timeoutMs, std::string* error) {
+    std::string path;
+    WithEnv("TLModPaths", error, [&](JNIEnv* env) {
+        jclass at = env->FindClass("android/app/ActivityThread");
+        jmethodID current = at ? env->GetStaticMethodID(at, "currentApplication", "()Landroid/app/Application;") : nullptr;
+        if (!current || Failed(env, "ActivityThread", error)) return false;
+        jobject app = nullptr;
+        for (int waited = 0; !(app = env->CallStaticObjectMethod(at, current)) && waited < timeoutMs; waited += 250) {
+            if (Failed(env, "ActivityThread.currentApplication", error)) return false;
+            SleepMs(250);
+        }
+        if (!app) {
+            if (error) *error = "Application ainda não existe";
+            return false;
+        }
+        jclass ctx = env->FindClass("android/content/Context");
+        jmethodID getDir = env->GetMethodID(ctx, "getCodeCacheDir", "()Ljava/io/File;");
+        jobject dir = env->CallObjectMethod(app, getDir);
+        if (!dir || Failed(env, "Context.getCodeCacheDir", error)) {
+            if (error && error->empty()) *error = "getCodeCacheDir devolveu nulo";
+            return false;
+        }
+        jclass file = env->FindClass("java/io/File");
+        jmethodID getPath = env->GetMethodID(file, "getAbsolutePath", "()Ljava/lang/String;");
+        auto js = static_cast<jstring>(env->CallObjectMethod(dir, getPath));
+        if (Failed(env, "File.getAbsolutePath", error)) return false;
+        path = ToUtf8(env, js);
+        return !path.empty();
+    });
+    return path;
+}
+
+bool StartOverlay(PanelController* panel, int timeoutMs, std::string* error) {
+    bool ok = WithEnv("TLModOverlay", error, [&](JNIEnv* env) { return Start(env, panel, timeoutMs, error); });
     if (ok) rt::Log(TLMOD_LOG_INFO, "overlay", "painel instalado na Activity do jogo");
     return ok;
 }

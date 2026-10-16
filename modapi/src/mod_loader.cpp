@@ -13,6 +13,7 @@
 #include "dynlib.h"
 #include "json.h"
 #include "tlmod/runtime/game_adapter.h"
+#include "tlmod/runtime/library_cache.h"
 #include "tlmod/runtime/log.h"
 
 // Buffer em que um provedor escreve o JSON. Opaco do lado do mod.
@@ -874,14 +875,37 @@ size_t ModLoader::LoadAll() {
                 Log(TLMOD_LOG_ERROR, rec.manifest.id, rec.error);
                 continue;
             }
+            const std::filesystem::path source = rec.manifest.dir / entry->second;
+            std::filesystem::path libPath = source;
+            std::string where;  // complemento da mensagem de erro
+            if (!libraryCacheDir_.empty()) {
+                // dlopen da cópia privada: a pasta de mods pode ser noexec
+                // (armazenamento externo do Android) ou fora do namespace do linker.
+                std::string cacheError;
+                LibraryCache cache(libraryCacheDir_);
+                if (auto copy = cache.Prepare(rec.manifest.id, source, &cacheError)) {
+                    libPath = copy->path;
+                    where = " (cópia em " + libPath.string() + ")";
+                    Log(TLMOD_LOG_INFO, rec.manifest.id,
+                        std::string(copy->copied ? "biblioteca copiada para " : "cópia reaproveitada: ") +
+                            libPath.string() + " (SHA-256 " + copy->sha256 + ")");
+                } else {
+                    rec.state = ModState::Failed;
+                    rec.error = "não foi possível copiar " + entry->second + " para a pasta privada: " + cacheError;
+                    Log(TLMOD_LOG_ERROR, rec.manifest.id, rec.error);
+                    continue;
+                }
+            }
             std::string error;
-            void* lib = dynlib::Open(rec.manifest.dir / entry->second, &error);
+            void* lib = dynlib::Open(libPath, &error);
             if (!lib) {
                 rec.state = ModState::Failed;
-                rec.error = "não foi possível carregar " + entry->second + ": " + error;
+                // dlerror() inteiro: é ele que diz a causa (noexec, namespace, símbolo...).
+                rec.error = "não foi possível carregar " + entry->second + where + ": " + error;
                 Log(TLMOD_LOG_ERROR, rec.manifest.id, rec.error);
                 continue;
             }
+            rec.libraryPath = libPath;
             impl_->libraries.push_back(lib);
             init = reinterpret_cast<TLModModInitFn>(dynlib::Symbol(lib, TLMOD_ENTRY_SYMBOL));
             if (!init) {

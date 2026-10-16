@@ -1,7 +1,9 @@
 // Entrada do runtime no Android: libtlmod_runtime.so depende de
 // libtlmod_bridge.so, então o linker roda o construtor da ponte primeiro
-// (ela dispara TLMod_Init). Aqui esperamos a ponte ficar pronta, lemos a
-// pasta de mods e carregamos tudo.
+// (ela dispara TLMod_Init). Aqui ligamos o log em arquivo (tlmod/tlmod.log,
+// com as linhas da ponte também), esperamos a ponte ficar pronta, lemos a
+// pasta de mods e carregamos tudo. As bibliotecas dos mods são copiadas para
+// code_cache/tlmod/<mod_id>/ antes do dlopen: o armazenamento externo é noexec.
 #include <android/log.h>
 #include <pthread.h>
 
@@ -26,6 +28,11 @@ void LogcatSink(TLModLogLevel level, const std::string& source, const std::strin
     __android_log_print(prio, "TLMod", "[%s] %s", source.c_str(), msg.c_str());
 }
 
+// Linhas da ponte: já foram para o logcat; aqui só vão para a memória e o arquivo.
+void OnBridgeLog(int level, int64_t timeMs, const char* message) {
+    tlmod::rt::RecordLog(static_cast<TLModLogLevel>(level), "ponte", message ? message : "", timeMs);
+}
+
 std::string PackageName() {
     std::ifstream in("/proc/self/cmdline", std::ios::binary);
     std::string name;
@@ -44,8 +51,28 @@ std::filesystem::path ModsDir() {
     return "/data/data/" + pkg + "/files/tlmod/mods";
 }
 
+// Pasta privada para as cópias das bibliotecas dos mods.
+std::filesystem::path LibraryCacheDir() {
+    std::string error;
+    std::string dir = tlmod::overlay::AppCodeCacheDir(10000, &error);
+    if (dir.empty()) {
+        dir = "/data/data/" + PackageName() + "/code_cache";
+        tlmod::rt::Log(TLMOD_LOG_WARN, "runtime",
+                       "Context.getCodeCacheDir indisponível (" + error + "); usando " + dir);
+    }
+    return std::filesystem::path(dir) / "tlmod";
+}
+
 void* RuntimeMain(void*) {
     tlmod::rt::SetLogSink(&LogcatSink);
+    TLMod_SetLogCallback(&OnBridgeLog);
+
+    std::filesystem::path dir = ModsDir();
+    std::string logError;
+    if (!tlmod::rt::SetLogFile(dir.parent_path() / "tlmod.log", &logError))
+        tlmod::rt::Log(TLMOD_LOG_WARN, "runtime", "sem log em arquivo: " + logError);
+    tlmod::rt::Log(TLMOD_LOG_INFO, "runtime", "pasta de mods: " + dir.string());
+
     if (!TLMod_WaitReady(120000)) {
         tlmod::rt::Log(TLMOD_LOG_ERROR, "runtime", "ponte IL2CPP não ficou pronta; mods não carregados");
         return nullptr;
@@ -56,9 +83,6 @@ void* RuntimeMain(void*) {
     static tlmod::rt::BridgeGameAdapter adapter;
     static tlmod::rt::ModLoader loader(&adapter);
 
-    std::filesystem::path dir = ModsDir();
-    tlmod::rt::Log(TLMOD_LOG_INFO, "runtime", "pasta de mods: " + dir.string());
-
     // Mods desligados no painel: lidos ANTES de carregar (valem nesta abertura).
     static tlmod::overlay::ConfigStore config(dir.parent_path() / "tlmod_config.json");
     std::string configError;
@@ -67,6 +91,9 @@ void* RuntimeMain(void*) {
     // Saves na nuvem não têm um caminho local confiável: o arquivo paralelo
     // dos itens de mod fica na pasta do TLMod.
     loader.Persistence().SetCloudDirectory(dir.parent_path() / "cloud_saves");
+    std::filesystem::path cache = LibraryCacheDir();
+    tlmod::rt::Log(TLMOD_LOG_INFO, "runtime", "cópias das bibliotecas dos mods: " + cache.string());
+    loader.SetLibraryCacheDir(cache);
 
     loader.DiscoverDirectory(dir);
     size_t n = loader.LoadAll();

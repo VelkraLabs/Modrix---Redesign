@@ -51,6 +51,13 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
    Lê os arrays de `ItemID.Sets` pelo nome (classe aninhada, via `il2cpp_class_get_nested_types`) e os campos de
    um `Item` de sonda montado com o `SetDefaults` do jogo. Só na thread do `Main.DoUpdate`.
 
+## Log
+
+`LOGI/LOGW/LOGE` (`src/log.h`) vão para o logcat (tag `TLModBridge`; stderr no host). Se o runtime
+registrou `TLMod_SetLogCallback`, cada linha também vai para ele, que a grava em `tlmod/tlmod.log`.
+As linhas emitidas antes disso (até 256) ficam guardadas e são reenviadas, com a hora original, quando
+o callback é ligado.
+
 ## Build
 
 Android (gera `libtlmod_bridge.so`, com o ShadowHook embutido). O configure baixa o ShadowHook via git;

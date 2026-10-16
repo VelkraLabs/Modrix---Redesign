@@ -495,6 +495,34 @@ Para compilar um mod fora deste repositório: `cmake -S mods/example_item -B b -
 No Android, o runtime procura mods em `$TLMOD_MODS_DIR`; se não houver, em
 `/storage/emulated/0/Android/data/<pacote>/files/tlmod/mods`; e por último em `/data/data/<pacote>/files/tlmod/mods`.
 
+### Bibliotecas dos mods: cópia privada antes do dlopen
+
+O armazenamento externo (`/storage/emulated/0/...`) é montado `noexec` e fica fora dos caminhos
+permitidos do namespace do linker, então o `dlopen` direto da pasta de mods falha. Antes do
+`dlopen`, o runtime copia a biblioteca de cada mod para
+`<Context.getCodeCacheDir()>/tlmod/<mod_id>/` (obtido pelo `Application` via JNI; se o JNI
+falhar, `/data/data/<pacote>/code_cache`) e carrega a cópia (`src/library_cache.cpp`):
+
+- **atômica**: grava `<nome>.tmp-<pid>-<n>` na mesma pasta e faz `rename` sobre o destino;
+  temporários de uma cópia interrompida são apagados na vez seguinte;
+- **conferida**: o SHA-256 do temporário precisa bater com o da origem (e com o que foi lido durante
+  a cópia: se a origem mudar no meio, a cópia é recusada);
+- **somente leitura** (`0444`), como o Android 14 exige para código carregado dinamicamente;
+- **reaproveitada** quando o SHA-256 da cópia existente já bate com o da origem (só corrige a
+  permissão, se alguém a mudou).
+
+Se o `dlopen` falha, o estado do mod guarda a mensagem inteira do `dlerror()`, com o caminho da
+cópia; o painel mostra o texto todo (quebra linha, dá para selecionar e copiar).
+
+### Log em arquivo
+
+O runtime grava `tlmod/tlmod.log` (ao lado de `mods/`), com as linhas do runtime, dos mods e da
+ponte (a ponte repassa as suas por `TLMod_SetLogCallback`; as emitidas antes de o runtime subir são
+reenviadas com a hora original). Cada abertura do jogo começa com uma linha
+`===== TLMod: sessão iniciada ...`. Passando de 1 MiB, o arquivo vira `tlmod.log.1`. As últimas 500
+linhas ficam em memória para a aba **Log** do painel. Tudo continua indo também para o logcat
+(tags `TLMod` e `TLModBridge`).
+
 ## Ainda não implementado
 
 - **Receitas e loja**, e textura própria nas telas listadas em [Texturas de mod](#texturas-de-mod).

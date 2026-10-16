@@ -30,6 +30,9 @@ struct ModRecord {
     ModState state = ModState::Discovered;
     std::string error;
     TLModModInitFn builtinInit = nullptr;  // mods embutidos no runtime (sem biblioteca)
+    // De onde a biblioteca foi aberta (a cópia privada, quando há cache). Vazio
+    // para mods embutidos ou se nem chegou a abrir.
+    std::filesystem::path libraryPath;
 };
 
 // Descobre, valida, ordena e carrega mods; dono do ContentRegistry e da
@@ -54,6 +57,12 @@ public:
     // nunca é descarregado com o jogo rodando.
     void SetDisabled(std::set<std::string> ids) { disabled_ = std::move(ids); }
     const std::set<std::string>& Disabled() const { return disabled_; }
+
+    // Pasta privada para onde a biblioteca de cada mod é copiada antes do
+    // dlopen (ver library_cache.h). Vazio = dlopen direto da pasta do mod.
+    // Configurar antes de LoadAll.
+    void SetLibraryCacheDir(std::filesystem::path dir) { libraryCacheDir_ = std::move(dir); }
+    const std::filesystem::path& LibraryCacheDir() const { return libraryCacheDir_; }
 
     // Valida, resolve dependências, ordena e chama o init de cada mod.
     // Pode ser chamado uma vez. Retorna quantos mods carregaram.
@@ -108,6 +117,7 @@ private:
     std::unique_ptr<ItemPersistence> persistence_;
     bool loaded_ = false;
     std::set<std::string> disabled_;
+    std::filesystem::path libraryCacheDir_;
 };
 
 }  // namespace tlmod::rt

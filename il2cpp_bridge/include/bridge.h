@@ -51,6 +51,13 @@ void TLMod_SetLibraryName(const char* name);  // padrão: "libil2cpp.so"
 void TLMod_SetHookInstaller(TLModHookInstaller installer);
 void TLMod_SetHurtCallback(TLModHurtCallback cb);
 
+// Log da ponte para o runtime (que grava o arquivo tlmod/tlmod.log). Cada linha
+// continua indo para o logcat. Ao ligar, as linhas emitidas desde o início
+// (até 256) são reenviadas primeiro, com a hora original. Nulo desliga.
+// level: 1 = I, 2 = W, 3 = E; timeMs: Unix em milissegundos.
+typedef void (*TLModLogCallback)(int level, int64_t timeMs, const char* message);
+void TLMod_SetLogCallback(TLModLogCallback cb);
+
 // Inicialização síncrona: espera a libil2cpp.so e o runtime subirem (até
 // timeoutMs), resolve Terraria.Player e instala o hook em Player.Hurt.
 bool TLMod_Init(int timeoutMs);

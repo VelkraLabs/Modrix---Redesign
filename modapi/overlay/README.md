@@ -1,7 +1,9 @@
 # Overlay do TLMod (Fase 5)
 
-Painel de mods dentro do jogo: botão flutuante "M", aba **Mods** (estado e
-liga/desliga) e aba **Boss Checklist** (JSON do mod `tlmod.boss_checklist`).
+Painel de mods dentro do jogo: botão flutuante "M", aba **Mods** (estado,
+erro de carga inteiro e liga/desliga), aba **Boss Checklist** (JSON do mod
+`tlmod.boss_checklist`) e aba **Log** (as últimas 150 linhas do log do TLMod,
+com o caminho do `tlmod.log`).
 
 ## Técnica: Views Android sobre a Activity do jogo
 
@@ -34,6 +36,13 @@ O `PanelController` entrega um view-model em JSON (`SnapshotJson()`) que já
 traz textos, cores e medidas em dp. O Java só desenha esse JSON e devolve
 ações (`toggle_open`, `close`, `tab`, `toggle_mod`). A prévia lê o mesmo JSON.
 
+- **Erro de carga.** O `detail` de um mod que falhou é a mensagem inteira (com
+  o `dlerror()` completo). O Java quebra a linha em vez de pôr reticências, e o
+  texto é selecionável para copiar.
+- **Aba Log.** Atualiza a cada 1 s com o painel aberto nela. As linhas vão
+  num `TextView` só (monoespaçado, vermelho para erro, amarelo para aviso,
+  selecionável) e a rolagem acompanha o fim enquanto ela estiver no fim.
+
 ## Liga/desliga
 
 A escolha é salva em `tlmod_config.json`, na mesma pasta que contém `mods/`:
@@ -61,5 +70,6 @@ Para gerar a prévia no host:
 
 ```sh
 build-host/overlay_snapshot modapi/mods/boss_checklist/sample_checklist.json out/
-python3 modapi/overlay/preview/render_preview.py out/snapshot_checklist.json out/snapshot_mods.json preview.png
+python3 modapi/overlay/preview/render_preview.py out/snapshot_checklist.json out/snapshot_mods.json \
+    out/snapshot_log.json preview.png
 ```

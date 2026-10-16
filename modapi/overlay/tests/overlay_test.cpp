@@ -230,6 +230,64 @@ static void TestChecklistNotLoaded(const fs::path& mods, const fs::path& tmp) {
     CHECK(panel.Checklist().message == "O mod Boss Checklist não está carregado.");
 }
 
+// Erro de carga inteiro no painel e aba Log com as últimas linhas do log real.
+static void TestErrorAndLog(const fs::path& tmp) {
+    std::printf("\n== erro completo e aba Log\n");
+    // dlerror longo, com a causa no fim (o que antes ficava escondido pelas reticências).
+    fs::path mods = tmp / "mods_err";
+    fs::create_directories(mods / "broken" / "lib" / "linux-x86_64");
+    std::ofstream(mods / "broken" / "manifest.json") << R"({"tlmod_api": 1, "id": "test.broken", "name": "Quebrado",
+        "version": "1.0.0", "entry": {"linux-x86_64": "lib/linux-x86_64/libbroken.so"}})";
+    std::ofstream(mods / "broken" / "lib" / "linux-x86_64" / "libbroken.so") << "sem ELF";
+    rt::ResetLogForTest();
+    if (!std::getenv("TLMOD_VERBOSE")) rt::SetLogSink(&QuietSink);
+    const fs::path logFile = tmp / "tlmod" / "tlmod.log";
+    CHECK(rt::SetLogFile(logFile));
+
+    FakeGame game;
+    rt::ModLoader loader(&game);
+    loader.SetLibraryCacheDir(tmp / "code_cache" / "tlmod");
+    loader.DiscoverDirectory(mods);
+    loader.LoadAll();
+    const rt::ModRecord* rec = loader.Find("test.broken");
+    CHECK(rec && rec->state == rt::ModState::Failed && rec->error.size() > 120);
+
+    overlay::LoaderDataSource source(loader);
+    overlay::ConfigStore config(tmp / "cfg_err" / "tlmod_config.json");
+    PanelController panel(source, config);
+    panel.Tick(0);
+    const overlay::ModRow* row = Row(panel, "test.broken");
+    CHECK(row && rec && row->detail == rec->error);  // inteiro, sem corte
+    auto snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    const rt::json::Value* jrow = snap ? &(*snap->Get("mods")->Get("rows")->AsArray())[0] : nullptr;
+    CHECK(jrow && rec && *jrow->Get("detail")->AsString() == rec->error);
+    CHECK(rec && rec->error.find("file too short") != std::string::npos);
+
+    // Aba Log: fechado não busca; aberto na aba, mostra as últimas linhas e o arquivo.
+    CHECK(panel.LogTab().lines.empty());
+    CHECK(panel.HandleAction("toggle_open", "") && panel.HandleAction("tab", "log"));
+    CHECK(panel.ActiveTab() == Tab::Log);
+    CHECK(panel.Tick(10));
+    const overlay::LogView& lv = panel.LogTab();
+    CHECK(lv.file == logFile.string() && !lv.lines.empty());
+    bool sawError = false;
+    for (const auto& l : lv.lines) sawError = sawError || (l.level == "E" && l.text.find("[test.broken]") != std::string::npos);
+    CHECK(sawError);
+    CHECK(lv.lines.size() <= PanelController::kLogTailLines);
+    // Linha nova: aparece no próximo refresh (1 s), não antes.
+    rt::Log(TLMOD_LOG_WARN, "teste", "linha nova");
+    CHECK(!panel.Tick(500));
+    CHECK(panel.Tick(10 + PanelController::kLogRefreshMs) && panel.LogTab().lines.back().text.find("W [teste] linha nova") != std::string::npos);
+    CHECK(!panel.Tick(10 + 2 * PanelController::kLogRefreshMs));  // nada mudou: não redesenha
+    snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    CHECK(snap && *snap->Get("tab")->AsString() == "log" && snap->Get("tabs")->AsArray()->size() == 3);
+    CHECK(snap && *snap->Get("log")->Get("file")->AsString() == logFile.string());
+    CHECK(snap && snap->Get("log")->Get("lines")->AsArray()->size() == panel.LogTab().lines.size());
+    CHECK(ReadFile(logFile).find("W [teste] linha nova") != std::string::npos);
+    rt::ResetLogForTest();
+    if (!std::getenv("TLMOD_VERBOSE")) rt::SetLogSink(&QuietSink);
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -249,6 +307,7 @@ int main(int argc, char** argv) {
     TestLoaderDisabled(mods);
     TestPanel(mods, tmp);
     TestChecklistNotLoaded(mods, tmp);
+    TestErrorAndLog(tmp);
     fs::remove_all(tmp);
     std::printf("\n%d checks, %d falha%s: %s\n", g_checks, g_failures, g_failures == 1 ? "" : "s",
                 g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM");

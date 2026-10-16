@@ -7,7 +7,10 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -49,8 +52,10 @@ public final class TLModOverlay {
     private TextView fab;
     private LinearLayout panel;
     private int panelMaxH;  // altura máxima; o painel encolhe para caber no conteúdo
+    private ScrollView scroll;
     private LinearLayout content;
     private LinearLayout tabsRow;
+    private String renderedTab = "";
     private long renderedVersion = -1;
     private JSONObject theme;
 
@@ -191,7 +196,7 @@ public final class TLModOverlay {
         tabsRow.setPadding(0, dp(8), 0, dp(8));
         panel.addView(tabsRow);
 
-        ScrollView scroll = new ScrollView(activity);
+        scroll = new ScrollView(activity);
         content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(content);
@@ -241,12 +246,30 @@ public final class TLModOverlay {
             tab.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { act("tab", t.optString("id")); }
             });
-            tabsRow.addView(tab, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            tab.setSingleLine(true);
+            // Largura do texto + parte igual da sobra: "Boss Checklist" não quebra ao lado de "Log".
+            tabsRow.addView(tab, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         }
 
+        // Na aba Log, acompanha o fim (linhas novas) se já estava no fim ou se acabou de entrar nela.
+        String tabId = s.optString("tab");
+        boolean follow = "log".equals(tabId) && (!tabId.equals(renderedTab) || atBottom());
+        renderedTab = tabId;
         content.removeAllViews();
-        if ("mods".equals(s.optString("tab"))) renderMods(s.optJSONObject("mods"));
+        if ("mods".equals(tabId)) renderMods(s.optJSONObject("mods"));
+        else if ("log".equals(tabId)) renderLog(s.optJSONObject("log"));
         else renderChecklist(s.optJSONObject("checklist"));
+        if (follow) {
+            scroll.post(new Runnable() {
+                @Override public void run() { scroll.fullScroll(View.FOCUS_DOWN); }
+            });
+        }
+    }
+
+    private boolean atBottom() {
+        View child = scroll.getChildAt(0);
+        return child == null || child.getBottom() - (scroll.getHeight() + scroll.getScrollY()) <= dp(24);
     }
 
     private void renderMods(JSONObject mods) {
@@ -271,8 +294,14 @@ public final class TLModOverlay {
             String state = r.optString("state");
             String stateColor = "loaded".equals(state) ? "text_dim" : ("disabled".equals(state) ? "unknown" : "error");
             texts.addView(line(r.optString("subtitle"), "small_sp", stateColor, false));
-            if (!TextUtils.isEmpty(r.optString("detail")))
-                texts.addView(line(r.optString("detail"), "small_sp", "error", false));
+            if (!TextUtils.isEmpty(r.optString("detail"))) {
+                // Erro inteiro: quebra linha, nunca reticências (a causa costuma estar no fim do
+                // dlerror). Selecionável para copiar.
+                TextView detail = text(r.optString("detail"), "small_sp", "error", false);
+                detail.setTextIsSelectable(true);
+                detail.setPadding(0, dp(2), 0, dp(2));
+                texts.addView(detail);
+            }
             if (!TextUtils.isEmpty(r.optString("pending")))
                 texts.addView(line(r.optString("pending"), "small_sp", "accent", false));
             row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -284,6 +313,41 @@ public final class TLModOverlay {
             row.addView(sw);
             addRow(row, 6);
         }
+    }
+
+    private void renderLog(JSONObject log) {
+        if (log == null) return;
+        String file = log.optString("file");
+        TextView where = text(TextUtils.isEmpty(file) ? "Sem arquivo de log" : file, "small_sp", "text_dim", false);
+        where.setTextIsSelectable(true);
+        where.setPadding(dp(4), 0, dp(4), dp(6));
+        content.addView(where);
+        JSONArray lines = log.optJSONArray("lines");
+        if (lines == null || lines.length() == 0) {
+            TextView msg = text(log.optString("empty"), "text_sp", "text_dim", false);
+            msg.setGravity(Gravity.CENTER);
+            msg.setPadding(dp(8), dp(48), dp(8), dp(48));
+            content.addView(msg);
+            return;
+        }
+        // Um TextView só, com cor por nível: rápido de redesenhar e dá para selecionar e copiar.
+        SpannableStringBuilder sb = new SpannableStringBuilder();
+        for (int i = 0; i < lines.length(); i++) {
+            JSONObject l = lines.optJSONObject(i);
+            String level = l.optString("level");
+            int start = sb.length();
+            sb.append(l.optString("text"));
+            String key = "E".equals(level) ? "error" : ("W".equals(level) ? "pending" : "text");
+            sb.setSpan(new ForegroundColorSpan(color(key)), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            if (i + 1 < lines.length()) sb.append('\n');
+        }
+        TextView body = text("", "small_sp", "text", false);
+        body.setTypeface(Typeface.MONOSPACE);
+        body.setText(sb);
+        body.setTextIsSelectable(true);
+        body.setPadding(dp(8), dp(6), dp(8), dp(6));
+        body.setBackground(rounded(color("row_bg"), 8, 0));
+        addRow(body, 0);
     }
 
     private void renderChecklist(JSONObject c) {

@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -16,14 +17,18 @@
 
 #include "fake_game.h"
 #include "json.h"
+#include "sha256.h"
 #include "tlmod/runtime/content_registry.h"
 #include "tlmod/runtime/item_persistence.h"
 #include "tlmod/runtime/item_shell.h"
+#include "tlmod/runtime/library_cache.h"
 #include "tlmod/runtime/log.h"
 #include "tlmod/runtime/manifest.h"
 #include "tlmod/runtime/mod_loader.h"
 #include "tlmod/runtime/png.h"
 
+#include <sys/stat.h>
+#include <unistd.h>
 #include <zlib.h>
 
 using namespace tlmod::rt;
@@ -1684,6 +1689,205 @@ static void TestShells(const fs::path& modsDir) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Cópia privada das bibliotecas dos mods (o dlopen no Android não pode ler do
+// armazenamento externo) e log em arquivo.
+static std::string ReadAll(const fs::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+static void WriteAll(const fs::path& p, const std::string& data) {
+    std::ofstream(p, std::ios::binary | std::ios::trunc).write(data.data(), static_cast<std::streamsize>(data.size()));
+}
+static unsigned Mode(const fs::path& p) {
+    struct stat st{};
+    return ::stat(p.c_str(), &st) == 0 ? (st.st_mode & 07777u) : 0u;
+}
+static size_t Leftovers(const fs::path& dir) {
+    size_t n = 0;
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(dir, ec)) n += e.path().filename().string().find(".tmp-") != std::string::npos;
+    return n;
+}
+
+static void TestSha256() {
+    std::printf("\n== SHA-256\n");
+    CHECK(Sha256Hex("", 0) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    CHECK(Sha256Hex("abc", 3) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    const std::string two = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";  // 2 blocos
+    CHECK(Sha256Hex(two.data(), two.size()) == "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+    Sha256 million;
+    const std::string a(1000, 'a');
+    for (int i = 0; i < 1000; ++i) million.Update(a.data(), a.size());
+    CHECK(million.HexDigest() == "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
+}
+
+static void TestLibraryCache(const fs::path& modsDir) {
+    std::printf("\n== cópia privada das bibliotecas (library_cache)\n");
+    fs::path tmp = fs::temp_directory_path() / "tlmod_libcache_test";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "mod");
+    const fs::path src = tmp / "mod" / "libx.so";
+    const fs::path root = tmp / "code_cache" / "tlmod";
+    const fs::path dest = root / "acme.x" / "libx.so";
+    std::string a(200 * 1024, '\0');
+    for (size_t i = 0; i < a.size(); ++i) a[i] = static_cast<char>(i * 31 + 7);
+    WriteAll(src, a);
+    LibraryCache cache(root);
+    std::string err;
+
+    // Cópia nova: conteúdo igual, somente leitura (0444), sem temporários.
+    auto r1 = cache.Prepare("acme.x", src, &err);
+    CHECK(r1 && r1->copied && r1->path == dest);
+    CHECK(r1 && r1->sha256 == Sha256Hex(a.data(), a.size()));
+    CHECK(ReadAll(dest) == a && Mode(dest) == 0444 && Leftovers(dest.parent_path()) == 0);
+
+    // Sem mudança: reaproveita (mesmo inode, nada regravado).
+    struct stat before{}, after{};
+    ::stat(dest.c_str(), &before);
+    auto r2 = cache.Prepare("acme.x", src, &err);
+    ::stat(dest.c_str(), &after);
+    CHECK(r2 && !r2->copied && r2->path == dest && before.st_ino == after.st_ino);
+    // Reaproveitada mas gravável (alguém mexeu na permissão): volta a 0444.
+    fs::permissions(dest, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace);
+    auto r3 = cache.Prepare("acme.x", src, &err);
+    CHECK(r3 && !r3->copied && Mode(dest) == 0444);
+
+    // O mod mudou: cópia nova por cima (rename atômico), de novo 0444.
+    std::string b = a;
+    b[1000] ^= 0x55;
+    WriteAll(src, b);
+    auto r4 = cache.Prepare("acme.x", src, &err);
+    CHECK(r4 && r4->copied && ReadAll(dest) == b && Mode(dest) == 0444);
+    CHECK(r4 && r4->sha256 != r1->sha256 && Leftovers(dest.parent_path()) == 0);
+
+    // Cópia adulterada no cache (mesmo tamanho, outro conteúdo): hash diverge, recopia.
+    fs::permissions(dest, fs::perms::owner_all, fs::perm_options::replace);
+    WriteAll(dest, a);
+    auto r5 = cache.Prepare("acme.x", src, &err);
+    CHECK(r5 && r5->copied && ReadAll(dest) == b && Mode(dest) == 0444);
+
+    // A cópia sai corrompida (disco, interrupção): a conferência recusa, nada
+    // vai para o destino (a cópia anterior fica intacta) e o temporário some.
+    LibraryCache corrupt(root);
+    corrupt.afterWriteForTest = [](const fs::path& t) {
+        std::fstream f(t, std::ios::in | std::ios::out | std::ios::binary);
+        f.seekp(4096);
+        f.put('\x7f');
+    };
+    WriteAll(src, a);  // muda a origem para forçar a cópia
+    err.clear();
+    CHECK(!corrupt.Prepare("acme.x", src, &err));
+    CHECK(err.find("não confere") != std::string::npos && err.find(Sha256Hex(a.data(), a.size())) != std::string::npos);
+    CHECK(ReadAll(dest) == b && Mode(dest) == 0444 && Leftovers(dest.parent_path()) == 0);
+    std::printf("      erro: %s\n", err.c_str());
+
+    // Temporário de uma cópia interrompida (processo morto): é limpo na próxima.
+    WriteAll(dest.parent_path() / "libx.so.tmp-999-0", "lixo");
+    auto r6 = cache.Prepare("acme.x", src, &err);
+    CHECK(r6 && r6->copied && ReadAll(dest) == a && Leftovers(dest.parent_path()) == 0);
+
+    // Origem que não existe / pasta do cache impossível de criar.
+    err.clear();
+    CHECK(!cache.Prepare("acme.x", tmp / "mod" / "nao_existe.so", &err) && err.find("nao_existe.so") != std::string::npos);
+    WriteAll(tmp / "arquivo", "x");
+    LibraryCache bad(tmp / "arquivo" / "tlmod");
+    err.clear();
+    CHECK(!bad.Prepare("acme.x", src, &err) && err.find("não foi possível criar") != std::string::npos);
+    // Pasta do mod somente leitura: o temporário não pode ser criado (root ignora permissões).
+    if (::geteuid() != 0) {
+        const fs::path ro = tmp / "ro";
+        fs::create_directories(ro / "acme.x");
+        fs::permissions(ro / "acme.x", fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace);
+        err.clear();
+        CHECK(!LibraryCache(ro).Prepare("acme.x", src, &err) && err.find("não foi possível criar") != std::string::npos);
+        fs::permissions(ro / "acme.x", fs::perms::owner_all, fs::perm_options::replace);
+    }
+
+    // ModLoader: com a pasta de cache, o dlopen é feito da cópia.
+    {
+        const fs::path mods = tmp / "mods";
+        fs::create_directories(mods);
+        fs::copy(modsDir / "example_item", mods / "example_item", fs::copy_options::recursive);
+        fs::create_directories(mods / "broken" / "lib" / "linux-x86_64");
+        WriteAll(mods / "broken" / "manifest.json", R"({"tlmod_api": 1, "id": "test.broken", "name": "Quebrado",
+            "version": "1.0.0", "entry": {"linux-x86_64": "lib/linux-x86_64/libbroken.so"}})");
+        WriteAll(mods / "broken" / "lib" / "linux-x86_64" / "libbroken.so", "isto não é um ELF");
+        FakeGame game;
+        ModLoader loader(&game);
+        loader.SetLibraryCacheDir(tmp / "loader_cache");
+        loader.DiscoverDirectory(mods);
+        CHECK(loader.LoadAll() == 1);
+        const ModRecord* item = loader.Find("tlmod.example_item");
+        const fs::path copy = tmp / "loader_cache" / "tlmod.example_item" / "libexample_item.so";
+        CHECK(item && item->state == ModState::Loaded && item->libraryPath == copy && Mode(copy) == 0444);
+        CHECK(ReadAll(copy) == ReadAll(mods / "example_item" / "lib" / "linux-x86_64" / "libexample_item.so"));
+        // dlopen que falha: a mensagem inteira do dlerror() fica no estado do mod.
+        const ModRecord* broken = loader.Find("test.broken");
+        const fs::path brokenCopy = tmp / "loader_cache" / "test.broken" / "libbroken.so";
+        CHECK(broken && broken->state == ModState::Failed && broken->libraryPath.empty());
+        CHECK(broken && broken->error.rfind("não foi possível carregar lib/linux-x86_64/libbroken.so (cópia em " +
+                                                brokenCopy.string() + "): ", 0) == 0);
+        CHECK(broken && broken->error.find(brokenCopy.string() + ": ") != std::string::npos);  // texto do dlerror
+        if (broken) std::printf("      erro (%zu caracteres): %s\n", broken->error.size(), broken->error.c_str());
+    }
+    fs::remove_all(tmp);
+}
+
+static int g_sinkCalls = 0;
+static void CountingSink(TLModLogLevel, const std::string&, const std::string&) { ++g_sinkCalls; }
+
+static void TestLogFile() {
+    std::printf("\n== log em arquivo\n");
+    fs::path tmp = fs::temp_directory_path() / "tlmod_log_test";
+    fs::remove_all(tmp);
+    ResetLogForTest();
+    SetLogSink(&CountingSink);
+    g_sinkCalls = 0;
+
+    // Antes de haver arquivo: fica na memória.
+    Log(TLMOD_LOG_INFO, "runtime", "antes do arquivo");
+    RecordLog(TLMOD_LOG_WARN, "ponte", "linha da ponte", 1700000000123);
+    CHECK(g_sinkCalls == 1);  // RecordLog não vai para o sink (a ponte já mandou ao logcat)
+    const fs::path file = tmp / "tlmod" / "tlmod.log";
+    std::string err;
+    CHECK(SetLogFile(file, &err) && LogFilePath() == file);
+    Log(TLMOD_LOG_ERROR, "acme.x", "depois do arquivo");
+    std::string text = ReadAll(file);
+    CHECK(text.find("===== TLMod: sessão iniciada") != std::string::npos);
+    CHECK(text.find(" I [runtime] antes do arquivo\n") != std::string::npos);
+    CHECK(text.find(" W [ponte] linha da ponte\n") != std::string::npos && text.find(".123 W [ponte]") != std::string::npos);
+    CHECK(text.find(" E [acme.x] depois do arquivo\n") != std::string::npos);
+    CHECK(text.find("antes do arquivo") < text.find("depois do arquivo"));
+    auto recent = RecentLog(2);
+    CHECK(recent.size() == 2 && recent[0].message == "linha da ponte" && recent[1].level == TLMOD_LOG_ERROR);
+
+    // Nova sessão no mesmo arquivo: acrescenta, não apaga.
+    CHECK(SetLogFile(file, &err));
+    Log(TLMOD_LOG_INFO, "runtime", "segunda sessão");
+    text = ReadAll(file);
+    CHECK(text.find("depois do arquivo") != std::string::npos && text.find("segunda sessão") != std::string::npos);
+
+    // Rotação: passou de 1 MiB, vira tlmod.log.1 e um arquivo novo começa.
+    const std::string big(1000, 'x');
+    for (int i = 0; i < 1100; ++i) Log(TLMOD_LOG_DEBUG, "spam", big);
+    fs::path old = file;
+    old += ".1";
+    CHECK(fs::exists(old) && fs::file_size(old) <= kLogFileMaxBytes && fs::file_size(file) < kLogFileMaxBytes);
+    CHECK(ReadAll(old).find("segunda sessão") != std::string::npos);
+    CHECK(RecentLog().size() == kLogMemoryLines);
+
+    // Pasta impossível: falha sem derrubar o log em memória.
+    WriteAll(tmp / "arquivo", "x");
+    CHECK(!SetLogFile(tmp / "arquivo" / "tlmod.log", &err) && !err.empty() && LogFilePath().empty());
+    Log(TLMOD_LOG_INFO, "runtime", "ainda em memória");
+    CHECK(RecentLog(1).at(0).message == "ainda em memória");
+
+    ResetLogForTest();
+    SetLogSink(std::getenv("TLMOD_VERBOSE") ? nullptr : &QuietSink);
+    fs::remove_all(tmp);
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -1702,6 +1906,9 @@ int main(int argc, char** argv) {
     TestPng(argv[1]);
     TestTextures(argv[1]);
     TestShells(argv[1]);
+    TestSha256();
+    TestLibraryCache(argv[1]);
+    TestLogFile();
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

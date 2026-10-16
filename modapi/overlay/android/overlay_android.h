@@ -12,4 +12,9 @@ class PanelController;
 // é usado na thread de UI do Android.
 bool StartOverlay(PanelController* panel, int timeoutMs, std::string* error);
 
+// Context.getCodeCacheDir() do app (pasta privada, fora do armazenamento
+// externo noexec), pelo Application atual via JNI. Espera até `timeoutMs` o
+// Application existir. Vazio + error se não der.
+std::string AppCodeCacheDir(int timeoutMs, std::string* error);
+
 }  // namespace tlmod::overlay

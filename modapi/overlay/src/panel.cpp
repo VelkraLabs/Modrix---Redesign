@@ -200,7 +200,7 @@ void PanelController::Bump() { ++version_; }
 void PanelController::SetOpen(bool open) {
     if (open_ == open) return;
     open_ = open;
-    if (open) checklistDirty_ = true;  // ao abrir, a próxima Tick busca na hora
+    if (open) checklistDirty_ = logDirty_ = true;  // ao abrir, a próxima Tick busca na hora
     Bump();
 }
 
@@ -208,6 +208,7 @@ void PanelController::SelectTab(Tab tab) {
     if (tab_ == tab) return;
     tab_ = tab;
     if (tab == Tab::Checklist) checklistDirty_ = true;
+    if (tab == Tab::Log) logDirty_ = true;
     Bump();
 }
 
@@ -236,6 +237,7 @@ bool PanelController::HandleAction(const std::string& action, const std::string&
     else if (action == "close") SetOpen(false);
     else if (action == "tab" && arg == "mods") SelectTab(Tab::Mods);
     else if (action == "tab" && arg == "checklist") SelectTab(Tab::Checklist);
+    else if (action == "tab" && arg == "log") SelectTab(Tab::Log);
     else if (action == "toggle_mod") return ToggleMod(arg);
     else return false;
     return true;
@@ -286,6 +288,22 @@ void PanelController::RefreshChecklist() {
     }
 }
 
+void PanelController::RefreshLog() {
+    static const char* const kLevel[] = {"D", "I", "W", "E"};
+    LogView next;
+    next.file = source_.LogFile();
+    for (const rt::LogEntry& e : source_.LogTail(kLogTailLines)) {
+        int idx = (e.level >= TLMOD_LOG_DEBUG && e.level <= TLMOD_LOG_ERROR) ? e.level : TLMOD_LOG_INFO;
+        next.lines.push_back({e.Format(), kLevel[idx]});
+    }
+    bool same = next.file == log_.file && next.lines.size() == log_.lines.size();
+    for (size_t i = 0; same && i < next.lines.size(); ++i) same = next.lines[i].text == log_.lines[i].text;
+    if (!same) {
+        log_ = std::move(next);
+        Bump();
+    }
+}
+
 bool PanelController::Tick(int64_t nowMs) {
     uint64_t before = version_;
     if (!modsLoaded_) {  // primeira vez: monta a lista de mods
@@ -298,6 +316,11 @@ bool PanelController::Tick(int64_t nowMs) {
         lastChecklistMs_ = nowMs;
         RefreshChecklist();
     }
+    if (open_ && tab_ == Tab::Log && (logDirty_ || nowMs - lastLogMs_ >= kLogRefreshMs)) {
+        logDirty_ = false;
+        lastLogMs_ = nowMs;
+        RefreshLog();
+    }
     return version_ != before;
 }
 
@@ -306,7 +329,7 @@ std::string PanelController::SnapshotJson() const {
     w.BeginObject();
     w.Key("version").Int(static_cast<int64_t>(version_));
     w.Key("open").Bool(open_);
-    w.Key("tab").String(tab_ == Tab::Mods ? "mods" : "checklist");
+    w.Key("tab").String(tab_ == Tab::Mods ? "mods" : tab_ == Tab::Checklist ? "checklist" : "log");
     w.Key("title").String("TLMod");
 
     w.Key("theme").BeginObject();
@@ -341,6 +364,7 @@ std::string PanelController::SnapshotJson() const {
     w.BeginObject().Key("id").String("mods").Key("label").String("Mods").Key("active").Bool(tab_ == Tab::Mods).EndObject();
     w.BeginObject().Key("id").String("checklist").Key("label").String("Boss Checklist")
         .Key("active").Bool(tab_ == Tab::Checklist).EndObject();
+    w.BeginObject().Key("id").String("log").Key("label").String("Log").Key("active").Bool(tab_ == Tab::Log).EndObject();
     w.EndArray();
 
     w.Key("mods").BeginObject();
@@ -357,6 +381,15 @@ std::string PanelController::SnapshotJson() const {
         w.Key("pending").String(r.pending);
         w.EndObject();
     }
+    w.EndArray();
+    w.EndObject();
+
+    w.Key("log").BeginObject();
+    w.Key("file").String(log_.file);
+    w.Key("empty").String(log_.lines.empty() ? "Nenhuma linha de log ainda." : "");
+    w.Key("lines").BeginArray();
+    for (const LogLine& l : log_.lines)
+        w.BeginObject().Key("text").String(l.text).Key("level").String(l.level).EndObject();
     w.EndArray();
     w.EndObject();
 
