@@ -68,10 +68,35 @@ if(ANDROID)
     PRIVATE ${SH_DIR} ${SH_DIR}/arch/${SH_ARCH} ${SH_DIR}/common
             ${SH_DIR}/third_party/xdl ${SH_DIR}/third_party/bsd ${SH_DIR}/third_party/lss)
 
+  # O shadowhook_init (monitor do linker) faz dlopen("libshadowhook_nothing.so"),
+  # uma biblioteca auxiliar que o AAR oficial instala ao lado da libshadowhook.so.
+  # Aqui ela é compilada como no upstream, embutida na ponte e gravada numa pasta
+  # privada do app na inicialização (src/hook_shadowhook.cpp). Sem mexer no código
+  # do ShadowHook, dois nomes são redirecionados só onde importa:
+  #   sh_linker.c: dlopen          -> tlmod_sh_dlopen (abre a cópia pelo caminho absoluto)
+  #   shadowhook.c: sh_linker_init -> tlmod_sh_linker_init (se o monitor falhar, os hooks
+  #                                   por endereço, que são os da ponte, seguem funcionando)
+  set_source_files_properties(${SH_DIR}/sh_linker.c PROPERTIES COMPILE_DEFINITIONS "dlopen=tlmod_sh_dlopen")
+  set_source_files_properties(${SH_DIR}/shadowhook.c PROPERTIES
+    COMPILE_DEFINITIONS "sh_linker_init=tlmod_sh_linker_init")
+
+  add_library(shadowhook_nothing SHARED ${SH_DIR}/nothing/sh_nothing.c)
+  target_compile_options(shadowhook_nothing PRIVATE -Oz -Weverything -Werror -fno-ident -fno-unwind-tables
+    -fno-asynchronous-unwind-tables)
+  set_target_properties(shadowhook_nothing PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  target_link_options(shadowhook_nothing PRIVATE -Wl,-z,max-page-size=16384 -Wl,--strip-all -Wl,--as-needed
+    -Wl,--hash-style=sysv -Wl,--build-id=none -Wl,-nostdlib -nostartfiles -nodefaultlibs)
+
   # --- Ponte -------------------------------------------------------------------
-  add_library(tlmod_bridge SHARED ${BRIDGE_SOURCES} src/hook_shadowhook.cpp src/entry.cpp)
+  add_library(tlmod_bridge SHARED ${BRIDGE_SOURCES} src/hook_shadowhook.cpp src/entry.cpp
+    src/sh_nothing_blob.S)
+  add_dependencies(tlmod_bridge shadowhook_nothing)
+  set(SH_NOTHING_SO ${CMAKE_CURRENT_BINARY_DIR}/libshadowhook_nothing.so)
+  set_property(SOURCE src/sh_nothing_blob.S APPEND PROPERTY OBJECT_DEPENDS ${SH_NOTHING_SO})
+  target_compile_definitions(tlmod_bridge PRIVATE TLMOD_SH_NOTHING_PATH="${SH_NOTHING_SO}")
   target_include_directories(tlmod_bridge PUBLIC include)
-  target_compile_options(tlmod_bridge PRIVATE ${BRIDGE_WARNINGS} -ffunction-sections -fdata-sections)
+  target_compile_options(tlmod_bridge PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${BRIDGE_WARNINGS}>
+    -ffunction-sections -fdata-sections)
   target_link_libraries(tlmod_bridge PRIVATE shadowhook_static dl log)
   # Exporta só TLMod_* (nada do ShadowHook vaza), descarta código morto e
   # alinha a 16 KB, exigido por aparelhos Android 15+ com páginas de 16 KB.

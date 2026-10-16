@@ -90,6 +90,16 @@ porque o mock não tem o layout do binário real.
 
 - `shadowhook_init` roda na thread de inicialização, na primeira instalação, e nunca no construtor da `.so`
   (ele mexe no linker, e o construtor roda com o lock do linker preso).
+- O `shadowhook_init` (monitor do linker) faz `dlopen("libshadowhook_nothing.so")`, uma biblioteca auxiliar que o
+  AAR oficial instala ao lado da `libshadowhook.so`. Sem ela, o init falha com o erro 12 (`Init linker mod failed`)
+  e nenhum hook é instalado, como aconteceu no primeiro teste no aparelho. A ponte compila essa biblioteca
+  (`nothing/sh_nothing.c`), embute os bytes (`src/sh_nothing_blob.S`) e, antes do init, grava a cópia em
+  `code_cache/tlmod/_ponte/` (somente leitura). O `dlopen` dentro de `sh_linker.c` é redirecionado para essa cópia
+  (`-Ddlopen=tlmod_sh_dlopen`, só nesse arquivo). Se o monitor do linker falhar mesmo assim, por exemplo por
+  símbolos do linker diferentes numa versão nova do Android, `tlmod_sh_linker_init` registra o aviso e deixa o
+  init seguir: o monitor só serve para hooks por nome de símbolo em bibliotecas ainda não carregadas, e os hooks
+  da ponte são por endereço. O código do ShadowHook não é alterado.
+- O init roda com `debuggable = true`: os detalhes de uma falha do ShadowHook aparecem no logcat (tag `shadowhook_tag`).
 - `sh_jni.c` fica fora da build: o `JNI_OnLoad` dele tentaria registrar natives de uma classe Java que o jogo não tem.
 - O endereço da original fica num slot global (`g_origHurtSlot`), lido atomicamente a cada chamada. No modo multi,
   o ShadowHook reescreve esse slot quando outro hook no mesmo alvo é removido.
