@@ -1,0 +1,17 @@
+{
+  "tlmod_api": 1,
+  "id": "tlmod.devtools",
+  "name": "Ferramentas de teste",
+  "version": "0.1.0",
+  "authors": ["TLMod"],
+  "description": "Aba Ferramentas no painel: dar itens por nome ou ID, invocar NPCs e bosses, mudar e congelar a hora, curar, ficar invencível e matar inimigos próximos. Para testar mods; não deixe ligado num mundo de verdade.",
+  "dependencies": {},
+  "provides": ["panel"],
+  "entry": {
+    "android-arm64": "lib/android-arm64/libdevtools.so",
+    "linux-x86_64": "lib/linux-x86_64/libdevtools.so",
+    "linux-arm64": "lib/linux-arm64/libdevtools.so",
+    "windows-x86_64": "lib/windows-x86_64/devtools.dll",
+    "macos-arm64": "lib/macos-arm64/libdevtools.dylib"
+  }
+}

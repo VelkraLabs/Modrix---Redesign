@@ -1888,6 +1888,240 @@ static void TestLogFile() {
     fs::remove_all(tmp);
 }
 
+// ---------------------------------------------------------------------------
+// API das ferramentas: frame, comandos, catálogo de nomes, hora, cura, matar.
+namespace tools {
+const TLModHostApi* g_api = nullptr;
+TLModContext* g_ctx = nullptr;
+int g_frames = 0;
+std::string g_lastCommand;
+bool g_initChecks = false;
+
+void OnFrame(void*) { ++g_frames; }
+bool OnCommand(void*, const char* cmd, TLModBuffer* out) {
+    g_lastCommand = cmd;
+    if (g_lastCommand == "recusa") return false;
+    if (g_lastCommand == "quebrado") {
+        g_api->buffer_append(out, "{x", 2);
+        return true;
+    }
+    if (g_lastCommand == "vazio") return true;
+    std::string json = "{\"toast\":\"ok: " + g_lastCommand + "\"}";
+    g_api->buffer_append(out, json.data(), json.size());
+    return true;
+}
+int Init(const TLModHostApi* api, TLModContext* ctx) {
+    g_api = api;
+    g_ctx = ctx;
+    g_initChecks = !api->register_command(ctx, "nao_declarado", &OnCommand, nullptr) &&
+                   !api->register_command(ctx, "panel", nullptr, nullptr) &&
+                   !api->subscribe_frame(ctx, nullptr, nullptr);
+    return api->subscribe_frame(ctx, &OnFrame, nullptr) && api->register_command(ctx, "panel", &OnCommand, nullptr) &&
+                   !api->register_command(ctx, "panel", &OnCommand, nullptr)  // duplicado
+               ? 0
+               : 1;
+}
+TLModId g_gem = TLMOD_INVALID_ID;
+int GemInit(const TLModHostApi* api, TLModContext* ctx) {
+    TLModItemDef d{};
+    d.struct_size = sizeof(d);
+    d.name = "gem";
+    d.display_name = "Gema Teste";
+    d.width = d.height = 16;
+    d.max_stack = 99;
+    g_gem = api->register_item(ctx, &d);
+    return g_gem == TLMOD_INVALID_ID;
+}
+std::string Name(TLModContentKind kind, TLModId id, bool internal, int32_t* rc = nullptr) {
+    char buf[64] = {};
+    int32_t n = g_api->content_name(g_ctx, kind, id, internal, buf, sizeof(buf));
+    if (rc) *rc = n;
+    return n >= 0 ? buf : "";
+}
+}  // namespace tools
+
+static void TestTools() {
+    std::printf("\n== ferramentas: frame, comandos, nomes, hora, cura, matar\n");
+    using namespace tools;
+    FakeGame game;
+    game.vanilla[TLMOD_CONTENT_ITEM] = FakeGame::kItemCount;
+    game.vanilla[TLMOD_CONTENT_NPC] = FakeGame::kVanillaNpcs;
+    game.namesReady = false;
+    ModLoader loader(&game);
+    ModManifest m = Builtin("test.tools");
+    m.provides = {"panel"};
+    loader.AddBuiltin(m, &Init);
+    loader.AddBuiltin(Builtin("test.gem", {"gem"}), &GemInit);
+    CHECK(loader.LoadAll() == 2 && g_initChecks);
+    for (const auto& r : loader.Mods())
+        if (r.state != ModState::Loaded) std::printf("      %s: %s\n", r.manifest.id.c_str(), r.error.c_str());
+    CHECK(loader.CommandChannels() == std::vector<std::string>{"test.tools/panel"});
+    // Fora do init não registra mais nada.
+    CHECK(!g_api->subscribe_frame(g_ctx, &OnFrame, nullptr));
+
+    // Comandos (da thread da UI): resposta validada, recusa e JSON quebrado viram erro.
+    std::string err;
+    auto r = loader.Command("test.tools", "panel", "give 38 5", &err);
+    CHECK(r && *r == "{\"toast\":\"ok: give 38 5\"}" && g_lastCommand == "give 38 5");
+    CHECK(loader.Command("test.tools", "panel", "vazio") == std::optional<std::string>("{}"));
+    CHECK(!loader.Command("test.tools", "panel", "recusa", &err) && err.find("recusado") != std::string::npos);
+    CHECK(!loader.Command("test.tools", "panel", "quebrado", &err));
+    CHECK(!loader.Command("test.tools", "outro", "x", &err) && err.find("não existe") != std::string::npos);
+
+    // Catálogo: conteúdo de mod responde já; original espera o jogo (-2).
+    int32_t rc = 0;
+    CHECK(Name(TLMOD_CONTENT_ITEM, g_gem, false) == "Gema Teste" && Name(TLMOD_CONTENT_ITEM, g_gem, true) == "test.gem:gem");
+    Name(TLMOD_CONTENT_ITEM, 38, false, &rc);
+    CHECK(rc == -2 && g_api->content_ids(g_ctx, TLMOD_CONTENT_ITEM, nullptr, 0) == -2);
+    game.Frame();  // o jogo ainda não responde nomes: nada avança
+    CHECK(game.nameQueries == 0 && !loader.CatalogReady() && g_frames == 1);
+    game.namesReady = true;
+    game.Frame();
+    CHECK(game.nameQueries == 2 * 256 && !loader.CatalogReady());  // 256 IDs por frame
+    int frames = 1;
+    while (!loader.CatalogReady() && frames < 100) game.Frame(), ++frames;
+    CHECK(loader.CatalogReady() && frames == (5455 + 687 + 255) / 256);
+    CHECK(Name(TLMOD_CONTENT_ITEM, 38, false) == "Lente" && Name(TLMOD_CONTENT_ITEM, 4956, true) == "Zenith");
+    CHECK(Name(TLMOD_CONTENT_NPC, 4, false) == "Olho de Cthulhu" && Name(TLMOD_CONTENT_NPC, 50, true) == "KingSlime");
+    Name(TLMOD_CONTENT_ITEM, 5000, false, &rc);
+    CHECK(rc == -1);  // sem nome
+    Name(TLMOD_CONTENT_ITEM, 0, false, &rc);
+    CHECK(rc == -1);
+    Name(TLMOD_CONTENT_PROJECTILE, 1, false, &rc);
+    CHECK(rc == -1);
+    char small[4];
+    CHECK(g_api->content_name(g_ctx, TLMOD_CONTENT_ITEM, 38, false, small, sizeof(small)) == 5 &&
+          std::string(small) == "Len");
+    int32_t n = g_api->content_ids(g_ctx, TLMOD_CONTENT_ITEM, nullptr, 0);
+    CHECK(n == 5455 - 1 + 1);  // 1..5455 menos o 5000, mais a gema
+    std::vector<TLModId> ids(static_cast<size_t>(n));
+    CHECK(g_api->content_ids(g_ctx, TLMOD_CONTENT_ITEM, ids.data(), n) == n && ids.front() == 1 &&
+          ids.back() == g_gem && std::find(ids.begin(), ids.end(), 5000) == ids.end());
+    CHECK(g_api->content_ids(g_ctx, TLMOD_CONTENT_NPC, nullptr, 0) == 687);
+    // Mais frames não perguntam de novo.
+    int queries = game.nameQueries;
+    game.Frame();
+    CHECK(game.nameQueries == queries);
+
+    // Hora, cura, matar: só com mundo.
+    bool day = false;
+    double t = 0;
+    game.inWorld = false;
+    CHECK(!g_api->get_time(g_ctx, &day, &t) && !g_api->set_time(g_ctx, false, 100, true));
+    game.inWorld = true;
+    CHECK(g_api->get_time(g_ctx, &day, &t) && day && t == 1000.0);
+    CHECK(g_api->set_time(g_ctx, false, 16200, true) && game.timeJumps == 1);
+    CHECK(g_api->set_time(g_ctx, true, 27000, false) && game.timeJumps == 1 && game.worldTime->second == 27000.0);
+    CHECK(!g_api->set_time(g_ctx, false, 40000, true) && !g_api->set_time(g_ctx, true, -1, true));  // fora da faixa
+    game.life[0] = 7;
+    CHECK(g_api->heal_player(g_ctx) && game.life[0] == 500 && game.mana == 200);
+    CHECK(game.NewNpc(2, 900, 400) == 0 && game.NewNpc(2, 5000, 400) == 1 && game.NewNpc(3, 820, 410) == 2);
+    game.npcs[2].friendly = true;
+    CHECK(g_api->kill_hostile_npcs(g_ctx, 1000) == 1 && !game.npcs[0].active && game.npcs[1].active &&
+          game.npcs[2].active);
+    game.playerCenter.reset();
+    CHECK(g_api->kill_hostile_npcs(g_ctx, 10000) == -1);
+    CHECK(g_frames > 10);  // o frame do mod rodou todo frame
+}
+
+// ---------------------------------------------------------------------------
+// Mod tlmod.devtools (a .so real) contra o jogo simulado.
+static void TestDevTools(const fs::path& modsDir) {
+    std::printf("\n== mod devtools (aba Ferramentas)\n");
+    fs::path tmp = fs::temp_directory_path() / "tlmod_devtools_test";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+    for (const char* m : {"devtools", "example_item"})
+        fs::copy(modsDir / m, tmp / m, fs::copy_options::recursive);
+    FakeGame game;
+    game.vanilla[TLMOD_CONTENT_ITEM] = FakeGame::kItemCount;
+    game.vanilla[TLMOD_CONTENT_NPC] = FakeGame::kVanillaNpcs;
+    ModLoader loader(&game);
+    loader.DiscoverDirectory(tmp);
+    CHECK(loader.LoadAll() == 2);
+    CHECK(loader.CommandChannels() == std::vector<std::string>{"tlmod.devtools/panel"});
+    auto cmd = [&](const std::string& c) { return loader.Command("tlmod.devtools", "panel", c); };
+    auto panel = [&]() -> std::string { return loader.Query("tlmod.devtools", "panel").value_or("?"); };
+    auto toast = [&](const std::optional<std::string>& r) {
+        auto doc = r ? json::Parse(*r, nullptr) : std::nullopt;
+        const json::Value* t = doc ? doc->Get("toast") : nullptr;
+        return t && t->AsString() ? *t->AsString() : std::string();
+    };
+
+    // Antes do catálogo: a busca avisa que os nomes estão carregando.
+    CHECK(cmd("search item lente") && panel().find("ainda est\xc3\xa3o carregando") != std::string::npos);
+    game.inWorld = false;
+    for (int i = 0; i < 40 && !loader.CatalogReady(); ++i) game.Frame();
+    CHECK(loader.CatalogReady());
+    std::string doc = panel();
+    auto parsed = json::Parse(doc, nullptr);
+    CHECK(parsed && *parsed->Get("title")->AsString() == "Ferramentas" && parsed->Get("sections")->AsArray()->size() == 4);
+    CHECK(doc.find("Entre num mundo") != std::string::npos);
+    // Sem busca, a seção de itens lista os itens de mod, e a de NPCs os bosses.
+    CHECK(doc.find("Rubi Fict\xc3\xad" "cio") != std::string::npos && doc.find("\"spawn 125 126\"") != std::string::npos);
+    CHECK(doc.find("\"Olho de Cthulhu\"") != std::string::npos && doc.find("\"Rei Slime\"") != std::string::npos);
+
+    // Busca: nome, sem acento, interno, ID; o painel recebe os resultados.
+    CHECK(cmd("search item lente") && panel().find("\"give 38 10\"") != std::string::npos);
+    CHECK(cmd("search item zenite") && panel().find("\"give 4956 1\"") != std::string::npos);  // Zênite
+    CHECK(cmd("search item FallenStar") && panel().find("\"give 75 100\"") != std::string::npos);
+    CHECK(cmd("search item 38") && panel().find("\"give 38 1\"") != std::string::npos);
+    CHECK(cmd("search item rubi") && panel().find("Rubi Fict\xc3\xad" "cio") != std::string::npos);
+    CHECK(cmd("search item xyzzy") && panel().find("Nada encontrado") != std::string::npos);
+    CHECK(cmd("search item item") && panel().find("Mostrando os 30") != std::string::npos);
+    CHECK(cmd("search npc olho") && panel().find("\"spawn 4\"") != std::string::npos);
+    CHECK(!cmd("search bloco x") && !cmd("abracadabra") && !cmd("give 38 0"));
+
+    // Dar item: chega no próximo frame dentro de um mundo.
+    game.inWorld = true;
+    auto r = cmd("give 38 5");
+    CHECK(r && toast(r) == "5x Lente no invent\xc3\xa1rio");
+    game.Frame();
+    CHECK(game.player.inventory[0].type == 38 && game.player.inventory[0].stack == 5);
+
+    // Hora: o pulo vai pelo SkipToTime; congelada, segura mesmo que o jogo ande.
+    CHECK(cmd("time noon"));
+    game.Frame();
+    CHECK(game.worldTime == std::make_pair(true, 27000.0) && game.timeJumps == 1);
+    CHECK(panel().find("Agora: 12:00 (dia)") != std::string::npos);
+    CHECK(toast(cmd("freeze")) == "Hora congelada");
+    game.Frame();
+    game.worldTime->second = 27500;  // o jogo andou meio minuto
+    game.Frame();
+    CHECK(game.worldTime->second == 27000.0 && panel().find("congelada") != std::string::npos);
+    CHECK(cmd("time midnight"));
+    game.Frame();
+    game.worldTime->second = 16300;
+    game.Frame();
+    CHECK(game.worldTime == std::make_pair(false, 16200.0));  // congelada na hora nova
+    CHECK(panel().find("Agora: 0:00 (noite)") != std::string::npos);
+    CHECK(toast(cmd("freeze")) == "Hora voltou a andar");
+    game.worldTime->second = 16400;
+    game.Frame();
+    CHECK(game.worldTime->second == 16400.0);
+
+    // Jogador: invencível cancela o golpe; curar; matar.
+    CHECK(toast(cmd("god")) == "Invenc\xc3\xadvel: ligado" && panel().find("\"command\":\"god\",\"active\":true") != std::string::npos);
+    CHECK(game.Hurt(0, 100) == 0 && game.life[0] == 400);
+    CHECK(cmd("god") && game.Hurt(0, 100) > 0);
+    CHECK(cmd("heal"));
+    game.Frame();
+    CHECK(game.life[0] == 500 && game.mana == 200);
+    CHECK(game.NewNpc(2, 900, 400) >= 0);
+    CHECK(cmd("kill"));
+    game.Frame();
+    CHECK(std::none_of(game.npcs.begin(), game.npcs.end(), [](const FakeGame::Npc& n) { return n.active; }));
+
+    // Invocar: perto do jogador (centro 800,400), os Gêmeos lado a lado.
+    // (o runtime espera 2 s seguidos no mundo antes do primeiro spawn perto do jogador)
+    CHECK(toast(cmd("spawn 125 126")).find("a caminho") != std::string::npos);
+    for (int i = 0; i < 120; ++i) game.Frame();
+    CHECK(game.npcs[0].active && game.npcs[0].s.type == 125 && game.npcs[0].s.x == 1280.0f);
+    CHECK(game.npcs[1].active && game.npcs[1].s.type == 126 && game.npcs[1].s.x == 1440.0f && game.npcs[1].s.y == 160.0f);
+
+    fs::remove_all(tmp);
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -1909,6 +2143,8 @@ int main(int argc, char** argv) {
     TestSha256();
     TestLibraryCache(argv[1]);
     TestLogFile();
+    TestTools();
+    TestDevTools(argv[1]);
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

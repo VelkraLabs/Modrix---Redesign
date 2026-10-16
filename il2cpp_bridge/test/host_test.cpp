@@ -171,6 +171,78 @@ void ItemTooltip(Il2CppObject* item, int32_t) {
     TLMod_SetItemTooltip(item, "Linha 1\nLinha 2");
 }
 
+// Ferramentas de teste (mod tlmod.devtools): nomes, hora, vida/mana, matar inimigos.
+int TestTools(void* lib) {
+    std::printf("\n== ferramentas (nomes, hora, vida/mana, matar inimigos)\n");
+    auto skipCalls = reinterpret_cast<int (*)()>(dlsym(lib, "mock_skip_to_time_calls"));
+    CHECK(skipCalls);
+    char buf[64];
+    CHECK(TLMod_ContentName(TLMOD_NAME_ITEM, 38, false, buf, sizeof(buf)) == 5 && std::string(buf) == "Lente");
+    CHECK(TLMod_ContentName(TLMOD_NAME_ITEM, 38, true, buf, sizeof(buf)) == 4 && std::string(buf) == "Lens");
+    CHECK(TLMod_ContentName(TLMOD_NAME_ITEM, 4956, false, buf, sizeof(buf)) == 7 &&
+          std::string(buf) == "Z\xc3\xaanite");  // UTF-16 -> UTF-8
+    CHECK(TLMod_ContentName(TLMOD_NAME_ITEM, 4956, true, buf, sizeof(buf)) == 6 && std::string(buf) == "Zenith");
+    CHECK(TLMod_ContentName(TLMOD_NAME_ITEM, 38, false, buf, 4) == 5 && std::string(buf) == "Len");  // cortado
+    CHECK(TLMod_ContentName(TLMOD_NAME_ITEM, 0, false, buf, sizeof(buf)) == -1);      // sem nome: ""
+    CHECK(TLMod_ContentName(TLMOD_NAME_ITEM, 99999, true, buf, sizeof(buf)) == -1);   // KeyNotFound
+    CHECK(TLMod_ContentName(TLMOD_NAME_NPC, 4, false, buf, sizeof(buf)) > 0 && std::string(buf) == "Olho de Cthulhu");
+    CHECK(TLMod_ContentName(TLMOD_NAME_NPC, 4, true, buf, sizeof(buf)) > 0 && std::string(buf) == "EyeofCthulhu");
+    CHECK(TLMod_ContentName(TLMOD_NAME_NPC, 3, true, nullptr, 0) == -1);
+
+    bool day = false;
+    double time = 0;
+    CHECK(TLMod_GetWorldTime(&day, &time) && day && time == 1000.0);
+    CHECK(TLMod_SetWorldTime(false, 16200, /*jump=*/true) && skipCalls() == 1);  // meia-noite pelo SkipToTime
+    CHECK(TLMod_GetWorldTime(&day, &time) && !day && time == 16200.0);
+    CHECK(TLMod_SetWorldTime(true, 27000.5, /*jump=*/false) && skipCalls() == 1);  // só os campos
+    CHECK(TLMod_GetWorldTime(&day, &time) && day && time == 27000.5);
+
+    auto* player = static_cast<uint8_t*>(static_cast<void*>(TLMod_GetLocalPlayer()));
+    int32_t lifeMax2 = 0;
+    std::memcpy(&lifeMax2, player + terraria::player_off::statLifeMax2, 4);
+    std::memcpy(player + terraria::player_off::statLife, "\x0a\0\0\0", 4);  // 10 de vida
+    CHECK(TLMod_RestorePlayer(TLMod_GetLocalPlayer()) && TLMod_GetStatLife(TLMod_GetLocalPlayer()) == lifeMax2);
+    int32_t mana = 0;
+    std::memcpy(&mana, player + terraria::player_off::statMana, 4);
+    CHECK(mana == 200 && !TLMod_RestorePlayer(nullptr));
+
+    // NPCs: só o hostil perto morre. Os slots voltam a ficar livres no fim.
+    struct Setup {
+        int slot;
+        float x;
+        int lifeMax;
+        size_t flag;  // campo bool ligado (0 = nenhum)
+    };
+    // Longe (x = 50000) dos NPCs que os outros testes deixaram ativos perto da origem.
+    const Setup setups[] = {{10, 50100, 200, 0},                                 // hostil perto: morre
+                            {11, 50100, 200, terraria::npc_off::friendly},       // amigável
+                            {12, 50100, 200, terraria::npc_off::townNPC},        // da cidade
+                            {13, 50100, 200, terraria::npc_off::dontTakeDamage}, // invulnerável
+                            {14, 50100, 5, 0},                                   // bichinho
+                            {15, 55000, 200, 0}};                                // hostil longe
+    for (const Setup& st : setups) {
+        auto* npc = reinterpret_cast<uint8_t*>(TLMod_GetNpcByIndex(st.slot));
+        std::memset(npc + terraria::npc_off::active, 1, 1);
+        std::memcpy(npc + terraria::npc_off::position, &st.x, 4);
+        std::memcpy(npc + terraria::npc_off::life, &st.lifeMax, 4);
+        std::memcpy(npc + terraria::npc_off::lifeMax, &st.lifeMax, 4);
+        if (st.flag) npc[st.flag] = 1;
+    }
+    CHECK(TLMod_KillHostileNpcs(50000, 0, 1000) == 1);
+    auto active = [](int slot) { return reinterpret_cast<uint8_t*>(TLMod_GetNpcByIndex(slot))[terraria::npc_off::active]; };
+    CHECK(!active(10) && active(11) && active(12) && active(13) && active(14) && active(15));
+    CHECK(TLMod_KillHostileNpcs(50000, 0, 6000) == 1 && !active(15));  // raio maior pega o longe
+    for (const Setup& st : setups) {  // só os campos mexidos (ai[] é um ponteiro do mock)
+        auto* npc = reinterpret_cast<uint8_t*>(TLMod_GetNpcByIndex(st.slot));
+        for (size_t off : {terraria::npc_off::active, terraria::npc_off::friendly, terraria::npc_off::townNPC,
+                           terraria::npc_off::dontTakeDamage})
+            npc[off] = 0;
+        std::memset(npc + terraria::npc_off::position, 0, 8);
+        std::memset(npc + terraria::npc_off::life, 0, 8);  // life e lifeMax
+    }
+    return 0;
+}
+
 int TestItems(void* lib) {
     auto sym = [&](const char* name) { return dlsym(lib, name); };
     auto new_item = reinterpret_cast<void* (*)()>(sym("mock_new_item"));
@@ -758,6 +830,7 @@ int main(int argc, char** argv) {
     CHECK(TLMod_ReadStaticBool(boss1, &b) && b);
     CHECK(TLMod_ReadStaticBool(hard, &b) && b);
 
+    if (int rc = TestTools(lib)) return rc;
     if (int rc = TestItems(lib)) return rc;
     if (int rc = TestDraw(lib)) return rc;
     if (int rc = TestScreens(lib)) return rc;

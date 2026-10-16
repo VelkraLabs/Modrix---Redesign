@@ -1,0 +1,218 @@
+{
+ "title": "Ferramentas",
+ "sections": [
+  {
+   "title": "Hora do dia",
+   "note": "Agora: 12:00 (dia), congelada",
+   "rows": [
+    {
+     "buttons": [
+      {
+       "label": "Amanhecer",
+       "command": "time dawn"
+      },
+      {
+       "label": "Meio-dia",
+       "command": "time noon"
+      },
+      {
+       "label": "Anoitecer",
+       "command": "time dusk"
+      },
+      {
+       "label": "Meia-noite",
+       "command": "time midnight"
+      }
+     ]
+    },
+    {
+     "buttons": [
+      {
+       "label": "Congelar hora",
+       "command": "freeze",
+       "active": true
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Jogador",
+   "rows": [
+    {
+     "buttons": [
+      {
+       "label": "Curar",
+       "command": "heal"
+      },
+      {
+       "label": "Invencível",
+       "command": "god",
+       "active": true
+      },
+      {
+       "label": "Matar inimigos",
+       "command": "kill"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Invocar NPC ou boss",
+   "search": {
+    "id": "npc",
+    "placeholder": "Nome ou ID do NPC",
+    "query": ""
+   },
+   "note": "",
+   "rows": [
+    {
+     "text": "Titã de Brasa",
+     "detail": "mod · ID 4096",
+     "buttons": [
+      {
+       "label": "Invocar",
+       "command": "spawn 4096"
+      }
+     ]
+    },
+    {
+     "text": "Bosses",
+     "detail": "invocados perto de você",
+     "buttons": [
+      {
+       "label": "Rei Slime",
+       "command": "spawn 50"
+      },
+      {
+       "label": "Olho de Cthulhu",
+       "command": "spawn 4"
+      },
+      {
+       "label": "Devorador de Mundos",
+       "command": "spawn 13"
+      },
+      {
+       "label": "Cérebro de Cthulhu",
+       "command": "spawn 266"
+      },
+      {
+       "label": "Abelha Rainha",
+       "command": "spawn 222"
+      },
+      {
+       "label": "Esqueletron",
+       "command": "spawn 35"
+      },
+      {
+       "label": "Deerclops",
+       "command": "spawn 668"
+      },
+      {
+       "label": "Rainha Slime",
+       "command": "spawn 657"
+      },
+      {
+       "label": "Os Gêmeos",
+       "command": "spawn 125 126"
+      },
+      {
+       "label": "O Destruidor",
+       "command": "spawn 134"
+      },
+      {
+       "label": "Esqueletron Primordial",
+       "command": "spawn 127"
+      },
+      {
+       "label": "Plantera",
+       "command": "spawn 262"
+      },
+      {
+       "label": "Golem",
+       "command": "spawn 245"
+      },
+      {
+       "label": "Duque Peixe-Dragão",
+       "command": "spawn 370"
+      },
+      {
+       "label": "Imperatriz da Luz",
+       "command": "spawn 636"
+      },
+      {
+       "label": "Cultista Lunático",
+       "command": "spawn 439"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Dar item",
+   "search": {
+    "id": "item",
+    "placeholder": "Nome ou ID do item",
+    "query": "estrela"
+   },
+   "note": "",
+   "rows": [
+    {
+     "text": "Estrela Cadente",
+     "detail": "ID 75 · FallenStar",
+     "buttons": [
+      {
+       "label": "+1",
+       "command": "give 75 1"
+      },
+      {
+       "label": "+10",
+       "command": "give 75 10"
+      },
+      {
+       "label": "+100",
+       "command": "give 75 100"
+      }
+     ]
+    },
+    {
+     "text": "Estrela no Frasco",
+     "detail": "ID 1430 · StarinaBottle",
+     "buttons": [
+      {
+       "label": "+1",
+       "command": "give 1430 1"
+      },
+      {
+       "label": "+10",
+       "command": "give 1430 10"
+      },
+      {
+       "label": "+100",
+       "command": "give 1430 100"
+      }
+     ]
+    },
+    {
+     "text": "Estrela-do-mar",
+     "detail": "ID 2626 · Starfish",
+     "buttons": [
+      {
+       "label": "+1",
+       "command": "give 2626 1"
+      },
+      {
+       "label": "+10",
+       "command": "give 2626 10"
+      },
+      {
+       "label": "+100",
+       "command": "give 2626 100"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

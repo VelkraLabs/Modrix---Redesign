@@ -69,6 +69,8 @@ struct Il2CppArray {
     uintptr_t max_length;
 };
 
+Il2CppObject* il2cpp_string_new(const char* utf8);
+
 }  // extern "C"
 
 namespace {
@@ -106,6 +108,11 @@ struct BoxedInt {
     int32_t value;
 };
 BoxedInt g_box{};
+struct BoxedDouble {
+    Il2CppObject header;
+    double value;
+};
+BoxedDouble g_dbl{};
 
 int32_t& I32(void* obj, size_t off) {
     return *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(obj) + off);
@@ -135,7 +142,7 @@ HurtFn g_hurtEntry = &MockPlayerHurt;
 // Offsets do dump (terraria_offsets.h, npc_off).
 constexpr size_t kNpcWhoAmI = 0x10, kNpcActive = 0x14, kNpcPos = 0x20, kNpcVel = 0x28, kNpcType = 0x154,
                  kNpcAi = 0x158, kNpcTarget = 0x178, kNpcDamage = 0x17C, kNpcDefense = 0x180,
-                 kNpcLife = 0x1A0, kNpcLifeMax = 0x1A4, kNpcSize = 0x200;
+                 kNpcLife = 0x1A0, kNpcLifeMax = 0x1A4, kNpcSize = 0x260;
 constexpr int kMaxNpcs = 200;
 constexpr int32_t kNpcVanillaCount = 688;
 
@@ -275,6 +282,7 @@ FieldInfo g_fGameMenu{"gameMenu", 0x320, nullptr};
 bool PatchScreens(void* target, void* replacement);
 bool InvokeScreens(const MethodInfo* m, void* obj, void** params, Il2CppObject** result);
 void InitScreens();
+void InitTools();
 
 int g_framesRun = 0;
 void MockMainDoUpdate(Il2CppObject*, Il2CppObject*, const MethodInfo*) { ++g_framesRun; }
@@ -834,6 +842,101 @@ void InitSaveWorld() {
     g_chests = NewArray(kMaxChests);
 }
 
+// ---- Ferramentas de teste: nomes, hora, vida/mana, matar inimigos -----------------
+Il2CppClass g_lang{"Terraria", "Lang", {}, {}};
+MethodInfo g_mItemNameValue{nullptr, "GetItemNameValue", 1};
+MethodInfo g_mNpcNameValue{nullptr, "GetNPCNameValue", 1};
+Il2CppClass g_idDictionary{"ReLogic.Reflection", "IdDictionary", {}, {}};
+MethodInfo g_mIdGetName{nullptr, "GetName", 1};
+Il2CppClass g_npcIdClass{"Terraria.ID", "NPCID", {}, {}};
+Il2CppObject* g_itemSearch = nullptr;
+Il2CppObject* g_npcSearch = nullptr;
+FieldInfo g_fItemSearch{"Search", 0x8, &g_itemSearch};
+FieldInfo g_fNpcSearch{"Search", 0x10, &g_npcSearch};
+bool g_dayTime = true;
+double g_time = 1000.0;
+FieldInfo g_fDayTime{"dayTime", 0x4B8, &g_dayTime, sizeof(bool)};
+FieldInfo g_fTime{"time", 0x4C0, &g_time, sizeof(double)};
+MethodInfo g_mSkipToTime{nullptr, "SkipToTime", 2};
+int g_skipToTimeCalls = 0;
+FieldInfo g_fPlayerMana[] = {{"statLifeMax2", 0x700, nullptr}, {"statMana", 0x708, nullptr},
+                             {"statManaMax2", 0x710, nullptr}};
+constexpr size_t kNpcWidth = 0x48, kNpcHeight = 0x4C, kNpcDontTakeDamage = 0x208, kNpcTownNpc = 0x21C,
+                 kNpcFriendly = 0x238;
+FieldInfo g_fNpcTools[] = {{"width", kNpcWidth, nullptr},     {"height", kNpcHeight, nullptr},
+                           {"friendly", kNpcFriendly, nullptr}, {"townNPC", kNpcTownNpc, nullptr},
+                           {"dontTakeDamage", kNpcDontTakeDamage, nullptr}};
+MethodInfo g_mStrikeNoInteraction{nullptr, "StrikeNPCNoInteraction", 6};
+Il2CppObject g_keyNotFound{};
+
+// Nomes como o jogo em português daria (alguns fixos, o resto genérico).
+std::string MockItemName(int32_t id) {
+    if (id <= 0 || id >= kItemCount) return "";
+    if (id == 38) return "Lente";
+    if (id == 4956) return "Zênite";
+    return "Item " + std::to_string(id);
+}
+std::string MockItemInternal(int32_t id) {
+    if (id == 38) return "Lens";
+    if (id == 4956) return "Zenith";
+    return id > 0 && id < kItemCount ? "Item" + std::to_string(id) : "";
+}
+std::string MockNpcName(int32_t id) {
+    if (id <= 0 || id >= kNpcVanillaCount) return "";
+    return id == 4 ? "Olho de Cthulhu" : "NPC " + std::to_string(id);
+}
+
+void InitTools() {
+    g_lang.methods = {&g_mItemNameValue, &g_mNpcNameValue};
+    g_idDictionary.methods = {&g_mIdGetName};
+    g_itemSearch = NewObject(0x40);
+    g_itemSearch->klass = &g_idDictionary;
+    g_npcSearch = NewObject(0x40);
+    g_npcSearch->klass = &g_idDictionary;
+    g_itemId.fields.push_back(&g_fItemSearch);
+    g_npcIdClass.fields = {&g_fNpcSearch};
+    g_main.fields.insert(g_main.fields.end(), {&g_fDayTime, &g_fTime});
+    g_main.methods.push_back(&g_mSkipToTime);
+    for (FieldInfo& f : g_fPlayerMana) g_player.fields.push_back(&f);
+    for (FieldInfo& f : g_fNpcTools) g_npc.fields.push_back(&f);
+    g_npc.methods.push_back(&g_mStrikeNoInteraction);
+    g_csharp.classes.insert(g_csharp.classes.end(), {&g_lang, &g_idDictionary, &g_npcIdClass});
+    I32(g_localPlayer, 0x708) = 20;   // statMana
+    I32(g_localPlayer, 0x710) = 200;  // statManaMax2
+}
+
+// Devolve true se `m` é uma das ferramentas (e preenche o retorno).
+bool InvokeTools(const MethodInfo* m, void* obj, void** params, Il2CppObject** ret, Il2CppException** exc) {
+    if (m == &g_mItemNameValue || m == &g_mNpcNameValue) {
+        int32_t id = *static_cast<int32_t*>(params[0]);
+        std::string s = m == &g_mItemNameValue ? MockItemName(id) : MockNpcName(id);
+        *ret = il2cpp_string_new(s.c_str());  // o jogo devolve "" para tipo sem nome
+        return true;
+    }
+    if (m == &g_mIdGetName) {
+        int32_t id = *static_cast<int32_t*>(params[0]);
+        std::string s = obj == g_itemSearch ? MockItemInternal(id) : (id == 4 ? "EyeofCthulhu" : "");
+        if (s.empty()) *exc = &g_keyNotFound;  // Dictionary: KeyNotFoundException
+        else *ret = il2cpp_string_new(s.c_str());
+        return true;
+    }
+    if (m == &g_mSkipToTime) {
+        ++g_skipToTimeCalls;
+        g_time = *static_cast<int32_t*>(params[0]);
+        g_dayTime = *static_cast<bool*>(params[1]);
+        return true;
+    }
+    if (m == &g_mStrikeNoInteraction) {
+        int32_t dmg = *static_cast<int32_t*>(params[0]) - At<int32_t>(obj, kNpcDefense) / 2;
+        At<int32_t>(obj, kNpcLife) -= std::max(1, dmg);
+        if (At<int32_t>(obj, kNpcLife) <= 0) At<bool>(obj, kNpcActive) = false;  // checkDead
+        g_dbl.value = dmg;
+        *ret = &g_dbl.header;
+        return true;
+    }
+    return false;
+}
+
 
 }  // namespace
 
@@ -877,9 +980,11 @@ __attribute__((visibility("default"))) void mock_il2cpp_init() {
     InitItems();
     InitDraw();
     InitScreens();
+    InitTools();
     g_initialized = true;
 }
 __attribute__((visibility("default"))) void* mock_local_player() { return g_localPlayer; }
+__attribute__((visibility("default"))) int mock_skip_to_time_calls() { return g_skipToTimeCalls; }
 __attribute__((visibility("default"))) bool mock_patch_function(void* target, void* replacement) {
     if (PatchScreens(target, replacement)) return true;
     if (target == reinterpret_cast<void*>(&MockPlayerHurt)) g_hurtEntry = reinterpret_cast<HurtFn>(replacement);
@@ -1104,6 +1209,9 @@ size_t il2cpp_field_get_offset(FieldInfo* f) { return f->offset; }
 void il2cpp_field_static_get_value(FieldInfo* f, void* out) {
     std::memcpy(out, f->tls ? f->tls() : f->staticAddr, f->size);
 }
+void il2cpp_field_static_set_value(FieldInfo* f, void* value) {
+    std::memcpy(f->tls ? f->tls() : f->staticAddr, value, f->size);
+}
 const MethodInfo* il2cpp_class_get_method_from_name(Il2CppClass* k, const char* name, int argc) {
     for (MethodInfo* m : k->methods)
         if (!std::strcmp(m->name, name) && (argc < 0 || m->argc == argc)) return m;
@@ -1112,6 +1220,7 @@ const MethodInfo* il2cpp_class_get_method_from_name(Il2CppClass* k, const char* 
 Il2CppObject* il2cpp_runtime_invoke(const MethodInfo* m, void* obj, void** params,
                                     Il2CppException** exc) {
     *exc = nullptr;
+    if (Il2CppObject* ret = nullptr; InvokeTools(m, obj, params, &ret, exc)) return ret;
     if (m == &g_mGetMyPlayer) {
         g_box.value = g_myPlayer;
         return &g_box.header;

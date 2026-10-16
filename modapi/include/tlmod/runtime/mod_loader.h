@@ -98,6 +98,15 @@ public:
     // thread; chamadas concorrentes ao mesmo provedor são serializadas.
     std::optional<std::string> Query(const std::string& modId, const std::string& channel,
                                      std::string* error = nullptr) const;
+    // Canais de comando registrados, como "mod_id/channel".
+    std::vector<std::string> CommandChannels() const;
+    // Manda um comando (texto definido pelo mod) e devolve a resposta JSON já
+    // validada ("{}" se o mod não respondeu nada). Qualquer thread; chamadas ao
+    // mesmo canal são serializadas.
+    std::optional<std::string> Command(const std::string& modId, const std::string& channel,
+                                       const std::string& command, std::string* error = nullptr) const;
+    // Catálogo de nomes de itens e NPCs (montado aos poucos no frame handler).
+    bool CatalogReady() const;
 
     // Resolve dependências e devolve a ordem de carga (ids). Marca como
     // Rejected os mods com dependência ausente/incompatível ou em ciclo.

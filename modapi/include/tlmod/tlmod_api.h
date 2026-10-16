@@ -204,6 +204,18 @@ typedef enum TLModProgress {
 typedef struct TLModBuffer TLModBuffer;
 typedef bool (*TLModProviderFn)(void* user, TLModBuffer* out);
 
+/* Comando vindo da interface (ex.: um botão do painel). `command` é texto
+ * UTF-8 no formato que o próprio mod definiu (o painel devolve exatamente o
+ * texto que o mod pôs no botão; o campo de busca manda "search <id> <texto>").
+ * A resposta, opcional, é um documento JSON escrito em `out`; o painel mostra
+ * o campo "toast" se houver. Pode ser chamado em QUALQUER thread (a da UI):
+ * o que mexe no jogo deve ir para uma fila atendida no subscribe_frame.
+ * Retornar false = comando recusado. */
+typedef bool (*TLModCommandFn)(void* user, const char* command, TLModBuffer* out);
+
+/* Uma vez por frame, na thread do jogo (menu e mundo). */
+typedef void (*TLModFrameFn)(void* user);
+
 /* ------------------------------------------------------------------------ */
 /* Eventos                                                                   */
 /* ------------------------------------------------------------------------ */
@@ -280,6 +292,40 @@ typedef struct TLModHostApi {
      * é acima. O ponto vira o centro-base do NPC, como em NPC.NewNPC.
      * false = tipo desconhecido. O resultado do spawn vai para o log. */
     bool (*spawn_npc_near_player)(TLModContext* ctx, TLModId type, float dx, float dy);
+
+    /* ---- Ferramentas (acrescentados depois de spawn_npc_near_player) ------- */
+
+    /* Só durante o init. fn roda uma vez por frame na thread do jogo. */
+    bool (*subscribe_frame)(TLModContext* ctx, TLModFrameFn fn, void* user);
+    /* Só durante o init; channel [a-z0-9_]{1,64}, declarado em "provides". */
+    bool (*register_command)(TLModContext* ctx, const char* channel, TLModCommandFn fn, void* user);
+
+    /* Nome de um item ou NPC, original ou de mod. internal_name = false: o do
+     * idioma do jogo; true: o interno (inglês, sem espaços, ex.: "Zenith";
+     * "mod_id:nome" para conteúdo de mod). Seguro em qualquer thread: lê um
+     * catálogo que o runtime monta nos primeiros frames. Copia até size-1
+     * bytes (com \0) e devolve o tamanho do nome inteiro; -1 = sem nome ou
+     * tipo desconhecido; -2 = catálogo ainda não pronto (tente depois). */
+    int32_t (*content_name)(const TLModContext* ctx, TLModContentKind kind, TLModId id, bool internal_name,
+                            char* buf, size_t size);
+    /* Todos os IDs com nome (originais e de mod), em ordem crescente. Copia até
+     * max em out (pode ser NULL com max 0) e devolve quantos existem; -2 =
+     * catálogo ainda não pronto. Qualquer thread. Só itens e NPCs. */
+    int32_t (*content_ids)(const TLModContext* ctx, TLModContentKind kind, TLModId* out, int32_t max);
+
+    /* Só na thread do jogo (ex.: dentro do subscribe_frame), com um mundo
+     * carregado. time em ticks: desde 4:30 se dia (dia = 54000), desde 19:30
+     * se noite (noite = 32400). jump = true faz como o poder de hora da
+     * Jornada (Main.SkipToTime); false só grava os campos (para segurar a
+     * hora parada). */
+    bool (*get_time)(const TLModContext* ctx, bool* day, double* time);
+    bool (*set_time)(TLModContext* ctx, bool day, double time, bool jump);
+    /* Vida e mana cheias no jogador local. */
+    bool (*heal_player)(TLModContext* ctx);
+    /* Mata (com loot) os NPCs hostis a até `radius` pixels do jogador local.
+     * Pula amigáveis, NPCs da cidade, invulneráveis e bichinhos. Devolve
+     * quantos morreram (-1 se não há jogador). */
+    int32_t (*kill_hostile_npcs)(TLModContext* ctx, float radius);
 } TLModHostApi;
 
 /* Assinatura do ponto de entrada. Retorne 0 em sucesso; qualquer outro valor

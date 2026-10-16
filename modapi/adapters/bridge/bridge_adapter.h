@@ -27,6 +27,11 @@ public:
     bool WriteNpc(int32_t index, const TLModNpcState& in) override;
     int32_t SpawnNpc(int32_t type, float x, float y) override;
     std::optional<std::pair<float, float>> LocalPlayerCenter() const override;
+    std::optional<std::string> ContentName(TLModContentKind kind, int32_t id, bool internalName) override;
+    std::optional<std::pair<bool, double>> WorldTime() const override;
+    bool SetWorldTime(bool day, double time, bool jump) override;
+    bool RestoreLocalPlayer() override;
+    int32_t KillHostileNpcs(float x, float y, float radius) override;
 
     // Leem a fotografia do último frame: seguros em qualquer thread.
     std::optional<bool> InWorld() const override;

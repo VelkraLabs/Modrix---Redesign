@@ -243,6 +243,7 @@ bool TLMod_Init(int timeoutMs) {
         // NPCs são opcionais: se algo não resolver, o resto da ponte segue.
         if (bridge::ResolveNpc()) bridge::InstallNpcHooks();
         if (bridge::ResolveWorldState()) bridge::InstallWorldStateHooks();
+        bridge::ResolveTools();  // opcional: só as ferramentas de teste dependem disso
         if (bridge::ResolveItems()) {
             bridge::InstallItemHooks();
             bridge::ResolveItemTraits();

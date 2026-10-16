@@ -6,8 +6,9 @@ Este script espelha o layout do Java (mesmas medidas em dp, paddings e ordem)
 e lê exatamente o JSON que o PanelController entrega ao Java, inclusive o
 tema. Serve para ver o resultado antes do aparelho; não é uma captura de tela.
 
-    overlay_snapshot sample_checklist.json out/
-    python3 render_preview.py out/snapshot_checklist.json out/snapshot_mods.json out/snapshot_log.json preview.png
+    overlay_snapshot sample_checklist.json out/ ../../mods/devtools/sample_panel.json
+    python3 render_preview.py out/snapshot_checklist.json out/snapshot_mods.json out/snapshot_log.json \
+        out/snapshot_tools.json preview.png
 """
 
 import json
@@ -159,6 +160,8 @@ def render_panel(snap, layer, scroll_to_end=False):
             return layer_, draw_mods(cp, snap["mods"], x0, x1, top)
         if snap["tab"] == "log":
             return layer_, draw_log(cp, snap["log"], x0, x1, top)
+        if snap["tab"].startswith("mod:"):
+            return layer_, draw_modtab(cp, snap["modtab"], x0, x1, top)
         return layer_, draw_checklist(cp, snap["checklist"], x0, x1, top)
 
     content, end_y = draw_content(content_y)
@@ -258,6 +261,91 @@ def draw_log(p, log, x0, x1, y):
     return y + h
 
 
+def chip_w(p, label):
+    return p.text_w(label, "small_sp", True) + dp(20)
+
+
+def chip(p, x, y, label, active):
+    """Java chip(): padding 10/5 dp, cantos 12, destaque quando ligado."""
+    f = font(p.t["small_sp"], True)
+    w, h = chip_w(p, label), line_h(f) + dp(10)
+    p.rounded((x, y, x + w, y + h), 12, "switch_on" if active else "tab_active_bg")
+    p.d.text((x + w / 2, y + h / 2), label, font=f, fill=p.color("panel_bg" if active else "text"), anchor="mm")
+    return w, h
+
+
+def draw_modtab(p, tab, x0, x1, y):
+    """Java renderModTab(): aviso, seções (título, busca, nota, linhas de botões)."""
+    t = p.t
+    if tab.get("notice"):
+        y += p.text((x0 + dp(4), y), tab["notice"], "small_sp", "accent", True) + dp(8)
+    for i, sec in enumerate(tab["content"].get("sections", [])):
+        y += dp(0 if i == 0 else 10)
+        y += p.text((x0 + dp(4), y), sec.get("title", "").upper(), "small_sp", "text_dim", True) + dp(4)
+        if sec.get("search"):
+            s = sec["search"]
+            fh = line_h(font(t["text_sp"])) + dp(12)
+            bw = p.text_w("Buscar", "small_sp", True) + dp(24)
+            p.rounded((x0, y, x1 - bw - dp(6), y + fh), 8, "row_bg", "panel_border")
+            q = s.get("query") or s.get("placeholder", "")
+            p.text((x0 + dp(10), y + dp(6)), q, "text_sp", "text" if s.get("query") else "text_dim")
+            p.rounded((x1 - bw, y + dp(2), x1, y + fh - dp(2)), 8, "tab_active_bg")
+            p.text((x1 - bw / 2, y + fh / 2), "Buscar", "small_sp", "text", True, "mm")
+            y += fh + dp(4)
+        if sec.get("note"):
+            for s in p.wrap(sec["note"], "small_sp", x1 - x0 - dp(8)):
+                y += p.text((x0 + dp(4), y), s, "small_sp", "text_dim")
+            y += dp(4)
+        for row in sec.get("rows", []):
+            buttons = row.get("buttons", [])
+            texts = [(row[k], s, c) for k, s, c in (("text", "text_sp", "text"), ("detail", "small_sp", "text_dim"))
+                     if row.get(k)]
+            ch = line_h(font(t["small_sp"], True)) + dp(10)
+            if texts and len(buttons) <= 3:  # texto à esquerda, botões na mesma linha
+                bw = sum(chip_w(p, b["label"]) + dp(6) for b in buttons)
+                th = sum(line_h(font(t[s])) for _, s, _ in texts)
+                h = max(th, ch) + dp(12)
+                p.rounded((x0, y, x1, y + h), 8, "row_bg")
+                ty = y + (h - th) / 2
+                for s, size, color in texts:
+                    ty += p.text((x0 + dp(10), ty), ellipsize(p, s, size, False, x1 - x0 - bw - dp(24)), size, color)
+                bx = x1 - dp(8) - bw
+                for b in buttons:
+                    bx += dp(6)
+                    w, _ = chip(p, bx, y + (h - ch) / 2, b["label"], b.get("active"))
+                    bx += w
+                y += h + dp(4)
+                continue
+            # muitos botões: quebram em linhas (Java: medida do texto + padding)
+            avail = x1 - x0 - dp(38)
+            lines, cur, used = [], [], 0
+            for b in buttons:
+                w = chip_w(p, b["label"]) + dp(6)
+                if cur and used + w > avail:
+                    lines.append(cur)
+                    cur, used = [], 0
+                cur.append(b)
+                used += w
+            if cur:
+                lines.append(cur)
+            th = sum(line_h(font(t[s])) for _, s, _ in texts)
+            h = th + len(lines) * (ch + dp(4)) + dp(12)
+            p.rounded((x0, y, x1, y + h), 8, "row_bg")
+            ty = y + dp(6)
+            for s, size, color in texts:
+                ty += p.text((x0 + dp(10), ty), s, size, color)
+            for ln in lines:
+                ty += dp(4)
+                bx = x0 + dp(10)
+                for b in ln:
+                    bx += dp(6)
+                    w, _ = chip(p, bx, ty, b["label"], b.get("active"))
+                    bx += w
+                ty += ch
+            y += h + dp(4)
+    return y
+
+
 def ellipsize(p, s, size, bold, max_w):
     if p.text_w(s, size, bold) <= max_w:
         return s
@@ -335,6 +423,9 @@ def main():
             screens.append(render_screen(snap, "Aba Boss Checklist (rolada até o fim)", True))
         elif snap["tab"] == "log":
             screens.append(render_screen(snap, "Aba Log (acompanha o fim)", True))
+        elif snap["tab"].startswith("mod:"):
+            screens.append(render_screen(snap, "Aba Ferramentas (tlmod.devtools)"))
+            screens.append(render_screen(snap, "Aba Ferramentas (rolada até o fim)", True))
         else:
             screens.append(render_screen(snap, "Aba Mods"))
     gap = dp(10)

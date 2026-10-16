@@ -47,6 +47,8 @@ constexpr size_t statDefense = 0x6F8;  // int
 constexpr size_t statLifeMax = 0x6FC;  // int
 constexpr size_t statLifeMax2 = 0x700; // int  (vida máxima com bônus)
 constexpr size_t statLife = 0x704;     // int  <-- usado pela ponte
+constexpr size_t statMana = 0x708;     // int
+constexpr size_t statManaMax2 = 0x710; // int  (mana máxima com bônus)
 // Itens gravados no .plr (Player.InternalSavePlayerFile). Laços do save:
 // armor/dye/miscEquips/miscDyes inteiros, inventory 0..57, bancos 0..39.
 constexpr size_t armor = 0x3F8;        // Item[] (20: armadura, acessórios, vaidade)
@@ -266,13 +268,28 @@ constexpr size_t defense = 0x180;   // int
 constexpr size_t life = 0x1A0;      // int
 constexpr size_t lifeMax = 0x1A4;   // int
 constexpr size_t frame = 0x1C0;     // Rectangle (X, Y, Width, Height): quadro da folha a desenhar
+constexpr size_t width = 0x48;      // int   (Entity)
+constexpr size_t height = 0x4C;     // int   (Entity)
+constexpr size_t dontTakeDamage = 0x208;  // bool  (partes imortais, NPCs invulneráveis)
+constexpr size_t townNPC = 0x21C;   // bool
+constexpr size_t friendly = 0x238;  // bool
 }  // namespace npc_off
+
+// --- Dicionários de nomes internos (IdDictionary, ReLogic.Reflection) --------
+namespace item_id_static_off {
+constexpr size_t Search = 0x8;   // IdDictionary ItemID.Search ("Zenith" <-> 4956)
+}  // namespace item_id_static_off
+namespace npc_id_static_off {
+constexpr size_t Search = 0x10;  // IdDictionary NPCID.Search ("EyeofCthulhu" <-> 4)
+}  // namespace npc_id_static_off
 
 // --- Campos estáticos de Terraria.Main -------------------------------------
 // Offset dentro de static_fields da classe; a ponte usa
 // il2cpp_field_static_get_value e não este número diretamente.
 namespace main_static_off {
 constexpr size_t npc = 0x5B0;      // NPC[] Main.npc (200 slots)
+constexpr size_t dayTime = 0x4B8;  // bool   Main.dayTime
+constexpr size_t time = 0x4C0;     // double Main.time (ticks desde 4:30 de dia ou 19:30 de noite)
 constexpr size_t player = 0x678;   // Player[] Main.player (255 slots)
 constexpr size_t netMode = 0x81C;  // int Main.netMode
 constexpr size_t chest = 0x5F8;    // Chest[] Main.chest (8000 slots; nulo = sem baú)
@@ -442,6 +459,14 @@ constexpr uintptr_t ItemSnippet_UniqueDraw = 0x97F0D8;           // [i:ID] no ch
 // Nome de NPC: o jogo só lê Lang pelo netID (o da casca).
 constexpr uintptr_t NPC_get_TypeName = 0xED9240;   // Lang.GetNPCNameValue(netID): hover, barra, mapa, morte
 constexpr uintptr_t NPC_GetTypeNetName = 0xEDB0BC; // NetworkText.FromKey(...): "X despertou!", "X foi derrotado"
+// Ferramentas de teste (mod tlmod.devtools). Chamadas por il2cpp_runtime_invoke, sem hook.
+constexpr uintptr_t Lang_GetItemNameValue = 0x11F56B0;  // nome do item no idioma do jogo
+constexpr uintptr_t Lang_GetNPCNameValue = 0x11F5298;   // nome do NPC no idioma do jogo
+constexpr uintptr_t IdDictionary_GetName = 0x98D538;    // nome interno (ItemID/NPCID.Search)
+constexpr uintptr_t Main_SkipToTime = 0xD72700;         // static void SkipToTime(int, bool): poder de hora da Jornada
+// double NPC.StrikeNPCNoInteraction(int Damage, float knockBack, int hitDirection,
+//                                   bool crit, bool noEffect, bool fromNet)
+constexpr uintptr_t NPC_StrikeNPCNoInteraction = 0xEE2BF0;
 }  // namespace rva
 
 // Número de parâmetros C# (sem contar `this`), usado em
@@ -453,6 +478,11 @@ constexpr int Main_get_myPlayer = 0;  // Main.myPlayer é propriedade nesta buil
 constexpr int NPC_NewNPC = 10;
 constexpr int NPC_SetDefaults = 2;
 constexpr int NPC_AI = 0;
+constexpr int Lang_GetItemNameValue = 1;
+constexpr int Lang_GetNPCNameValue = 1;
+constexpr int IdDictionary_GetName = 1;
+constexpr int Main_SkipToTime = 2;
+constexpr int NPC_StrikeNPCNoInteraction = 6;
 constexpr int Main_DoUpdate = 1;
 constexpr int Player_InternalSavePlayerFile = 1;
 constexpr int Player_LoadPlayer = 2;

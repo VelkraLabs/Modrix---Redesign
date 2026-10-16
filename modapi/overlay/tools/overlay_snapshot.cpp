@@ -1,6 +1,7 @@
 // Gera view-models do painel a partir de dados fixos, para a prévia em PNG.
-//   overlay_snapshot sample_checklist.json <saída>/
-// Escreve snapshot_checklist.json, snapshot_mods.json e snapshot_log.json:
+//   overlay_snapshot sample_checklist.json <saída>/ [sample_panel.json]
+// Escreve snapshot_checklist.json, snapshot_mods.json e snapshot_log.json (e,
+// com o terceiro argumento, snapshot_tools.json com a aba do tlmod.devtools):
 // exatamente o JSON que o renderizador Android recebe do PanelController.
 #include <cstdio>
 #include <filesystem>
@@ -22,7 +23,8 @@ constexpr const char* kDlError =
 
 class StaticSource final : public overlay::PanelDataSource {
 public:
-    explicit StaticSource(std::string checklist) : checklist_(std::move(checklist)) {}
+    StaticSource(std::string checklist, std::string panel)
+        : checklist_(std::move(checklist)), panel_(std::move(panel)) {}
     std::vector<overlay::ModInfo> Mods() const override {
         return {
             {"tlmod.boss_checklist", "Boss Checklist", "0.1.0", rt::ModState::Loaded, ""},
@@ -48,26 +50,36 @@ public:
         };
     }
     std::string LogFile() const override { return std::string(kModsDir).substr(0, std::string(kModsDir).size() - 5) + "/tlmod.log"; }
-    std::optional<std::string> Query(const std::string&, const std::string&, std::string*) const override {
-        return checklist_;
+    std::optional<std::string> Query(const std::string& modId, const std::string&, std::string*) const override {
+        return modId == "tlmod.devtools" ? panel_ : checklist_;
+    }
+    std::vector<std::string> PanelMods() const override {
+        return panel_.empty() ? std::vector<std::string>{} : std::vector<std::string>{"tlmod.devtools"};
+    }
+    std::optional<std::string> Command(const std::string&, const std::string&, const std::string&,
+                                       std::string*) const override {
+        return std::string("{\"toast\":\"10x Estrela Cadente no invent\u00e1rio\"}");
     }
 
 private:
-    std::string checklist_;
+    std::string checklist_, panel_;
 };
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::fprintf(stderr, "uso: %s sample_checklist.json <saída>/\n", argv[0]);
+        std::fprintf(stderr, "uso: %s sample_checklist.json <saída>/ [sample_panel.json]\n", argv[0]);
         return 2;
     }
-    std::ifstream in(argv[1], std::ios::binary);
-    std::ostringstream ss;
-    ss << in.rdbuf();
+    auto read = [](const char* path) {
+        std::ifstream in(path, std::ios::binary);
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    };
     fs::path out = argv[2];
     fs::create_directories(out);
 
-    StaticSource source(ss.str());
+    StaticSource source(read(argv[1]), argc > 3 ? read(argv[3]) : std::string());
     overlay::ConfigStore config(out / "preview_config.json");
     std::string err;
     config.SetEnabled("tlmod.example_item", false, &err);  // mostra o aviso "ao reiniciar"
@@ -84,6 +96,14 @@ int main(int argc, char** argv) {
     panel.SelectTab(overlay::Tab::Log);
     panel.Tick(2);
     std::ofstream(out / "snapshot_log.json") << panel.SnapshotJson();
+
+    if (argc > 3) {  // aba Ferramentas, logo depois de um toque em "+10"
+        panel.SelectModTab("tlmod.devtools");
+        panel.Tick(3);
+        panel.HandleAction("mod_command", "give 75 10");
+        panel.Tick(4);
+        std::ofstream(out / "snapshot_tools.json") << panel.SnapshotJson();
+    }
     fs::remove(out / "preview_config.json");
     std::printf("snapshots em %s\n", out.string().c_str());
     return 0;

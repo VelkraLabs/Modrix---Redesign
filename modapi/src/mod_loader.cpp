@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <cstring>
 #include <deque>
 #include <iterator>
 #include <map>
@@ -67,6 +68,59 @@ struct ModLoader::Impl {
         std::unique_ptr<std::mutex> mutex;  // serializa chamadas ao mesmo provedor
     };
     std::vector<Provider> providers;
+
+    // Ferramentas: ouvintes de frame e canais de comando ("mod_id/channel").
+    struct FrameSub {
+        TLModFrameFn fn;
+        void* user;
+    };
+    std::vector<FrameSub> frameSubs;
+    struct CommandChannel {
+        std::string key;
+        TLModCommandFn fn;
+        void* user;
+        std::unique_ptr<std::mutex> mutex;  // serializa comandos ao mesmo canal
+    };
+    std::vector<CommandChannel> commands;
+
+    // Catálogo de nomes de itens e NPCs originais, montado aos poucos no frame
+    // handler (o jogo só responde na thread dele) e lido de qualquer thread.
+    // Índice 0 = itens, 1 = NPCs (os mesmos valores de TLModContentKind).
+    struct Catalog {
+        std::mutex mutex;
+        std::vector<std::string> display[2], internal[2];
+        int32_t next[2] = {1, 1};
+        std::atomic<bool> ready{false};
+    } catalog;
+    static constexpr int kCatalogPerFrame = 256;  // IDs por frame (2 consultas cada)
+
+    void StepCatalog() {
+        if (catalog.ready.load(std::memory_order_acquire)) return;
+        int budget = kCatalogPerFrame;
+        for (int k = 0; k < 2; ++k) {
+            const auto kind = static_cast<TLModContentKind>(k);
+            const int32_t count = std::max(0, self->registry_.VanillaCount(kind).value_or(0));
+            while (catalog.next[k] < count) {
+                if (budget-- <= 0) return;
+                const int32_t id = catalog.next[k];
+                std::optional<std::string> d = game->ContentName(kind, id, false);
+                std::optional<std::string> i = d ? game->ContentName(kind, id, true) : std::nullopt;
+                if (!d || !i) return;  // o jogo ainda não responde: tenta no próximo frame
+                std::lock_guard<std::mutex> lock(catalog.mutex);
+                if (catalog.display[k].size() < static_cast<size_t>(count)) {
+                    catalog.display[k].resize(static_cast<size_t>(count));
+                    catalog.internal[k].resize(static_cast<size_t>(count));
+                }
+                catalog.display[k][static_cast<size_t>(id)] = std::move(*d);
+                catalog.internal[k][static_cast<size_t>(id)] = std::move(*i);
+                ++catalog.next[k];
+            }
+        }
+        catalog.ready.store(true, std::memory_order_release);
+        Log(TLMOD_LOG_INFO, "runtime",
+            "catálogo de nomes pronto: " + std::to_string(catalog.display[0].size()) + " itens, " +
+                std::to_string(catalog.display[1].size()) + " NPCs");
+    }
 
     const ModRecord& Mod(const TLModContext* ctx) const { return self->mods_[ctx->index]; }
     const std::string& ModId(const TLModContext* ctx) const { return Mod(ctx).manifest.id; }
@@ -229,8 +283,10 @@ struct ModLoader::Impl {
     void OnFrame() {
         ProcessShellChecks();
         ProcessTextures();
+        StepCatalog();
         ProcessNearSpawns();
         ProcessGives();
+        for (const FrameSub& s : frameSubs) s.fn(s.user);
     }
 
     void ProcessNearSpawns() {
@@ -542,6 +598,119 @@ bool Api_RegisterProvider(TLModContext* ctx, const char* channel, TLModProviderF
     return true;
 }
 
+// Canal [a-z0-9_]{1,64} declarado em "provides"; só no init.
+bool CheckChannel(TLModContext* ctx, const char* api, const char* channel, std::string* key) {
+    Impl* impl = ImplOf(ctx);
+    const ModRecord& mod = impl->Mod(ctx);
+    auto err = [&](const std::string& msg) {
+        Log(TLMOD_LOG_ERROR, mod.manifest.id, std::string(api) + ": " + msg);
+        return false;
+    };
+    if (!ctx->initializing) return err("só pode ser chamado durante tlmod_mod_init");
+    if (!channel) return err("channel é obrigatório");
+    std::string ch = channel;
+    if (std::find(mod.manifest.provides.begin(), mod.manifest.provides.end(), ch) == mod.manifest.provides.end())
+        return err("\"" + ch + "\" não está declarado em \"provides\" do manifest.json");
+    *key = mod.manifest.id + "/" + ch;
+    return true;
+}
+
+bool Api_SubscribeFrame(TLModContext* ctx, TLModFrameFn fn, void* user) {
+    if (!ctx) return false;
+    Impl* impl = ImplOf(ctx);
+    if (!ctx->initializing || !fn) {
+        Log(TLMOD_LOG_ERROR, impl->ModId(ctx), "subscribe_frame: só durante tlmod_mod_init, com fn");
+        return false;
+    }
+    impl->frameSubs.push_back({fn, user});
+    return true;
+}
+
+bool Api_RegisterCommand(TLModContext* ctx, const char* channel, TLModCommandFn fn, void* user) {
+    if (!ctx) return false;
+    std::string key;
+    if (!CheckChannel(ctx, "register_command", channel, &key)) return false;
+    Impl* impl = ImplOf(ctx);
+    if (!fn) {
+        Log(TLMOD_LOG_ERROR, impl->ModId(ctx), "register_command: fn é obrigatório");
+        return false;
+    }
+    for (const auto& c : impl->commands)
+        if (c.key == key) {
+            Log(TLMOD_LOG_ERROR, impl->ModId(ctx), "register_command: canal \"" + std::string(channel) + "\" já registrado");
+            return false;
+        }
+    impl->commands.push_back({key, fn, user, std::make_unique<std::mutex>()});
+    return true;
+}
+
+bool CatalogKind(TLModContentKind kind) { return kind == TLMOD_CONTENT_ITEM || kind == TLMOD_CONTENT_NPC; }
+
+int32_t Api_ContentName(const TLModContext* ctx, TLModContentKind kind, TLModId id, bool internalName, char* buf,
+                        size_t size) {
+    if (!ctx || !CatalogKind(kind)) return -1;
+    Impl* impl = ImplOf(ctx);
+    std::string name;
+    if (const ContentEntry* e = impl->self->Registry().Get(kind, id)) {
+        if (internalName) name = e->key;
+        else if (const ItemDefinition* item = e->Item()) name = item->displayName;
+        else if (const NpcDefinition* npc = e->Npc()) name = npc->displayName;
+    } else {
+        if (!impl->catalog.ready.load(std::memory_order_acquire)) return -2;
+        std::lock_guard<std::mutex> lock(impl->catalog.mutex);
+        const auto& names = (internalName ? impl->catalog.internal : impl->catalog.display)[kind];
+        if (id > 0 && static_cast<size_t>(id) < names.size()) name = names[static_cast<size_t>(id)];
+    }
+    if (name.empty()) return -1;
+    if (buf && size > 0) {
+        size_t n = std::min(name.size(), size - 1);
+        std::memcpy(buf, name.data(), n);
+        buf[n] = '\0';
+    }
+    return static_cast<int32_t>(name.size());
+}
+
+int32_t Api_ContentIds(const TLModContext* ctx, TLModContentKind kind, TLModId* out, int32_t max) {
+    if (!ctx || !CatalogKind(kind)) return -1;
+    Impl* impl = ImplOf(ctx);
+    if (!impl->catalog.ready.load(std::memory_order_acquire)) return -2;
+    std::vector<TLModId> ids;
+    {
+        std::lock_guard<std::mutex> lock(impl->catalog.mutex);
+        const auto& d = impl->catalog.display[kind];
+        const auto& in = impl->catalog.internal[kind];
+        for (size_t i = 1; i < d.size(); ++i)
+            if (!d[i].empty() || !in[i].empty()) ids.push_back(static_cast<TLModId>(i));
+    }
+    for (const ContentEntry& e : impl->self->Registry().Entries(kind)) ids.push_back(e.id);
+    for (int32_t i = 0; out && i < max && static_cast<size_t>(i) < ids.size(); ++i) out[i] = ids[static_cast<size_t>(i)];
+    return static_cast<int32_t>(ids.size());
+}
+
+bool Api_GetTime(const TLModContext* ctx, bool* day, double* time) {
+    if (!ctx || !day || !time) return false;
+    auto t = ImplOf(ctx)->game->WorldTime();
+    if (!t) return false;
+    *day = t->first;
+    *time = t->second;
+    return true;
+}
+
+bool Api_SetTime(TLModContext* ctx, bool day, double time, bool jump) {
+    if (!ctx || time < 0 || time > (day ? 54000.0 : 32400.0)) return false;
+    return ImplOf(ctx)->game->SetWorldTime(day, time, jump);
+}
+
+bool Api_HealPlayer(TLModContext* ctx) { return ctx && ImplOf(ctx)->game->RestoreLocalPlayer(); }
+
+int32_t Api_KillHostileNpcs(TLModContext* ctx, float radius) {
+    if (!ctx) return -1;
+    GameAdapter* game = ImplOf(ctx)->game;
+    auto center = game->LocalPlayerCenter();
+    if (!center) return -1;
+    return game->KillHostileNpcs(center->first, center->second, radius);
+}
+
 void Api_BufferAppend(TLModBuffer* out, const char* data, size_t len) {
     if (out && data) out->data.append(data, len);
 }
@@ -623,6 +792,14 @@ ModLoader::ModLoader(GameAdapter* game)
     a.buffer_append = &Api_BufferAppend;
     a.give_item = &Api_GiveItem;
     a.spawn_npc_near_player = &Api_SpawnNpcNearPlayer;
+    a.subscribe_frame = &Api_SubscribeFrame;
+    a.register_command = &Api_RegisterCommand;
+    a.content_name = &Api_ContentName;
+    a.content_ids = &Api_ContentIds;
+    a.get_time = &Api_GetTime;
+    a.set_time = &Api_SetTime;
+    a.heal_player = &Api_HealPlayer;
+    a.kill_hostile_npcs = &Api_KillHostileNpcs;
 
     Impl* impl = impl_.get();
     game_->SetPlayerHurtHandler([impl](TLModPlayerHurt& ev, bool after) { return impl->DispatchHurt(ev, after); });
@@ -650,6 +827,41 @@ std::vector<std::string> ModLoader::Providers() const {
     for (const auto& p : impl_->providers) keys.push_back(p.key);
     return keys;
 }
+
+std::vector<std::string> ModLoader::CommandChannels() const {
+    std::vector<std::string> keys;
+    for (const auto& c : impl_->commands) keys.push_back(c.key);
+    return keys;
+}
+
+std::optional<std::string> ModLoader::Command(const std::string& modId, const std::string& channel,
+                                              const std::string& command, std::string* error) const {
+    auto fail = [&](const std::string& msg) -> std::optional<std::string> {
+        if (error) *error = msg;
+        return std::nullopt;
+    };
+    std::string key = modId + "/" + channel;
+    for (const auto& c : impl_->commands) {
+        if (c.key != key) continue;
+        TLModBuffer buf;
+        bool ok;
+        {
+            std::lock_guard<std::mutex> lock(*c.mutex);
+            ok = c.fn(c.user, command.c_str(), &buf);
+        }
+        if (!ok) return fail(key + ": comando recusado");
+        if (buf.data.empty()) return std::string("{}");
+        std::string jsonError;
+        if (!json::Parse(buf.data, &jsonError)) {
+            Log(TLMOD_LOG_ERROR, modId, "comando " + channel + " respondeu JSON inválido: " + jsonError);
+            return fail(key + ": " + jsonError);
+        }
+        return std::move(buf.data);
+    }
+    return fail("canal de comando " + key + " não existe");
+}
+
+bool ModLoader::CatalogReady() const { return impl_->catalog.ready.load(std::memory_order_acquire); }
 
 std::optional<std::string> ModLoader::Query(const std::string& modId, const std::string& channel,
                                             std::string* error) const {
@@ -926,6 +1138,8 @@ size_t ModLoader::LoadAll() {
         auto checkpoint = registry_.Mark();
         size_t subsBefore = impl_->hurtSubs.size();
         size_t providersBefore = impl_->providers.size();
+        size_t framesBefore = impl_->frameSubs.size();
+        size_t commandsBefore = impl_->commands.size();
         ctx->initializing = true;
         int rc = init(&impl_->api, ctx.get());
         ctx->initializing = false;
@@ -934,6 +1148,8 @@ size_t ModLoader::LoadAll() {
             registry_.Rollback(checkpoint);
             impl_->hurtSubs.resize(subsBefore);
             while (impl_->providers.size() > providersBefore) impl_->providers.pop_back();
+            impl_->frameSubs.resize(framesBefore);
+            while (impl_->commands.size() > commandsBefore) impl_->commands.pop_back();
             rec.state = ModState::Failed;
             rec.error = "tlmod_mod_init retornou " + std::to_string(rc);
             Log(TLMOD_LOG_ERROR, rec.manifest.id, rec.error);

@@ -65,6 +65,8 @@ FIELD_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "gui_craft_guide_popup_off": ("", "GUICraftGuidePopup", "instance"),
     "recipe_off": ("Terraria", "Recipe", "instance"),
     "item_snippet_off": ("Terraria.GameContent.UI.Chat", "ItemTagHandler.ItemSnippet", "instance"),
+    "item_id_static_off": ("Terraria.ID", "ItemID", "static"),
+    "npc_id_static_off": ("Terraria.ID", "NPCID", "static"),
 }
 
 # Prefixo de rva::/argc:: (antes do primeiro "_") -> (namespace C#, classe).
@@ -77,6 +79,7 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
     "CreativeUI": ("Terraria.GameContent.Creative", "CreativeUI"),
     "Item": ("Terraria", "Item"),
     "Lang": ("Terraria", "Lang"),
+    "IdDictionary": ("ReLogic.Reflection", "IdDictionary"),
     "GUIInventory": ("", "GUIInventory"),
     "GUIHotbar": ("", "GUIHotbar"),
     "ItemSlot": ("Terraria.UI", "ItemSlot"),

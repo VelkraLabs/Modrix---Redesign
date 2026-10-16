@@ -1,5 +1,7 @@
 #include "tlmod/overlay/panel.h"
 
+#include <algorithm>
+
 #include "json.h"
 #include "json_writer.h"
 #include "tlmod/overlay/config_store.h"
@@ -30,7 +32,7 @@ constexpr const char* kUnknown = "#FF8A93A3";
 constexpr const char* kError = "#FFFF6B6B";
 constexpr const char* kSwitchOn = "#FF5BD17A";
 constexpr const char* kSwitchOff = "#FF4A5568";
-constexpr int kPanelWidthDp = 340;
+constexpr int kPanelWidthDp = 400;  // 4 abas (Mods, Boss Checklist, Log, Ferramentas)
 constexpr int kPanelMaxHeightDp = 440;
 constexpr int kFabSizeDp = 44;
 constexpr int kMarginDp = 12;
@@ -182,6 +184,17 @@ std::vector<ModInfo> LoaderDataSource::Mods() const {
     return out;
 }
 
+std::vector<std::string> LoaderDataSource::PanelMods() const {
+    const std::string suffix = std::string("/") + kModPanelChannel;
+    std::vector<std::string> commands = loader_.CommandChannels(), out;
+    for (const std::string& key : loader_.Providers()) {
+        if (key.size() <= suffix.size() || key.compare(key.size() - suffix.size(), suffix.size(), suffix) != 0) continue;
+        if (std::find(commands.begin(), commands.end(), key) == commands.end()) continue;
+        out.push_back(key.substr(0, key.size() - suffix.size()));
+    }
+    return out;
+}
+
 std::optional<std::string> LoaderDataSource::Query(const std::string& modId, const std::string& channel,
                                                    std::string* error) const {
     return loader_.Query(modId, channel, error);
@@ -205,7 +218,9 @@ void PanelController::SetOpen(bool open) {
 }
 
 void PanelController::SelectTab(Tab tab) {
-    if (tab_ == tab) return;
+    if (tab_ == tab && tab != Tab::ModTab) return;
+    if (tab == Tab::ModTab) return;  // abas de mod: SelectModTab
+    activeMod_.clear();
     tab_ = tab;
     if (tab == Tab::Checklist) checklistDirty_ = true;
     if (tab == Tab::Log) logDirty_ = true;
@@ -238,6 +253,8 @@ bool PanelController::HandleAction(const std::string& action, const std::string&
     else if (action == "tab" && arg == "mods") SelectTab(Tab::Mods);
     else if (action == "tab" && arg == "checklist") SelectTab(Tab::Checklist);
     else if (action == "tab" && arg == "log") SelectTab(Tab::Log);
+    else if (action == "tab" && arg.rfind("mod:", 0) == 0) return SelectModTab(arg.substr(4));
+    else if (action == "mod_command") return ModCommand(arg);
     else if (action == "toggle_mod") return ToggleMod(arg);
     else return false;
     return true;
@@ -247,6 +264,15 @@ void PanelController::RebuildMods() {
     if (!modsLoaded_) {
         mods_ = source_.Mods();  // estado dos mods não muda com o jogo rodando
         modsLoaded_ = true;
+        for (const std::string& id : source_.PanelMods()) {
+            ModTab tab;
+            tab.modId = id;
+            tab.title = id;
+            for (const ModInfo& m : mods_)
+                if (m.id == id) tab.title = m.name;
+            modTabs_.push_back(std::move(tab));
+            RefreshModTab(modTabs_.back());  // título do próprio mod já no primeiro desenho
+        }
     }
     modRows_.clear();
     bool anyPending = false;
@@ -288,6 +314,58 @@ void PanelController::RefreshChecklist() {
     }
 }
 
+ModTab* PanelController::FindModTab(const std::string& modId) {
+    for (ModTab& t : modTabs_)
+        if (t.modId == modId) return &t;
+    return nullptr;
+}
+
+bool PanelController::SelectModTab(const std::string& modId) {
+    if (!modsLoaded_) RebuildMods();
+    ModTab* tab = FindModTab(modId);
+    if (!tab) return false;
+    if (tab_ == Tab::ModTab && activeMod_ == modId) return true;
+    tab_ = Tab::ModTab;
+    activeMod_ = modId;
+    modDirty_ = true;
+    Bump();
+    return true;
+}
+
+bool PanelController::ModCommand(const std::string& command) {
+    ModTab* tab = tab_ == Tab::ModTab ? FindModTab(activeMod_) : nullptr;
+    if (!tab) return false;
+    std::string err;
+    auto reply = source_.Command(tab->modId, kModPanelChannel, command, &err);
+    if (reply) {
+        auto doc = json::Parse(*reply, nullptr);
+        tab->notice = Str(doc ? &*doc : nullptr, "toast");
+    } else {
+        tab->notice = "Não deu certo: " + err;
+    }
+    noticeFresh_ = !tab->notice.empty();
+    modDirty_ = true;  // o estado do mod pode ter mudado: busca já no próximo Tick
+    Bump();
+    return reply.has_value();
+}
+
+void PanelController::RefreshModTab(ModTab& tab) {
+    std::string err;
+    auto text = source_.Query(tab.modId, kModPanelChannel, &err);
+    std::string next = text ? *text : "{}";
+    if (!text && tab.notice.empty()) {
+        tab.notice = "Erro ao ler a aba: " + err;
+        noticeFresh_ = true;
+        Bump();
+    }
+    if (next == tab.content) return;
+    tab.content = std::move(next);
+    auto doc = json::Parse(tab.content, nullptr);
+    std::string title = Str(doc ? &*doc : nullptr, "title");
+    if (!title.empty()) tab.title = title;
+    Bump();
+}
+
 void PanelController::RefreshLog() {
     static const char* const kLevel[] = {"D", "I", "W", "E"};
     LogView next;
@@ -310,6 +388,19 @@ bool PanelController::Tick(int64_t nowMs) {
         RebuildMods();
         Bump();
     }
+    if (open_ && tab_ == Tab::ModTab && (modDirty_ || nowMs - lastModMs_ >= kModTabRefreshMs)) {
+        modDirty_ = false;
+        lastModMs_ = nowMs;
+        if (ModTab* tab = FindModTab(activeMod_)) RefreshModTab(*tab);
+    }
+    // Aviso de uma aba de mod: some sozinho depois de kModNoticeMs.
+    if (noticeFresh_) {
+        noticeFresh_ = false;
+        noticeMs_ = nowMs;
+    } else if (nowMs - noticeMs_ >= kModNoticeMs) {
+        for (ModTab& t : modTabs_)
+            if (!t.notice.empty()) t.notice.clear(), Bump();
+    }
     if (open_ && tab_ == Tab::Checklist &&
         (checklistDirty_ || nowMs - lastChecklistMs_ >= kChecklistRefreshMs)) {
         checklistDirty_ = false;
@@ -329,7 +420,10 @@ std::string PanelController::SnapshotJson() const {
     w.BeginObject();
     w.Key("version").Int(static_cast<int64_t>(version_));
     w.Key("open").Bool(open_);
-    w.Key("tab").String(tab_ == Tab::Mods ? "mods" : tab_ == Tab::Checklist ? "checklist" : "log");
+    w.Key("tab").String(tab_ == Tab::Mods        ? "mods"
+                        : tab_ == Tab::Checklist ? "checklist"
+                        : tab_ == Tab::Log       ? "log"
+                                                 : "mod:" + activeMod_);
     w.Key("title").String("TLMod");
 
     w.Key("theme").BeginObject();
@@ -365,7 +459,25 @@ std::string PanelController::SnapshotJson() const {
     w.BeginObject().Key("id").String("checklist").Key("label").String("Boss Checklist")
         .Key("active").Bool(tab_ == Tab::Checklist).EndObject();
     w.BeginObject().Key("id").String("log").Key("label").String("Log").Key("active").Bool(tab_ == Tab::Log).EndObject();
+    for (const ModTab& t : modTabs_)
+        w.BeginObject().Key("id").String("mod:" + t.modId).Key("label").String(t.title)
+            .Key("active").Bool(tab_ == Tab::ModTab && activeMod_ == t.modId).EndObject();
     w.EndArray();
+
+    // Aba de mod aberta: o JSON do mod vai como está (já validado pelo runtime).
+    w.Key("modtab");
+    const ModTab* open = nullptr;
+    for (const ModTab& t : modTabs_)
+        if (tab_ == Tab::ModTab && t.modId == activeMod_) open = &t;
+    if (open) {
+        w.BeginObject();
+        w.Key("id").String(open->modId);
+        w.Key("notice").String(open->notice);
+        w.Key("content").Raw(open->content.empty() ? "{}" : open->content);
+        w.EndObject();
+    } else {
+        w.Null();
+    }
 
     w.Key("mods").BeginObject();
     w.Key("notice").String(modsNotice_);

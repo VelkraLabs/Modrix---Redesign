@@ -3,7 +3,8 @@
 Painel de mods dentro do jogo: botão flutuante "M", aba **Mods** (estado,
 erro de carga inteiro e liga/desliga), aba **Boss Checklist** (JSON do mod
 `tlmod.boss_checklist`) e aba **Log** (as últimas 150 linhas do log do TLMod,
-com o caminho do `tlmod.log`).
+com o caminho do `tlmod.log`). Mods que registram o canal `panel` (provedor e
+comando) ganham uma aba própria, como **Ferramentas** do `tlmod.devtools`.
 
 ## Técnica: Views Android sobre a Activity do jogo
 
@@ -39,6 +40,13 @@ ações (`toggle_open`, `close`, `tab`, `toggle_mod`). A prévia lê o mesmo JSO
 - **Erro de carga.** O `detail` de um mod que falhou é a mensagem inteira (com
   o `dlerror()` completo). O Java quebra a linha em vez de pôr reticências, e o
   texto é selecionável para copiar.
+- **Aba de mod.** O conteúdo é o JSON do canal `panel` do mod, repassado como
+  está (seções com título, nota, campo de busca e linhas de botões; ver
+  `panel.h`). Atualiza a cada 0,5 s com a aba aberta e logo depois de cada
+  toque. Botões quebram em linhas conforme a largura. O campo de busca é o
+  mesmo `EditText` entre desenhos, e a aba não é redesenhada enquanto ele
+  tem foco, para não perder o texto nem fechar o teclado. A resposta do mod
+  (`toast`) aparece no topo por 4 s.
 - **Aba Log.** Atualiza a cada 1 s com o painel aberto nela. As linhas vão
   num `TextView` só (monoespaçado, vermelho para erro, amarelo para aviso,
   selecionável) e a rolagem acompanha o fim enquanto ela estiver no fim.

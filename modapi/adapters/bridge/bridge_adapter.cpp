@@ -569,6 +569,31 @@ std::optional<std::pair<float, float>> BridgeGameAdapter::LocalPlayerCenter() co
     return std::make_pair(x, y);
 }
 
+std::optional<std::string> BridgeGameAdapter::ContentName(TLModContentKind kind, int32_t id, bool internalName) {
+    if (!TLMod_WaitReady(0) || (kind != TLMOD_CONTENT_ITEM && kind != TLMOD_CONTENT_NPC)) return std::nullopt;
+    char buf[256];
+    int32_t n = TLMod_ContentName(kind == TLMOD_CONTENT_ITEM ? TLMOD_NAME_ITEM : TLMOD_NAME_NPC, id, internalName,
+                                  buf, sizeof(buf));
+    return n < 0 ? std::string() : std::string(buf);
+}
+
+std::optional<std::pair<bool, double>> BridgeGameAdapter::WorldTime() const {
+    bool day = false;
+    double time = 0;
+    if (InWorld() != std::optional<bool>(true) || !TLMod_GetWorldTime(&day, &time)) return std::nullopt;
+    return std::make_pair(day, time);
+}
+
+bool BridgeGameAdapter::SetWorldTime(bool day, double time, bool jump) {
+    return InWorld() == std::optional<bool>(true) && TLMod_SetWorldTime(day, time, jump);
+}
+
+bool BridgeGameAdapter::RestoreLocalPlayer() { return TLMod_RestorePlayer(TLMod_GetLocalPlayer()); }
+
+int32_t BridgeGameAdapter::KillHostileNpcs(float x, float y, float radius) {
+    return TLMod_KillHostileNpcs(x, y, radius);
+}
+
 int32_t BridgeGameAdapter::PlayerLife(TLModPlayer player) const {
     Il2CppObject* p = TLMod_GetPlayerByIndex(player);
     return p ? TLMod_GetStatLife(p) : -1;

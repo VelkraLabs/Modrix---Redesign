@@ -39,6 +39,7 @@ public:
     static constexpr int32_t kVanillaNpcs = 688;
     struct Npc {
         bool active = false;
+        bool friendly = false;  // amigável / da cidade: KillHostileNpcs pula
         TLModNpcState s{};  // só os campos "do jogo" (local[] não existe aqui)
     };
     std::array<Npc, kMaxNpcs> npcs{};
@@ -65,6 +66,56 @@ public:
     int32_t SpawnNpc(int32_t type, float x, float y) override { return NewNpc(type, x, y); }
     std::optional<std::pair<float, float>> playerCenter = std::make_pair(800.0f, 400.0f);  // nullopt = morto
     std::optional<std::pair<float, float>> LocalPlayerCenter() const override { return playerCenter; }
+
+    // --- Ferramentas ------------------------------------------------------------------
+    bool namesReady = true;  // false = o jogo ainda não responde nomes (Lang não carregado)
+    int nameQueries = 0;
+    std::optional<std::string> ContentName(TLModContentKind kind, int32_t id, bool internalName) override {
+        if (!namesReady) return std::nullopt;
+        ++nameQueries;
+        if (kind == TLMOD_CONTENT_ITEM) {
+            if (id <= 0 || id >= kItemCount) return std::string();
+            if (id == 38) return std::string(internalName ? "Lens" : "Lente");
+            if (id == 4956) return std::string(internalName ? "Zenith" : "Z\xc3\xaanite");
+            if (id == 75) return std::string(internalName ? "FallenStar" : "Estrela Cadente");
+            if (id == 5000) return std::string();  // item sem nome (cortado do jogo)
+            return internalName ? "Item" + std::to_string(id) : itemNames[static_cast<size_t>(id)];
+        }
+        if (kind == TLMOD_CONTENT_NPC) {
+            if (id <= 0 || id >= kVanillaNpcs) return std::string();
+            if (id == 4) return std::string(internalName ? "EyeofCthulhu" : "Olho de Cthulhu");
+            if (id == 50) return std::string(internalName ? "KingSlime" : "Rei Slime");
+            return (internalName ? "NPC" : "NPC ") + std::to_string(id);
+        }
+        return std::string();
+    }
+    std::optional<std::pair<bool, double>> worldTime = std::make_pair(true, 1000.0);
+    int timeJumps = 0;
+    std::optional<std::pair<bool, double>> WorldTime() const override { return inWorld == true ? worldTime : std::nullopt; }
+    bool SetWorldTime(bool day, double time, bool jump) override {
+        if (inWorld != true) return false;
+        worldTime = std::make_pair(day, time);
+        timeJumps += jump ? 1 : 0;
+        return true;
+    }
+    int32_t lifeMax = 500, mana = 0, manaMax = 200;
+    bool RestoreLocalPlayer() override {
+        if (local < 0 || local >= static_cast<int>(life.size())) return false;
+        life[static_cast<size_t>(local)] = lifeMax;
+        mana = manaMax;
+        return true;
+    }
+    int32_t KillHostileNpcs(float x, float y, float radius) override {
+        int32_t killed = 0;
+        for (Npc& n : npcs) {
+            if (!n.active || n.friendly) continue;
+            float dx = n.s.x - x, dy = n.s.y - y;
+            if (dx * dx + dy * dy > radius * radius) continue;
+            n.active = false;
+            ++killed;
+        }
+        return killed;
+    }
 
     // NPC.SetDefaults: o jogo de verdade indexa arrays por tipo.
     void SetDefaults(int32_t i, int32_t type) {

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "il2cpp_api.h"
 
@@ -39,6 +40,12 @@ bool ResolveWorldState();
 void InstallWorldStateHooks();
 // true se quem chama é a thread do Main.DoUpdate (depois do primeiro frame).
 bool OnGameThread();
+
+// System.String (UTF-16) -> UTF-8 (save_hooks.cpp). Nulo vira "".
+std::string Utf8String(Il2CppObject* str);
+
+// Ferramentas de teste (tools.cpp): nomes, hora, vida/mana. Opcional.
+bool ResolveTools();
 
 // Itens de mod: SetDefaults/RebuildTooltip (item_hooks.cpp).
 bool ResolveItems();

@@ -270,6 +270,8 @@ __attribute__((noinline)) void NotifyWorldLoaded(TLModSaveCallback cb, bool clou
 // ===========================================================================
 namespace bridge {
 
+std::string Utf8String(Il2CppObject* str) { return Utf8(str); }
+
 bool ResolveSaves() {
     const Il2CppImage* img = Image();
     Il2CppClass* item = api.il2cpp_class_from_name(img, terraria::kNamespace, terraria::kItemClass);

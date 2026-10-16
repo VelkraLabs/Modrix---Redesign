@@ -206,7 +206,7 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     CHECK(doc.has_value());
     CHECK(snap.find("Próximo: Skeletron") != std::string::npos);  // acentos em UTF-8, sem escape
     CHECK(doc && *doc->Get("tab")->AsString() == "checklist" && *doc->Get("open")->AsBool());
-    CHECK(doc && doc->Get("theme")->Get("defeated") && *doc->Get("theme")->Get("panel_width_dp")->AsNumber() == 340);
+    CHECK(doc && doc->Get("theme")->Get("defeated") && *doc->Get("theme")->Get("panel_width_dp")->AsNumber() == 400);
     CHECK(doc && doc->Get("mods")->Get("rows")->AsArray()->size() == 3);
 }
 
@@ -288,6 +288,66 @@ static void TestErrorAndLog(const fs::path& tmp) {
     if (!std::getenv("TLMOD_VERBOSE")) rt::SetLogSink(&QuietSink);
 }
 
+// Aba de mod: o tlmod.devtools real ganha a aba "Ferramentas" e recebe os toques.
+static void TestModTab(const fs::path& modsSrc, const fs::path& tmp) {
+    std::printf("\n== aba de mod (Ferramentas)\n");
+    fs::path mods = tmp / "mods_tools";
+    fs::create_directories(mods);
+    for (const char* m : {"devtools", "example_item"})
+        fs::copy(modsSrc / m, mods / m, fs::copy_options::recursive);
+    FakeGame game;
+    game.vanilla[TLMOD_CONTENT_ITEM] = FakeGame::kItemCount;
+    game.vanilla[TLMOD_CONTENT_NPC] = FakeGame::kVanillaNpcs;
+    rt::ModLoader loader(&game);
+    loader.DiscoverDirectory(mods);
+    CHECK(loader.LoadAll() == 2);
+    for (int i = 0; i < 40 && !loader.CatalogReady(); ++i) game.Frame();
+
+    overlay::LoaderDataSource source(loader);
+    CHECK(source.PanelMods() == std::vector<std::string>{"tlmod.devtools"});
+    overlay::ConfigStore config(tmp / "cfg_tools" / "tlmod_config.json");
+    PanelController panel(source, config);
+    panel.Tick(0);
+    CHECK(panel.ModTabs().size() == 1 && panel.ModTabs()[0].title == "Ferramentas");
+    auto snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    const auto& tabs = *snap->Get("tabs")->AsArray();
+    CHECK(tabs.size() == 4 && *tabs[3].Get("id")->AsString() == "mod:tlmod.devtools" &&
+          *tabs[3].Get("label")->AsString() == "Ferramentas");
+    CHECK(snap->Get("modtab")->IsNull());
+
+    CHECK(panel.HandleAction("toggle_open", "") && panel.HandleAction("tab", "mod:tlmod.devtools"));
+    CHECK(!panel.HandleAction("tab", "mod:nao.existe"));
+    CHECK(panel.ActiveTab() == Tab::ModTab && panel.ActiveModTab() == "tlmod.devtools");
+    panel.Tick(10);
+    snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    CHECK(snap && *snap->Get("tab")->AsString() == "mod:tlmod.devtools");
+    const rt::json::Value* content = snap->Get("modtab")->Get("content");
+    CHECK(content && content->Get("sections")->AsArray()->size() == 4);
+    CHECK(*(*content->Get("sections")->AsArray())[3].Get("search")->Get("id")->AsString() == "item");
+
+    // Busca pelo campo do painel e toque num botão: o mod recebe o texto e responde.
+    CHECK(panel.HandleAction("mod_command", "search item lente"));
+    CHECK(panel.Tick(20) && panel.SnapshotJson().find("\"give 38 10\"") != std::string::npos);
+    game.inWorld = true;
+    CHECK(panel.HandleAction("mod_command", "give 38 10"));
+    CHECK(panel.ModTabs()[0].notice == "10x Lente no invent\xc3\xa1rio");
+    CHECK(!panel.HandleAction("mod_command", "abracadabra") &&
+          panel.ModTabs()[0].notice.rfind("N\xc3\xa3o deu certo", 0) == 0);
+    panel.Tick(30);
+    CHECK(!panel.ModTabs()[0].notice.empty());
+    panel.Tick(30 + PanelController::kModNoticeMs);
+    CHECK(panel.ModTabs()[0].notice.empty());  // o aviso some sozinho
+    // A aba acompanha o estado do mod (aqui, a hora que o jogo andou).
+    game.Frame();
+    std::string before = panel.SnapshotJson();
+    game.worldTime->second += 3600;
+    game.Frame();
+    CHECK(panel.Tick(30 + PanelController::kModNoticeMs + PanelController::kModTabRefreshMs) &&
+          panel.SnapshotJson() != before);
+    // Outra aba: comando não vai para lugar nenhum.
+    CHECK(panel.HandleAction("tab", "mods") && panel.ActiveModTab().empty() && !panel.HandleAction("mod_command", "heal"));
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -308,6 +368,7 @@ int main(int argc, char** argv) {
     TestPanel(mods, tmp);
     TestChecklistNotLoaded(mods, tmp);
     TestErrorAndLog(tmp);
+    TestModTab(argv[1], tmp);
     fs::remove_all(tmp);
     std::printf("\n%d checks, %d falha%s: %s\n", g_checks, g_failures, g_failures == 1 ? "" : "s",
                 g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM");

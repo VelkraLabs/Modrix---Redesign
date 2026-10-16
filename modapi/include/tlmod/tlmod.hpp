@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "tlmod_api.h"
 
@@ -64,6 +65,21 @@ public:
 private:
     friend class Host;
     const TLModHostApi* api_ = nullptr;  // preenchido por Host::Provide
+};
+
+// Comandos da interface (ver TLModCommandFn): Handle roda em qualquer thread.
+class CommandHandler {
+public:
+    virtual ~CommandHandler() = default;
+    // true = aceito. `json` (opcional) é a resposta, um documento JSON.
+    virtual bool Handle(const std::string& command, std::string& json) = 0;
+};
+
+// Uma vez por frame na thread do jogo (menu e mundo).
+class FrameListener {
+public:
+    virtual ~FrameListener() = default;
+    virtual void OnFrame() = 0;
 };
 
 class Host {
@@ -148,6 +164,43 @@ public:
         return HasSpawnNearApi() && api_->spawn_npc_near_player(ctx_, type, dx, dy);
     }
 
+    // --- Ferramentas (ver tlmod_api.h). Sem suporte no runtime: false/-1. ---
+    // `listener`/`handler` precisam viver enquanto o jogo roda.
+    bool OnFrame(FrameListener* listener) const {
+        return HasToolsApi() && listener && api_->subscribe_frame(ctx_, &FrameTrampoline, listener);
+    }
+    bool Commands(const std::string& channel, CommandHandler* handler) const {
+        if (!HasToolsApi() || !handler) return false;
+        handler_api_ = api_;
+        return api_->register_command(ctx_, channel.c_str(), &CommandTrampoline, handler);
+    }
+    // -1 = sem nome, -2 = catálogo ainda não pronto; senão o nome em `out`.
+    int32_t ContentName(TLModContentKind kind, TLModId id, bool internalName, std::string& out) const {
+        if (!HasToolsApi()) return -1;
+        char buf[256];
+        int32_t n = api_->content_name(ctx_, kind, id, internalName, buf, sizeof(buf));
+        if (n >= 0) out.assign(buf, static_cast<size_t>(n) < sizeof(buf) ? static_cast<size_t>(n) : sizeof(buf) - 1);
+        return n;
+    }
+    // IDs com nome; -2 em `status` se o catálogo ainda não está pronto.
+    std::vector<TLModId> ContentIds(TLModContentKind kind, int32_t* status = nullptr) const {
+        std::vector<TLModId> ids;
+        int32_t n = HasToolsApi() ? api_->content_ids(ctx_, kind, nullptr, 0) : -1;
+        if (status) *status = n;
+        if (n > 0) {
+            ids.resize(static_cast<size_t>(n));
+            n = api_->content_ids(ctx_, kind, ids.data(), n);
+            ids.resize(static_cast<size_t>(n > 0 ? n : 0));
+        }
+        return ids;
+    }
+    bool GetTime(bool& day, double& time) const { return HasToolsApi() && api_->get_time(ctx_, &day, &time); }
+    bool SetTime(bool day, double time, bool jump) const {
+        return HasToolsApi() && api_->set_time(ctx_, day, time, jump);
+    }
+    bool HealPlayer() const { return HasToolsApi() && api_->heal_player(ctx_); }
+    int32_t KillHostileNpcs(float radius) const { return HasToolsApi() ? api_->kill_hostile_npcs(ctx_, radius) : -1; }
+
     bool OnPlayerHurt(TLModPlayerHurtFn fn, void* user = nullptr) const {
         return api_->subscribe_player_hurt(ctx_, fn, user);
     }
@@ -168,6 +221,17 @@ private:
     bool HasGiveApi() const {
         return api_->struct_size >= offsetof(TLModHostApi, give_item) + sizeof(api_->give_item);
     }
+    bool HasToolsApi() const {
+        return api_->struct_size >= offsetof(TLModHostApi, kill_hostile_npcs) + sizeof(api_->kill_hostile_npcs);
+    }
+    static void FrameTrampoline(void* user) { static_cast<FrameListener*>(user)->OnFrame(); }
+    static bool CommandTrampoline(void* user, const char* command, TLModBuffer* out) {
+        std::string json;
+        if (!static_cast<CommandHandler*>(user)->Handle(command ? command : "", json)) return false;
+        if (!json.empty()) handler_api_->buffer_append(out, json.data(), json.size());
+        return true;
+    }
+    static inline const TLModHostApi* handler_api_ = nullptr;  // um runtime por processo
     bool HasSpawnNearApi() const {
         return api_->struct_size >=
                offsetof(TLModHostApi, spawn_npc_near_player) + sizeof(api_->spawn_npc_near_player);

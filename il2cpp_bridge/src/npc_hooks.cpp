@@ -37,6 +37,13 @@ struct NpcResolved {
     size_t defense = terraria::npc_off::defense;
     size_t life = terraria::npc_off::life;
     size_t lifeMax = terraria::npc_off::lifeMax;
+    // Ferramentas de teste (TLMod_KillHostileNpcs); opcionais.
+    size_t width = terraria::npc_off::width;
+    size_t height = terraria::npc_off::height;
+    size_t friendly = terraria::npc_off::friendly;
+    size_t townNPC = terraria::npc_off::townNPC;
+    size_t dontTakeDamage = terraria::npc_off::dontTakeDamage;
+    const MethodInfo* strike = nullptr;  // double StrikeNPCNoInteraction(int, float, int, bool, bool, bool)
 };
 NpcResolved n;
 
@@ -97,6 +104,13 @@ bool ResolveNpc() {
     n.defense = FieldOffset(n.klass, "defense", terraria::npc_off::defense);
     n.life = FieldOffset(n.klass, "life", terraria::npc_off::life);
     n.lifeMax = FieldOffset(n.klass, "lifeMax", terraria::npc_off::lifeMax);
+    n.width = FieldOffset(n.klass, "width", terraria::npc_off::width);
+    n.height = FieldOffset(n.klass, "height", terraria::npc_off::height);
+    n.friendly = FieldOffset(n.klass, "friendly", terraria::npc_off::friendly);
+    n.townNPC = FieldOffset(n.klass, "townNPC", terraria::npc_off::townNPC);
+    n.dontTakeDamage = FieldOffset(n.klass, "dontTakeDamage", terraria::npc_off::dontTakeDamage);
+    n.strike = api.il2cpp_class_get_method_from_name(n.klass, "StrikeNPCNoInteraction",
+                                                     terraria::argc::NPC_StrikeNPCNoInteraction);
 
     // static NPC[] Main.npc (static_fields+0x5B0 no dump)
     n.mainNpcField = api.il2cpp_class_get_field_from_name(MainClass(), "npc");
@@ -208,6 +222,38 @@ int32_t TLMod_SpawnNpc(int32_t x, int32_t y, int32_t type) {
         return terraria::kMaxNPCs;
     }
     return *static_cast<int32_t*>(api.il2cpp_object_unbox(boxed));
+}
+
+int32_t TLMod_KillHostileNpcs(float x, float y, float radius) {
+    if (!Resolved() || !n.strike) return 0;
+    int32_t killed = 0;
+    const float r2 = radius * radius;
+    for (int32_t i = 0; i < terraria::kMaxNPCs; ++i) {
+        Il2CppObject* npc = TLMod_GetNpcByIndex(i);
+        if (!npc || !FieldAt<bool>(npc, n.active)) continue;
+        if (FieldAt<bool>(npc, n.friendly) || FieldAt<bool>(npc, n.townNPC) || FieldAt<bool>(npc, n.dontTakeDamage))
+            continue;
+        const int32_t lifeMax = FieldAt<int32_t>(npc, n.lifeMax);
+        if (lifeMax <= 5) continue;  // bichinhos (coelho, pássaro...): têm 5 de vida
+        float cx = FieldAt<float>(npc, n.position) + FieldAt<int32_t>(npc, n.width) * 0.5f;
+        float cy = FieldAt<float>(npc, n.position + 4) + FieldAt<int32_t>(npc, n.height) * 0.5f;
+        if ((cx - x) * (cx - x) + (cy - y) * (cy - y) > r2) continue;
+        // Dano maior que qualquer vida + defesa; o jogo cuida de morte, loot e
+        // partes (minhocas dividem a vida pelo realLife).
+        int32_t damage = lifeMax > 100000000 ? 2000000000 : lifeMax * 10 + 1000000;
+        float knockback = 0.0f;
+        int32_t dir = 0;
+        bool crit = false, noEffect = false, fromNet = false;
+        void* params[] = {&damage, &knockback, &dir, &crit, &noEffect, &fromNet};
+        Il2CppException* exc = nullptr;
+        api.il2cpp_runtime_invoke(n.strike, npc, params, &exc);
+        if (exc) {
+            bridge::LogException("NPC.StrikeNPCNoInteraction", exc);
+            continue;
+        }
+        if (!FieldAt<bool>(npc, n.active) || FieldAt<int32_t>(npc, n.life) <= 0) ++killed;
+    }
+    return killed;
 }
 
 // ---------------------------------------------------------------------------

@@ -43,6 +43,7 @@ struct MethodInfo {
     X(FieldInfo*, il2cpp_class_get_field_from_name, (Il2CppClass*, const char*))            \
     X(size_t, il2cpp_field_get_offset, (FieldInfo*))                                        \
     X(void, il2cpp_field_static_get_value, (FieldInfo*, void*))                             \
+    X(void, il2cpp_field_static_set_value, (FieldInfo*, void*))                             \
     X(const MethodInfo*, il2cpp_class_get_method_from_name, (Il2CppClass*, const char*, int)) \
     X(Il2CppObject*, il2cpp_runtime_invoke,                                                 \
       (const MethodInfo*, void*, void**, Il2CppException**))                                \

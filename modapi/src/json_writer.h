@@ -26,6 +26,8 @@ public:
     JsonWriter& Bool(bool v) { Sep(); out_ += v ? "true" : "false"; return *this; }
     JsonWriter& Int(int64_t v) { Sep(); out_ += std::to_string(v); return *this; }
     JsonWriter& Null() { Sep(); out_ += "null"; return *this; }
+    // Valor JSON pronto (quem chama garante que é válido, ex.: já passou por json::Parse).
+    JsonWriter& Raw(const std::string& json) { Sep(); out_ += json; return *this; }
 
     const std::string& str() const { return out_; }
 

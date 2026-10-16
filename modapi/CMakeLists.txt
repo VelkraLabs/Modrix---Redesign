@@ -43,6 +43,7 @@ set(TLMOD_MODS_OUTPUT_DIR ${CMAKE_BINARY_DIR}/dist/mods)
 add_subdirectory(mods/example_item)
 add_subdirectory(mods/example_boss)
 add_subdirectory(mods/boss_checklist)
+add_subdirectory(mods/devtools)
 
 # --- Adaptador sobre a ponte IL2CPP -----------------------------------------
 if(TLMOD_WITH_BRIDGE)
@@ -118,7 +119,7 @@ if(NOT ANDROID)
   target_compile_options(runtime_test PRIVATE ${TLMOD_WARNINGS})
   find_package(Threads REQUIRED)
   target_link_libraries(runtime_test PRIVATE tlmod_runtime Threads::Threads)
-  add_dependencies(runtime_test example_item example_boss boss_checklist)
+  add_dependencies(runtime_test example_item example_boss boss_checklist devtools)
   target_include_directories(runtime_test PRIVATE src)  # json.h, para conferir a saída
   add_test(NAME runtime_test COMMAND runtime_test ${TLMOD_MODS_OUTPUT_DIR})
 
@@ -127,7 +128,7 @@ if(NOT ANDROID)
   target_compile_options(overlay_test PRIVATE ${TLMOD_WARNINGS})
   target_include_directories(overlay_test PRIVATE src)
   target_link_libraries(overlay_test PRIVATE tlmod_overlay)
-  add_dependencies(overlay_test example_item example_boss boss_checklist)
+  add_dependencies(overlay_test example_item example_boss boss_checklist devtools)
   add_test(NAME overlay_test COMMAND overlay_test ${TLMOD_MODS_OUTPUT_DIR})
 
   # View-models para a prévia em PNG (overlay/preview/render_preview.py).

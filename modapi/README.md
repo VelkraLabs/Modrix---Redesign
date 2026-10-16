@@ -393,6 +393,41 @@ Nenhum dos dois precisa de hook.
 
 Os dois são gerados por `tools/make_example_textures.py`.
 
+## Ferramentas e abas no painel
+
+API acrescentada ao fim da `TLModHostApi` (o `tlmod.hpp` confere o `struct_size`):
+
+| função | thread | o que faz |
+|---|---|---|
+| `subscribe_frame(fn)` | init | `fn` roda uma vez por frame na thread do jogo (menu e mundo) |
+| `register_command(channel, fn)` | init | recebe comandos de texto da interface; responde JSON (`{"toast": ...}`) |
+| `content_name(kind, id, internal)` | qualquer | nome de item ou NPC, original ou de mod: no idioma do jogo ou o interno (`Zenith`, `mod:nome`) |
+| `content_ids(kind)` | qualquer | todos os IDs com nome, originais e de mod |
+| `get_time` / `set_time(day, time, jump)` | jogo | `Main.dayTime`/`Main.time`; `jump` = `Main.SkipToTime`, como o poder da Jornada |
+| `heal_player` | jogo | vida e mana cheias |
+| `kill_hostile_npcs(radius)` | jogo | `StrikeNPCNoInteraction` (com loot) nos hostis perto do jogador |
+
+Os nomes vêm de um catálogo que o runtime monta nos primeiros frames (256 IDs por frame, pelo
+`Lang` e pelo `ItemID/NPCID.Search` do jogo); até ficar pronto, `content_name` de um ID original
+devolve `-2`.
+
+**Aba própria no painel.** Um mod que registra provedor **e** comando no canal `panel` ganha uma aba.
+O provedor descreve a aba em JSON; o painel desenha e devolve os toques como comandos:
+
+```json
+{"title": "Ferramentas", "sections": [
+  {"title": "Hora do dia", "note": "Agora: 12:00 (dia)",
+   "rows": [{"buttons": [{"label": "Meio-dia", "command": "time noon"},
+                         {"label": "Congelar hora", "command": "freeze", "active": true}]}]},
+  {"title": "Dar item", "search": {"id": "item", "placeholder": "Nome ou ID", "query": "estrela"},
+   "rows": [{"text": "Estrela Cadente", "detail": "ID 75 · FallenStar",
+             "buttons": [{"label": "+10", "command": "give 75 10"}]}]}]}
+```
+
+O botão manda o texto de `command`; o campo de busca manda `search <id> <texto>`. Comandos chegam na
+thread da UI: o que mexe no jogo vai para uma fila atendida no `subscribe_frame`. Veja
+[`mods/devtools`](mods/devtools/README.md).
+
 ## Itens de mod no save
 
 O jogo grava o ID numérico do item (`netID`) no arquivo. Um ID de mod (8192+) muda quando o

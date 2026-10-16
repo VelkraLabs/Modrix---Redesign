@@ -1,7 +1,9 @@
 package com.tlmod.overlay;
 
 import android.app.Activity;
+import android.content.Context;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
@@ -10,7 +12,12 @@ import android.os.SystemClock;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.InputType;
 import android.text.style.ForegroundColorSpan;
+import android.view.KeyEvent;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -24,6 +31,9 @@ import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Renderizador do painel do TLMod: Views Android presas à janela da Activity
@@ -56,6 +66,9 @@ public final class TLModOverlay {
     private LinearLayout content;
     private LinearLayout tabsRow;
     private String renderedTab = "";
+    // Campos de busca das abas de mod, reaproveitados entre desenhos para não
+    // perder o texto digitado nem o foco (chave: "<mod>/<id da busca>").
+    private final Map<String, EditText> searchFields = new HashMap<>();
     private long renderedVersion = -1;
     private JSONObject theme;
 
@@ -93,7 +106,9 @@ public final class TLModOverlay {
 
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
-            if (nativeTick(handle, SystemClock.uptimeMillis())) {
+            // Enquanto um campo de busca está sendo editado, a aba não é redesenhada
+            // (recriar as Views fecharia o teclado); o desenho alcança depois.
+            if (nativeTick(handle, SystemClock.uptimeMillis()) && !editingSearch()) {
                 JSONObject snap = snapshot();
                 if (snap != null) render(snap);
             }
@@ -109,7 +124,23 @@ public final class TLModOverlay {
         }
     }
 
+    private boolean editingSearch() {
+        for (EditText e : searchFields.values())
+            if (e.hasFocus()) return true;
+        return false;
+    }
+
+    private void hideKeyboard() {
+        for (EditText e : searchFields.values()) {
+            if (!e.hasFocus()) continue;
+            InputMethodManager imm = (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) imm.hideSoftInputFromWindow(e.getWindowToken(), 0);
+            e.clearFocus();
+        }
+    }
+
     private void act(String action, String arg) {
+        hideKeyboard();
         nativeAction(handle, action, arg);
         nativeTick(handle, SystemClock.uptimeMillis());  // resposta imediata ao toque
         JSONObject snap = snapshot();
@@ -259,6 +290,7 @@ public final class TLModOverlay {
         content.removeAllViews();
         if ("mods".equals(tabId)) renderMods(s.optJSONObject("mods"));
         else if ("log".equals(tabId)) renderLog(s.optJSONObject("log"));
+        else if (tabId.startsWith("mod:")) renderModTab(s.optJSONObject("modtab"));
         else renderChecklist(s.optJSONObject("checklist"));
         if (follow) {
             scroll.post(new Runnable() {
@@ -313,6 +345,152 @@ public final class TLModOverlay {
             row.addView(sw);
             addRow(row, 6);
         }
+    }
+
+    // ------------------------------------------------------------------------
+    // Aba de um mod: seções com nota, campo de busca e linhas de botões, tudo
+    // descrito pelo JSON do mod (ver panel.h, struct ModTab).
+    private void renderModTab(JSONObject tab) {
+        if (tab == null) return;
+        String notice = tab.optString("notice");
+        if (!TextUtils.isEmpty(notice)) {
+            TextView n = text(notice, "small_sp", "accent", true);
+            n.setPadding(dp(4), 0, dp(4), dp(8));
+            content.addView(n);
+        }
+        JSONObject c = tab.optJSONObject("content");
+        JSONArray sections = c != null ? c.optJSONArray("sections") : null;
+        final String modId = tab.optString("id");
+        for (int i = 0; sections != null && i < sections.length(); i++) {
+            JSONObject sec = sections.optJSONObject(i);
+            if (sec == null) continue;
+            TextView h = text(sec.optString("title").toUpperCase(), "small_sp", "text_dim", true);
+            h.setPadding(dp(4), dp(i == 0 ? 0 : 10), 0, dp(4));
+            content.addView(h);
+            JSONObject search = sec.optJSONObject("search");
+            if (search != null) addRow(searchRow(modId, search), 4);
+            String note = sec.optString("note");
+            if (!TextUtils.isEmpty(note)) {
+                TextView nt = text(note, "small_sp", "text_dim", false);
+                nt.setPadding(dp(4), 0, dp(4), dp(4));
+                content.addView(nt);
+            }
+            JSONArray rows = sec.optJSONArray("rows");
+            for (int r = 0; rows != null && r < rows.length(); r++) {
+                JSONObject row = rows.optJSONObject(r);
+                if (row != null) addRow(modRow(row), 4);
+            }
+        }
+    }
+
+    private View modRow(JSONObject row) {
+        String title = row.optString("text");
+        String detail = row.optString("detail");
+        JSONArray buttons = row.optJSONArray("buttons");
+        int nButtons = buttons != null ? buttons.length() : 0;
+        LinearLayout box = new LinearLayout(activity);
+        box.setPadding(dp(10), dp(6), dp(8), dp(6));
+        box.setBackground(rounded(color("row_bg"), 8, 0));
+        LinearLayout texts = new LinearLayout(activity);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        if (!TextUtils.isEmpty(title)) texts.addView(line(title, "text_sp", "text", false));
+        if (!TextUtils.isEmpty(detail)) texts.addView(line(detail, "small_sp", "text_dim", false));
+        boolean hasText = texts.getChildCount() > 0;
+        if (hasText && nButtons <= 3) {  // texto à esquerda, poucos botões na mesma linha
+            box.setGravity(Gravity.CENTER_VERTICAL);
+            box.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            for (int b = 0; b < nButtons; b++) box.addView(chip(buttons.optJSONObject(b)), chipParams());
+            return box;
+        }
+        box.setOrientation(LinearLayout.VERTICAL);  // muitos botões: quebram em linhas
+        if (hasText) box.addView(texts);
+        int avail = dp(theme.optInt("panel_width_dp", 400)) - dp(10) * 2 - dp(18);
+        LinearLayout lineView = null;
+        int used = 0;
+        Paint paint = new Paint();
+        paint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, theme.optInt("small_sp", 12),
+                activity.getResources().getDisplayMetrics()));
+        for (int b = 0; b < nButtons; b++) {
+            JSONObject spec = buttons.optJSONObject(b);
+            int w = (int) paint.measureText(spec != null ? spec.optString("label") : "") + dp(20) + dp(6);
+            if (lineView == null || used + w > avail) {
+                lineView = new LinearLayout(activity);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.topMargin = dp(4);
+                box.addView(lineView, lp);
+                used = 0;
+            }
+            lineView.addView(chip(spec), chipParams());
+            used += w;
+        }
+        return box;
+    }
+
+    private LinearLayout.LayoutParams chipParams() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = dp(6);
+        return lp;
+    }
+
+    /** Botão do mod: toque manda o texto de "command"; "active" = ligado (cor de destaque). */
+    private TextView chip(final JSONObject spec) {
+        boolean active = spec != null && spec.optBoolean("active");
+        TextView b = text(spec != null ? spec.optString("label") : "?", "small_sp", active ? "panel_bg" : "text", true);
+        b.setSingleLine(true);
+        b.setPadding(dp(10), dp(5), dp(10), dp(5));
+        b.setBackground(rounded(color(active ? "switch_on" : "tab_active_bg"), 12, 0));
+        if (spec != null) {
+            b.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { act("mod_command", spec.optString("command")); }
+            });
+        }
+        return b;
+    }
+
+    /** Campo de busca + botão Buscar. Manda "search <id> <texto>" ao mod. */
+    private View searchRow(String modId, JSONObject spec) {
+        final String id = spec.optString("id");
+        String key = modId + "/" + id;
+        EditText field = searchFields.get(key);
+        if (field == null) {
+            field = new EditText(activity);
+            field.setSingleLine(true);
+            field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+            field.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+            field.setTextColor(color("text"));
+            field.setHintTextColor(color("text_dim"));
+            field.setTextSize(TypedValue.COMPLEX_UNIT_SP, theme.optInt("text_sp", 14));
+            field.setBackground(rounded(color("row_bg"), 8, color("panel_border")));
+            field.setPadding(dp(10), dp(6), dp(10), dp(6));
+            field.setText(spec.optString("query"));
+            final EditText f = field;
+            field.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+                @Override public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
+                    act("mod_command", "search " + id + " " + f.getText().toString().trim());
+                    return true;
+                }
+            });
+            searchFields.put(key, field);
+        } else if (field.getParent() != null) {
+            ((ViewGroup) field.getParent()).removeView(field);
+        }
+        field.setHint(spec.optString("placeholder"));
+        LinearLayout row = new LinearLayout(activity);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(field, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        final EditText f = field;
+        TextView go = text("Buscar", "small_sp", "text", true);
+        go.setPadding(dp(12), dp(8), dp(12), dp(8));
+        go.setBackground(rounded(color("tab_active_bg"), 8, 0));
+        go.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                act("mod_command", "search " + id + " " + f.getText().toString().trim());
+            }
+        });
+        row.addView(go, chipParams());
+        return row;
     }
 
     private void renderLog(JSONObject log) {

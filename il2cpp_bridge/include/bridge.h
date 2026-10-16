@@ -187,6 +187,35 @@ int32_t TLMod_FindNpcIndex(Il2CppObject* npc);       // posição em Main.npc[] 
 int32_t TLMod_SpawnNpc(int32_t x, int32_t y, int32_t type);
 
 // ===========================================================================
+// Ferramentas de teste (mod tlmod.devtools). Todas só na thread do jogo.
+// ===========================================================================
+
+// Nome de um item ou NPC original. internalName = false: o do idioma do jogo
+// (Lang.GetItemNameValue / GetNPCNameValue); true: o interno, em inglês, sem
+// espaços (ItemID.Search / NPCID.Search, ex.: "Zenith", "EyeofCthulhu").
+// Copia até size-1 bytes em UTF-8 (com \0) e devolve o tamanho do nome inteiro;
+// -1 se o tipo não tem nome ou a ponte não está pronta.
+typedef enum TLModNameKind { TLMOD_NAME_ITEM = 0, TLMOD_NAME_NPC = 1 } TLModNameKind;
+int32_t TLMod_ContentName(TLModNameKind kind, int32_t type, bool internalName, char* buf, int32_t size);
+
+// Hora do mundo: Main.dayTime e Main.time (ticks desde 4:30 se dia, desde
+// 19:30 se noite; o dia tem 54000 ticks e a noite 32400).
+bool TLMod_GetWorldTime(bool* day, double* time);
+// jump = true: Main.SkipToTime, como o poder de hora da Jornada (dispara o que
+// a virada de dia/noite dispara). false: só grava os dois campos (para segurar
+// a hora parada a cada frame).
+bool TLMod_SetWorldTime(bool day, double time, bool jump);
+
+// Vida e mana cheias (statLife = statLifeMax2, statMana = statManaMax2).
+bool TLMod_RestorePlayer(Il2CppObject* player);
+
+// Mata, pelo caminho normal do jogo (NPC.StrikeNPCNoInteraction, com loot), os
+// NPCs hostis ativos cujo centro está a até `radius` pixels de (x, y). Pula
+// amigáveis, NPCs da cidade, invulneráveis (dontTakeDamage) e bichinhos
+// (lifeMax <= 5). Devolve quantos morreram.
+int32_t TLMod_KillHostileNpcs(float x, float y, float radius);
+
+// ===========================================================================
 // Estado do mundo / frame
 // ===========================================================================
 

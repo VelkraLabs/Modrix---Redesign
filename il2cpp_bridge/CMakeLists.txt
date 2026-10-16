@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 
-set(BRIDGE_SOURCES src/log.cpp src/il2cpp_api.cpp src/bridge.cpp src/npc_hooks.cpp src/world_state.cpp src/save_hooks.cpp
+set(BRIDGE_SOURCES src/log.cpp src/il2cpp_api.cpp src/tools.cpp src/bridge.cpp src/npc_hooks.cpp src/world_state.cpp src/save_hooks.cpp
   src/item_hooks.cpp src/item_traits.cpp src/draw_hooks.cpp
   src/screen_hooks.cpp)
 set(BRIDGE_WARNINGS -Wall -Wextra -Werror)

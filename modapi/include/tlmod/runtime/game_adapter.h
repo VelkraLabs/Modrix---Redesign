@@ -129,6 +129,17 @@ public:
     // inativo ou morto. Só na thread do jogo.
     virtual std::optional<std::pair<float, float>> LocalPlayerCenter() const = 0;
 
+    // --- Ferramentas de teste (mod tlmod.devtools). Só na thread do jogo. ---
+    // Nome de item/NPC original: no idioma do jogo ou o interno. nullopt = o
+    // jogo ainda não pode responder (tentar num próximo frame); "" = sem nome.
+    virtual std::optional<std::string> ContentName(TLModContentKind kind, int32_t id, bool internalName) = 0;
+    // (dia?, ticks) de Main.dayTime/Main.time; nullopt sem mundo.
+    virtual std::optional<std::pair<bool, double>> WorldTime() const = 0;
+    virtual bool SetWorldTime(bool day, double time, bool jump) = 0;
+    virtual bool RestoreLocalPlayer() = 0;  // vida e mana cheias
+    // NPCs hostis mortos a até `radius` px de (x, y); ver tlmod_api.h.
+    virtual int32_t KillHostileNpcs(float x, float y, float radius) = 0;
+
     // --- Estado do mundo -----------------------------------------------------
     // Precisam ser seguros em QUALQUER thread (a UI consulta fora da thread do
     // jogo). nullopt = desconhecido.

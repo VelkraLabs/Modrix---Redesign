@@ -43,6 +43,13 @@ public:
     // Últimas linhas do log (da mais antiga para a mais nova) e o arquivo onde ele é gravado.
     virtual std::vector<rt::LogEntry> LogTail(size_t /*max*/) const { return {}; }
     virtual std::string LogFile() const { return {}; }
+    // Mods com aba própria no painel: provedor E canal de comando "panel".
+    virtual std::vector<std::string> PanelMods() const { return {}; }
+    virtual std::optional<std::string> Command(const std::string& /*modId*/, const std::string& /*channel*/,
+                                               const std::string& /*command*/, std::string* error) const {
+        if (error) *error = "sem canal de comando";
+        return std::nullopt;
+    }
 };
 
 // Fonte real: lê do ModLoader (depois de LoadAll).
@@ -54,6 +61,11 @@ public:
                                      std::string* error) const override;
     std::vector<rt::LogEntry> LogTail(size_t max) const override { return rt::RecentLog(max); }
     std::string LogFile() const override { return rt::LogFilePath().string(); }
+    std::vector<std::string> PanelMods() const override;
+    std::optional<std::string> Command(const std::string& modId, const std::string& channel,
+                                       const std::string& command, std::string* error) const override {
+        return loader_.Command(modId, channel, command, error);
+    }
 
 private:
     const rt::ModLoader& loader_;
@@ -62,7 +74,7 @@ private:
 // ---------------------------------------------------------------------------
 // View-model
 // ---------------------------------------------------------------------------
-enum class Tab { Mods, Checklist, Log };
+enum class Tab { Mods, Checklist, Log, ModTab };
 
 struct ModRow {
     std::string id;
@@ -107,6 +119,20 @@ struct LogView {
     std::vector<LogLine> lines;   // da mais antiga para a mais nova
 };
 
+// Aba de um mod (ex.: tlmod.devtools). O conteúdo é o JSON do canal "panel"
+// do mod, já validado, repassado ao renderizador como está:
+//   {"title": "...", "sections": [{"title", "note", "search": {"id", "placeholder", "query"},
+//     "rows": [{"text", "detail", "buttons": [{"label", "command", "active"}]}]}]}
+// Um toque num botão manda o texto de "command" de volta ao mod; o campo de
+// busca manda "search <id> <texto>".
+struct ModTab {
+    std::string modId;
+    std::string title;    // "title" do JSON do mod; o nome do mod se faltar
+    std::string content;  // JSON do canal "panel" (objeto)
+    std::string notice;   // "toast" da última resposta, ou erro
+};
+constexpr const char* kModPanelChannel = "panel";
+
 // Canal do Boss Checklist que o painel consome.
 constexpr const char* kChecklistMod = "tlmod.boss_checklist";
 constexpr const char* kChecklistChannel = "checklist";
@@ -118,6 +144,9 @@ public:
     // Aba Log: quantas linhas e de quanto em quanto tempo, com o painel aberto nela.
     static constexpr size_t kLogTailLines = 150;
     static constexpr int64_t kLogRefreshMs = 1000;
+    // Abas de mod: atualização com o painel aberto nelas, e quanto tempo o aviso fica.
+    static constexpr int64_t kModTabRefreshMs = 500;
+    static constexpr int64_t kModNoticeMs = 4000;
 
     PanelController(const PanelDataSource& source, ConfigStore& config);
 
@@ -128,7 +157,8 @@ public:
     // Inverte o interruptor do mod e salva. Não carrega nem descarrega nada.
     bool ToggleMod(const std::string& modId, std::string* error = nullptr);
     // Ponto de entrada do renderizador: "toggle_open", "close",
-    // "tab" (arg "mods" | "checklist" | "log"), "toggle_mod" (arg = id do mod).
+    // "tab" (arg "mods" | "checklist" | "log" | "mod:<id>"), "toggle_mod" (arg = id do mod),
+    // "mod_command" (arg = comando para o mod da aba aberta).
     bool HandleAction(const std::string& action, const std::string& arg);
 
     // Chamado periodicamente pelo renderizador (ex.: a cada 250 ms).
@@ -143,6 +173,10 @@ public:
     const std::string& ModsNotice() const { return modsNotice_; }
     const ChecklistView& Checklist() const { return checklist_; }
     const LogView& LogTab() const { return log_; }
+    const std::vector<ModTab>& ModTabs() const { return modTabs_; }
+    const std::string& ActiveModTab() const { return activeMod_; }  // vazio fora de uma aba de mod
+    bool SelectModTab(const std::string& modId);
+    bool ModCommand(const std::string& command);
     // Quantas vezes o canal do checklist foi consultado (para testes).
     int ChecklistQueries() const { return checklistQueries_; }
 
@@ -153,6 +187,8 @@ private:
     void RebuildMods();
     void RefreshChecklist();
     void RefreshLog();
+    void RefreshModTab(ModTab& tab);
+    ModTab* FindModTab(const std::string& modId);
     void Bump();
 
     const PanelDataSource& source_;
@@ -174,6 +210,13 @@ private:
     LogView log_;
     bool logDirty_ = true;
     int64_t lastLogMs_ = INT64_MIN / 2;
+
+    std::vector<ModTab> modTabs_;
+    std::string activeMod_;
+    bool modDirty_ = true;
+    int64_t lastModMs_ = INT64_MIN / 2;
+    bool noticeFresh_ = false;  // aviso novo: o relógio começa no próximo Tick
+    int64_t noticeMs_ = 0;
 };
 
 // Rótulos em português usados no view-model (expostos para testes).
