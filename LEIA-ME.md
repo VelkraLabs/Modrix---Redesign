@@ -1,17 +1,16 @@
-# Entrega: pacote de teste do TLMod (3ª versão)
+# Entrega: pacote de teste do TLMod (4ª versão)
 
 Branch só para download, sem o código. Pode ser apagada depois.
 
 | arquivo | SHA-256 |
 |---|---|
-| `tlmod-teste.zip` | `e6792d20b65e0fb46a3445572140553cdc4124c68cac95f9611a4e6dc6173d14` |
-| `libtlmod_bridge.so` | `3b926f4793a7d0eeba5ab7ee3bba3b4055a7324cee3eacc2cc9256df6483063f` |
-| `libtlmod_runtime.so` | `8b1a4fbbf4e5b29c1c893df54f55c49af5d37d5eb9252820094ee72519e45470` |
-| `README_TESTE.md` | `dac8b4f2f64aa58aa9bed8bdcd4fcf4021568f41789a47763ff6d5f2804c7620` |
+| `tlmod-teste.zip` | `85c81b2952ac5bfb6cfae09e65cad7a637288dac12bc8ccfe4cdd3631df25924` |
+| `libtlmod_bridge.so` | `5d970bf878748390ea76ae11eb268e5edf0197762381b90603eb147579a61a96` |
+| `libtlmod_runtime.so` | `fd0b69e26678aaefbeb5bdccc21b951b2af57eb2295a80808575fba116b0347d` |
+| `README_TESTE.md` | `26055c68980f62e7d7cb038827830e1835f0f1ac056477aa90e098c97667f1bb` |
 
-- `tlmod-teste.zip`: o pacote completo (as `.so`, a pasta `tlmod/`, o README_TESTE.md e o SHA256SUMS.txt).
-- `libtlmod_bridge.so`: a única que mudou desde a 2ª versão (correção do `shadowhook_init`). Basta
-  trocar essa no aparelho.
-- `libtlmod_runtime.so`: igual à da 2ª versão; fica aqui por conveniência.
+- `tlmod-teste.zip`: o pacote completo. Nesta versão a pasta `tlmod/` mudou (mod novo `devtools`
+  e as `.so` dos outros mods recompiladas), então use o zip.
+- `libtlmod_bridge.so` e `libtlmod_runtime.so`: as duas da 4ª versão, soltas.
 
-Gerado a partir do commit `b071b1d` da branch `ccr-bbd92bf9-i01buk`.
+Gerado a partir do commit `5a623b3` da branch `ccr-bbd92bf9-i01buk`.
