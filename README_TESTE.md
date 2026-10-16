@@ -1,38 +1,39 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**2ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**3ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com três mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-No primeiro teste, a ponte, o runtime, o painel e a descoberta dos 3 mods funcionaram, mas os
-3 mods falharam em `não foi possível carregar lib/android-arm64/lib...`: o `dlopen` direto do
-armazenamento externo (`/storage/emulated/0/Android/data/...`, montado `noexec`) é bloqueado.
+No segundo teste, os 3 mods carregaram da cópia privada, mas nada funcionou no jogo: o
+`tlmod.log` mostrou `shadowhook_init falhou: 12 (Init linker mod failed)` e **nenhum hook foi
+instalado**. O ShadowHook 2.0, ao inicializar, abre uma biblioteca auxiliar,
+`libshadowhook_nothing.so`, que o pacote oficial dele instala ao lado da `libshadowhook.so`. A
+ponte embute o ShadowHook e não levava essa biblioteca.
 
-- **Cópia privada antes do `dlopen`.** A `.so` de cada mod é copiada para
-  `<code_cache do app>/tlmod/<mod_id>/` (caminho obtido do `Context` via JNI) e carregada de lá.
-  A cópia é atômica (temporário + `rename`), conferida por SHA-256 com a origem, somente leitura
-  (`0444`) e reaproveitada nas aberturas seguintes enquanto o mod não mudar.
-- **Erro inteiro.** Quando o `dlopen` falha, o estado do mod guarda o `dlerror()` completo, com o
-  caminho da cópia. O painel mostra o texto todo, quebrando linha (dá para selecionar e copiar).
-- **Log em arquivo.** A ponte e o runtime gravam `tlmod/tlmod.log`, ao lado de `mods/`. O painel
-  ganhou a aba **Log**, com as últimas 150 linhas.
+- **A ponte agora leva a biblioteca auxiliar embutida.** Antes de inicializar o ShadowHook, ela
+  grava a cópia em `<code_cache do app>/tlmod/_ponte/libshadowhook_nothing.so` (atômica, somente
+  leitura) e o ShadowHook a abre de lá.
+- **Plano B.** Se mesmo assim o monitor do linker do ShadowHook falhar (por exemplo, porque o
+  linker de uma versão nova do Android tem outros símbolos), a ponte avisa no log e segue: os
+  hooks dela são por endereço e não dependem desse monitor.
+- **Mais diagnóstico.** O log passa a trazer a versão do Android e o modelo do aparelho, e o
+  ShadowHook escreve detalhes de falhas no logcat (tag `shadowhook_tag`).
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 371992 bytes, `a11c5cb9ef262eeb…` | 379448 bytes, `e708adeace2f799a…` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 817392 bytes, `7f8490029c2bf229…` | 860144 bytes, `8b1a4fbbf4e5b29c…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 379448 bytes, `e708adeace2f799a…` | 389336 bytes, `3b926f4793a7d0ee…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
-Todo o resto é idêntico, byte a byte, ao pacote anterior: as `.so` dos 3 mods, os manifestos, as
-texturas, os marcadores e o `tlmod_config.json`.
+Todo o resto é idêntico, byte a byte, ao pacote anterior: a `libtlmod_runtime.so`, as `.so` dos
+3 mods, os manifestos, as texturas, os marcadores e o `tlmod_config.json`.
 
-**Para atualizar o aparelho:** troque as duas `.so` no seu carregador.
-A pasta `tlmod/` que já está no aparelho pode ficar como está (o conteúdo dela não mudou). Não precisa mexer no seu `tlmod_config.json`.
+**Para atualizar o aparelho:** troque só a `libtlmod_bridge.so` no seu carregador.
+A pasta `tlmod/` que já está no aparelho pode ficar como está. Não precisa mexer no seu `tlmod_config.json`.
 
 ## Conteúdo
 
@@ -68,7 +69,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `e1cf0d7` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `b071b1d` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -128,8 +129,12 @@ foge depois da introdução.
 Acompanhe pelo logcat: `adb logcat -s TLMod TLModBridge`.
 
 1. **Ao abrir o jogo**
-   - `TLModBridge`: a `libil2cpp.so` encontrada, `Terraria.Player=...`, várias linhas
-     `hook em ... instalado` e `... confere com o dump`.
+   - `TLModBridge` (no `tlmod.log`, como `[ponte]`): a `libil2cpp.so` encontrada,
+     `Terraria.Player=...`, `Android <versão> (API <n>), <fabricante> <modelo>`,
+     `ShadowHook: biblioteca auxiliar em .../code_cache/tlmod/_ponte/libshadowhook_nothing.so`,
+     `ShadowHook: monitor do linker ok` e, para cada hook, `... confere com o dump` seguido de
+     `ShadowHook ...: hook em 0x... -> 0x...` e `hook em ... instalado`. **Nenhuma** linha
+     `shadowhook_init falhou` ou `falha ao instalar hook`.
    - `TLMod`: `pasta de mods: .../files/tlmod/mods`,
      `cópias das bibliotecas dos mods: /data/user/0/<pacote>/code_cache/tlmod`, uma linha
      `biblioteca copiada para .../code_cache/tlmod/<mod_id>/lib....so (SHA-256 ...)` por mod (nas
@@ -166,6 +171,9 @@ O runtime, o painel e os mods passam nos testes de host contra um jogo simulado.
 dependem do jogo real.
 
 **Carga e ponte**
+- [ ] O log não tem `shadowhook_init falhou` nem `falha ao instalar hook`; tem `ShadowHook: monitor do
+      linker ok` (se aparecer `monitor do linker indisponível`, os hooks devem funcionar mesmo assim:
+      me mande o `tlmod.log` e o `adb logcat -s shadowhook_tag`)
 - [ ] O carregador escolhido põe as duas `.so` no processo, e o logcat mostra `3 de 3 mods carregados`
 - [ ] Todos os hooks aparecem como `instalado`, sem aviso de RVA ou offset divergente
 - [ ] O jogo abre e chega ao menu sem travar nem fechar
@@ -225,7 +233,7 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 379448 | `e708adeace2f799aeb2c58552ed61295ef41a9114dcf88ab6229511e9902e5c1` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 389336 | `3b926f4793a7d0eeba5ab7ee3bba3b4055a7324cee3eacc2cc9256df6483063f` |
 | `lib/arm64-v8a/libtlmod_runtime.so` | 860144 | `8b1a4fbbf4e5b29c1c893df54f55c49af5d37d5eb9252820094ee72519e45470` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `0a4c5092953f79101efeda8b08cfbff10c7add1824a1de29370f6049ab7fa7de` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
