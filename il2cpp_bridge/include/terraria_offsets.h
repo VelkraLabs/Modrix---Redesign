@@ -448,6 +448,13 @@ constexpr uintptr_t GUITransactionButton_Draw = 0x12220F8;
 constexpr uintptr_t GUIReforgePopup_DrawItem = 0x9D2984;        // item da reforja
 constexpr uintptr_t GUIResearch_DrawResearchItem = 0x9D7164;    // item na pesquisa da Jornada
 constexpr uintptr_t GUIResearch_CanBeResearched = 0x9D4C10;     // só olha o type: item de mod bloqueado
+// static void MouseText_DrawItemTooltip_GetLinesInfo(Item, ref int yoyoLogo, ref int researchLine,
+//     ref int materialsLine, float oldKB, ref int numLines, string[] toolTipLine, bool[] preFixLine,
+//     bool[] badPreFixLine, ref int setBonusLine): monta as linhas do tooltip. Na Jornada
+// pergunta ao catálogo abaixo pelo type (0xCC972C) para a linha "Pesquise mais N".
+constexpr uintptr_t Main_MouseText_DrawItemTooltip_GetLinesInfo = 0xCC90D8;
+// bool TryGetSacrificeCountCapToUnlockInfiniteItems(int itemId, out int amountNeeded)
+constexpr uintptr_t CreativeItemSacrificesCatalog_TryGetSacrificeCountCapToUnlockInfiniteItems = 0x8F4290;
 constexpr uintptr_t GUICraftGuidePopup_DrawItem = 0x15A5384;    // item da guia / resultado da receita
 constexpr uintptr_t GUICrafting_MaterialItemDraw = 0x73AD78;    // ingrediente da receita em foco
 constexpr uintptr_t GUICrafting_MaterialItemTooltipDraw = 0x73A3AC;  // ingrediente no tooltip da receita
@@ -511,6 +518,8 @@ constexpr int GUITransactionButton_Draw = 9;    // o overload com Item (os outro
 constexpr int GUIReforgePopup_DrawItem = 0;
 constexpr int GUIResearch_DrawResearchItem = 0;
 constexpr int GUIResearch_CanBeResearched = 2;
+constexpr int Main_MouseText_DrawItemTooltip_GetLinesInfo = 10;
+constexpr int CreativeItemSacrificesCatalog_TryGetSacrificeCountCapToUnlockInfiniteItems = 2;
 constexpr int GUICraftGuidePopup_DrawItem = 0;
 constexpr int GUICrafting_MaterialItemDraw = 4;
 constexpr int GUICrafting_MaterialItemTooltipDraw = 4;

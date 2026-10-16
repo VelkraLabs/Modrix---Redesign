@@ -77,6 +77,7 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
     "Main": ("Terraria", "Main"),
     "WorldFile": ("Terraria.IO", "WorldFile"),
     "CreativeUI": ("Terraria.GameContent.Creative", "CreativeUI"),
+    "CreativeItemSacrificesCatalog": ("Terraria.GameContent.Creative", "CreativeItemSacrificesCatalog"),
     "Item": ("Terraria", "Item"),
     "Lang": ("Terraria", "Lang"),
     "IdDictionary": ("ReLogic.Reflection", "IdDictionary"),

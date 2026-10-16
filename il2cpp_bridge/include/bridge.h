@@ -471,6 +471,13 @@ void TLMod_Hooked_GUIReforgePopupDrawItem(Il2CppObject* self, const MethodInfo* 
 void TLMod_Hooked_GUIResearchDrawResearchItem(Il2CppObject* self, const MethodInfo* method);
 int32_t TLMod_Hooked_GUIResearchCanBeResearched(Il2CppObject* self, Il2CppObject* item, int32_t* percent,
                                                 const MethodInfo* method);
+void TLMod_Hooked_MainTooltipGetLinesInfo(Il2CppObject* item, int32_t* yoyoLogo, int32_t* researchLine,
+                                          int32_t* materialsLine, float oldKB, int32_t* numLines,
+                                          Il2CppArray* toolTipLine, Il2CppArray* preFixLine,
+                                          Il2CppArray* badPreFixLine, int32_t* setBonusLine,
+                                          const MethodInfo* method);
+bool TLMod_Hooked_SacrificeCountCap(Il2CppObject* self, int32_t itemId, int32_t* amountNeeded,
+                                    const MethodInfo* method);
 void TLMod_Hooked_GUICraftGuidePopupDrawItem(Il2CppObject* self, const MethodInfo* method);
 void TLMod_Hooked_GUICraftingMaterialItemDraw(Il2CppObject* self, Il2CppObject* layout, int32_t index,
                                               TLModXnaVector2 position, float scale, const MethodInfo* method);

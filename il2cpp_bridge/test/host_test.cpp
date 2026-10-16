@@ -462,6 +462,13 @@ int TestScreens(void* lib) {
     int32_t percent = -1;
     CHECK(can_research(ruby, &percent) == 0 && percent == 0);
     CHECK(can_research(lens, &percent) == 1 && percent == 50);
+    // ...e o tooltip não promete "Pesquise mais 25" (o limite da casca) para ele.
+    auto tooltip_research = reinterpret_cast<int32_t (*)(void*)>(sym("mock_game_tooltip_research_line"));
+    auto sacrifice_cap = reinterpret_cast<bool (*)(int32_t, int32_t*)>(sym("mock_game_sacrifice_cap"));
+    CHECK(tooltip_research(ruby) == -1);
+    CHECK(tooltip_research(lens) == 1);
+    int32_t amount = -1;
+    CHECK(sacrifice_cap(kShell, &amount) && amount == 25);  // fora do tooltip, o catálogo segue igual
 
     // Receitas: receita 2 com o rubi (resultado e ingrediente 0) e uma Lente (ingrediente 1).
     modItem(recipe_item(2, -1));

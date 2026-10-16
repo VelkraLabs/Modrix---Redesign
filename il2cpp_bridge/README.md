@@ -45,7 +45,8 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
    - controles de toque (`GUIVirtualInputController.DrawControls`, `GUIQuickActionButton.Draw`);
    - ícone do cursor (`Main.DrawInterface_40_InteractItemIcon`) e `[i:ID]` no chat (`ItemSnippet.UniqueDraw`).
 
-   `GUIResearch.CanBeResearched` recusa item de mod. `NPC.TypeName` e `NPC.GetTypeNetName` devolvem o nome
+   `GUIResearch.CanBeResearched` recusa item de mod, e o tooltip dele (`Main.MouseText_DrawItemTooltip_GetLinesInfo`
+   com `CreativeItemSacrificesCatalog.TryGetSacrificeCountCapToUnlockInfiniteItems`) não mostra "Pesquise mais N". `NPC.TypeName` e `NPC.GetTypeNetName` devolvem o nome
    do NPC de mod (callback `npc_name`). Lista completa, com o que fica de fora: `modapi/README.md`, "Texturas de mod".
 11. Propriedades de um item original para avaliar uma casca (`src/item_traits.cpp`, `TLMod_ReadItemTraits`).
    Lê os arrays de `ItemID.Sets` pelo nome (classe aninhada, via `il2cpp_class_get_nested_types`) e os campos de

@@ -1436,6 +1436,30 @@ MethodInfo g_mDrawResearchItem{reinterpret_cast<Il2CppMethodPointer>(&MockDrawRe
 MethodInfo g_mCanBeResearched{reinterpret_cast<Il2CppMethodPointer>(&MockCanBeResearched), "CanBeResearched", 2};
 MethodInfo g_mGetResearchItem{nullptr, "GetResearchItem", 0};
 
+// Linha "Pesquise mais N" do tooltip na Jornada: o catálogo pelo type (cap 25 para
+// type > 0); GetLinesInfo acrescenta a linha quando o catálogo tem um limite.
+bool MockSacrificeCap(Il2CppObject*, int32_t itemId, int32_t* amountNeeded, const MethodInfo*) {
+    *amountNeeded = itemId > 0 ? 25 : 0;
+    return itemId > 0;
+}
+using SacrificeCapFn = decltype(&MockSacrificeCap);
+SacrificeCapFn g_sacrificeCapEntry = &MockSacrificeCap;
+Il2CppClass g_sacrificesCatalog{"Terraria.GameContent.Creative", "CreativeItemSacrificesCatalog", {}, {}};
+MethodInfo g_mSacrificeCap{reinterpret_cast<Il2CppMethodPointer>(&MockSacrificeCap),
+                           "TryGetSacrificeCountCapToUnlockInfiniteItems", 2};
+extern MethodInfo g_mTooltipLines;
+void MockTooltipLines(Il2CppObject* item, int32_t*, int32_t* researchLine, int32_t*, float, int32_t* numLines,
+                      Il2CppArray*, Il2CppArray*, Il2CppArray*, int32_t*, const MethodInfo*) {
+    int32_t amount = 0;
+    *researchLine = -1;
+    if (g_sacrificeCapEntry(nullptr, At<int32_t>(item, kItemType), &amount, &g_mSacrificeCap) && amount > 0)
+        *researchLine = (*numLines)++;
+}
+using TooltipLinesFn = decltype(&MockTooltipLines);
+TooltipLinesFn g_tooltipLinesEntry = &MockTooltipLines;
+MethodInfo g_mTooltipLines{reinterpret_cast<Il2CppMethodPointer>(&MockTooltipLines),
+                           "MouseText_DrawItemTooltip_GetLinesInfo", 10};
+
 // Guia: focusGuideRecipe (+0xCC) >= 0 ? Main.recipe[availableGuideRecipe[focus]].createItem : guideItem.
 constexpr size_t kPopupFocus = 0xCC, kPopupAvailable = 0xD0;
 Il2CppObject* g_guidePopup = nullptr;
@@ -1589,6 +1613,8 @@ bool PatchScreens(void* target, void* r) {
     else if (target == reinterpret_cast<void*>(&MockReforgePopupDrawItem)) g_reforgePopupEntry = reinterpret_cast<InstanceFn>(r);
     else if (target == reinterpret_cast<void*>(&MockDrawResearchItem)) g_researchEntry = reinterpret_cast<InstanceFn>(r);
     else if (target == reinterpret_cast<void*>(&MockCanBeResearched)) g_canResearchEntry = reinterpret_cast<CanResearchFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockSacrificeCap)) g_sacrificeCapEntry = reinterpret_cast<SacrificeCapFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockTooltipLines)) g_tooltipLinesEntry = reinterpret_cast<TooltipLinesFn>(r);
     else if (target == reinterpret_cast<void*>(&MockGuidePopupDrawItem)) g_guidePopupEntry = reinterpret_cast<InstanceFn>(r);
     else if (target == reinterpret_cast<void*>(&MockMaterialItemDraw)) g_materialEntry = reinterpret_cast<MaterialFn>(r);
     else if (target == reinterpret_cast<void*>(&MockMaterialTooltipDraw)) g_materialTooltipEntry = reinterpret_cast<MaterialFn>(r);
@@ -1622,10 +1648,11 @@ void InitScreens() {
     g_availableRecipe = NewArray(8);
     g_main.fields.push_back(&g_fMainRecipe);
     g_main.methods.insert(g_main.methods.end(), {&g_mGetAvailableRecipe, &g_mGetFocusRecipe, &g_mInteractIcon,
-                                                 &g_mTryGetAmmo});
+                                                 &g_mTryGetAmmo, &g_mTooltipLines});
     g_guiTransaction.methods = {&g_mTransactionDraw};
     g_guiReforgePopup.methods = {&g_mReforgePopupDrawItem};
     g_guiResearch.methods = {&g_mDrawResearchItem, &g_mCanBeResearched, &g_mGetResearchItem};
+    g_sacrificesCatalog.methods = {&g_mSacrificeCap};
     g_guidePopup = NewObject(0x100);
     At<int32_t>(g_guidePopup, kPopupFocus) = -1;
     At<Il2CppArray*>(g_guidePopup, kPopupAvailable) = NewArray(8);
@@ -1645,7 +1672,8 @@ void InitScreens() {
     g_csharp.classes.insert(g_csharp.classes.end(),
                             {&g_guiInstance, &g_guiReforge, &g_guiCraftGuide, &g_recipe, &g_guiTransaction,
                              &g_guiReforgePopup, &g_guiResearch, &g_guiCraftGuidePopup, &g_guiCrafting,
-                             &g_guiVirtualInput, &g_guiQuickAction, &g_itemTagHandler, &g_networkText});
+                             &g_guiVirtualInput, &g_guiQuickAction, &g_itemTagHandler, &g_networkText,
+                             &g_sacrificesCatalog});
 }
 
 }  // namespace
@@ -1679,6 +1707,17 @@ __attribute__((visibility("default"))) void* mock_game_research(void* item) {
 }
 __attribute__((visibility("default"))) int32_t mock_game_can_research(void* item, int32_t* percent) {
     return g_canResearchEntry(nullptr, static_cast<Il2CppObject*>(item), percent, &g_mCanBeResearched);
+}
+// Tooltip: índice da linha "Pesquise mais N" (-1 = sem a linha), como no jogo.
+__attribute__((visibility("default"))) int32_t mock_game_tooltip_research_line(void* item) {
+    int32_t yoyo = -1, research = -1, materials = -1, lines = 1, setBonus = -1;
+    g_tooltipLinesEntry(static_cast<Il2CppObject*>(item), &yoyo, &research, &materials, 0.0f, &lines, nullptr,
+                        nullptr, nullptr, &setBonus, &g_mTooltipLines);
+    return research;
+}
+// O catálogo chamado por outra tela (fora do tooltip).
+__attribute__((visibility("default"))) bool mock_game_sacrifice_cap(int32_t type, int32_t* amount) {
+    return g_sacrificeCapEntry(nullptr, type, amount, &g_mSacrificeCap);
 }
 // Guia: focus -1 = o item da guia; senão a receita availableGuideRecipe[focus] = recipe.
 __attribute__((visibility("default"))) void* mock_game_guide(void* guideItem, int32_t focus, int32_t recipe) {

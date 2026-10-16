@@ -327,6 +327,10 @@ Quando um desenho mostra dois itens (item na mão e munição, item e gancho) e 
 **Pesquisa da Jornada (`GUIResearch.CanBeResearched`, `0x9D4C10`).** A pesquisa só olha o `type`.
 Um item de mod seria consumido e desbloquearia a casca para duplicação. O hook responde "não pode
 ser pesquisado".
+O tooltip também perguntava pelo `type`: na Jornada mostrava "Pesquise mais 25 para liberar a
+Duplicação", o limite da casca. Enquanto `Main.MouseText_DrawItemTooltip_GetLinesInfo` (`0xCC90D8`)
+monta o tooltip de um item de mod, `CreativeItemSacrificesCatalog.TryGetSacrificeCountCapToUnlockInfiniteItems`
+(`0x8F4290`) responde "sem limite" e a linha não aparece. Fora do tooltip o catálogo segue igual.
 
 **Nomes de item.** As telas usam `Item.Name`, `AffixName` ou `HoverName`, que leem o
 `_nameOverride` do item de mod. Isso vale para hover, tooltip, loja, reforja, título da pesquisa,

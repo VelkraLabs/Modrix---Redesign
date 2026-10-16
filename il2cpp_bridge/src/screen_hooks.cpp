@@ -25,6 +25,10 @@ typedef int32_t (*TransactionDrawFn)(Il2CppObject* layout, Il2CppObject* item, I
 typedef void (*InstanceDrawFn)(Il2CppObject* self, const MethodInfo* method);
 typedef int32_t (*CanBeResearchedFn)(Il2CppObject* self, Il2CppObject* item, int32_t* percent,
                                      const MethodInfo* method);
+typedef void (*TooltipLinesFn)(Il2CppObject* item, int32_t* yoyoLogo, int32_t* researchLine, int32_t* materialsLine,
+                               float oldKB, int32_t* numLines, Il2CppArray* toolTipLine, Il2CppArray* preFixLine,
+                               Il2CppArray* badPreFixLine, int32_t* setBonusLine, const MethodInfo* method);
+typedef bool (*SacrificeCapFn)(Il2CppObject* self, int32_t itemId, int32_t* amountNeeded, const MethodInfo* method);
 typedef void (*GridItemDrawFn)(Il2CppObject* self, Il2CppObject* layout, int32_t index, TLModXnaVector2 position,
                                float scale, const MethodInfo* method);
 typedef void (*QuickActionDrawFn)(int32_t actionType, Il2CppObject* layout, bool pressed, float* scale,
@@ -70,6 +74,8 @@ void* g_origTransaction = nullptr;
 void* g_origReforgePopup = nullptr;
 void* g_origResearchItem = nullptr;
 void* g_origCanBeResearched = nullptr;
+void* g_origTooltipLines = nullptr;
+void* g_origSacrificeCap = nullptr;
 void* g_origGuidePopup = nullptr;
 void* g_origMaterialDraw = nullptr;
 void* g_origMaterialTooltipDraw = nullptr;
@@ -82,6 +88,9 @@ void* g_origNpcTypeNetName = nullptr;
 
 constexpr int32_t kQuickGrapple = 4, kQuickGrappleFire = 22;  // QuickActionButton_Layout.QuickActionControl
 constexpr int32_t kResearchInvalid = 0;                        // GUIResearch.ResearchState.Invalid
+
+// Verdadeiro enquanto o jogo monta o tooltip de um item de mod (thread principal).
+thread_local bool t_modItemTooltip = false;
 
 template <typename Fn>
 Fn LoadOrig(void* const& slot) {
@@ -300,6 +309,17 @@ void InstallScreenHooks() {
          Method("", "GUIResearch", "CanBeResearched", argc::GUIResearch_CanBeResearched),
          rva::GUIResearch_CanBeResearched, reinterpret_cast<void*>(&TLMod_Hooked_GUIResearchCanBeResearched),
          &g_origCanBeResearched},
+        {"Main.MouseText_DrawItemTooltip_GetLinesInfo",
+         api.il2cpp_class_get_method_from_name(MainClass(), "MouseText_DrawItemTooltip_GetLinesInfo",
+                                               argc::Main_MouseText_DrawItemTooltip_GetLinesInfo),
+         rva::Main_MouseText_DrawItemTooltip_GetLinesInfo,
+         reinterpret_cast<void*>(&TLMod_Hooked_MainTooltipGetLinesInfo), &g_origTooltipLines},
+        {"CreativeItemSacrificesCatalog.TryGetSacrificeCountCapToUnlockInfiniteItems",
+         Method("Terraria.GameContent.Creative", "CreativeItemSacrificesCatalog",
+                "TryGetSacrificeCountCapToUnlockInfiniteItems",
+                argc::CreativeItemSacrificesCatalog_TryGetSacrificeCountCapToUnlockInfiniteItems),
+         rva::CreativeItemSacrificesCatalog_TryGetSacrificeCountCapToUnlockInfiniteItems,
+         reinterpret_cast<void*>(&TLMod_Hooked_SacrificeCountCap), &g_origSacrificeCap},
         {"GUICraftGuidePopup.DrawItem",
          Method("", "GUICraftGuidePopup", "DrawItem", argc::GUICraftGuidePopup_DrawItem),
          rva::GUICraftGuidePopup_DrawItem, reinterpret_cast<void*>(&TLMod_Hooked_GUICraftGuidePopupDrawItem),
@@ -386,6 +406,35 @@ int32_t TLMod_Hooked_GUIResearchCanBeResearched(Il2CppObject* self, Il2CppObject
         return kResearchInvalid;
     }
     return orig(self, item, percent, method);
+}
+
+// Na Jornada o tooltip ganha "Pesquise mais N para liberar a Duplicação", com o
+// N do catálogo pelo type (o da casca). Para um item de mod a pesquisa está
+// bloqueada (acima): durante o tooltip dele o catálogo responde "sem limite" e
+// a linha não aparece. Atribui (não soma) para um tooltip interrompido não
+// deixar o estado preso: o próximo tooltip o refaz.
+void TLMod_Hooked_MainTooltipGetLinesInfo(Il2CppObject* item, int32_t* yoyoLogo, int32_t* researchLine,
+                                          int32_t* materialsLine, float oldKB, int32_t* numLines,
+                                          Il2CppArray* toolTipLine, Il2CppArray* preFixLine,
+                                          Il2CppArray* badPreFixLine, int32_t* setBonusLine,
+                                          const MethodInfo* method) {
+    auto orig = LoadOrig<TooltipLinesFn>(g_origTooltipLines);
+    if (!orig) return;
+    bool prev = t_modItemTooltip;
+    t_modItemTooltip = drawx::IsModItem(item);
+    orig(item, yoyoLogo, researchLine, materialsLine, oldKB, numLines, toolTipLine, preFixLine, badPreFixLine,
+         setBonusLine, method);
+    t_modItemTooltip = prev;
+}
+
+bool TLMod_Hooked_SacrificeCountCap(Il2CppObject* self, int32_t itemId, int32_t* amountNeeded,
+                                    const MethodInfo* method) {
+    auto orig = LoadOrig<SacrificeCapFn>(g_origSacrificeCap);
+    if (t_modItemTooltip || !orig) {
+        if (amountNeeded) *amountNeeded = 0;
+        return false;
+    }
+    return orig(self, itemId, amountNeeded, method);
 }
 
 void TLMod_Hooked_GUICraftGuidePopupDrawItem(Il2CppObject* self, const MethodInfo* method) {
