@@ -1,39 +1,38 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**5ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**6ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-A 4ª versão funcionou no aparelho, aba Ferramentas incluída. Esta versão corrige o tooltip do item
-de mod na Jornada:
+A 5ª versão funcionou no aparelho: o tooltip do Rubi Fictício na Jornada não mostra mais
+"Pesquise mais 25". Esta versão muda a entrega de itens quando o inventário está cheio:
 
-- **Antes:** o Rubi Fictício mostrava "Pesquise mais 25 para liberar a Duplicação". Esse número é
-  o da Lente, o item do jogo que serve de casca para o rubi. A pesquisa do rubi já era recusada,
-  então a linha prometia algo impossível.
-- **Agora:** a linha não aparece mais no tooltip de itens de mod. Os itens do jogo continuam com
-  ela, e a pesquisa continua recusando o item de mod, de propósito: pesquisá-lo consumiria o rubi
-  e liberaria a duplicação da Lente.
-
-**Sobre o preço do rubi:** "11 prata 23 cobre" na loja do Mercador está certo. O valor do rubi é
-50 de prata, e a loja paga 1/5 disso, 10 de prata. O jogo ainda ajusta o preço pela felicidade do
-NPC (vizinhos, bioma): com o Mercador feliz, a venda sobe para cerca de 11 de prata. Os itens do
-jogo seguem a mesma conta.
+- **Antes:** o que não cabia se perdia. O log dizia "só 0 de 1 couberam no inventário", e a aba
+  Ferramentas dizia "no inventário" mesmo assim.
+- **Agora:** o que não couber cai no chão, em cima do personagem, em pilhas do tamanho máximo do
+  item. Ele pega de volta quando abrir espaço. Vale para itens do jogo e de mod (o Rubi cai como
+  Rubi), e para qualquer mod que dê itens, não só para a aba Ferramentas.
+- A resposta da aba passou a ser "10x Lente entregue (o que não couber cai no chão)". O log diz
+  quanto ficou no inventário e quanto foi para o chão.
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 392896 bytes, `5d970bf878748390…` | 394080 bytes, `f6f6f39a335d65a6…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 394080 bytes, `f6f6f39a335d65a6…` | 394992 bytes, `a27e45f5f0bdccfd…` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 891632 bytes, `fd0b69e26678aaef…` | 892816 bytes, `a3c3b686b34b76d5…` |
+| `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490824 bytes, `03049ce0171c3785…` | 490840 bytes, `931a7f67bec83deb…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
-Todo o resto é idêntico, byte a byte, ao pacote anterior: a `libtlmod_runtime.so`, as `.so` dos
-4 mods, os manifestos, as texturas, os marcadores e o `tlmod_config.json`.
+Todo o resto é idêntico, byte a byte, ao pacote anterior: as `.so` dos outros 3 mods, os
+manifestos, as texturas, os marcadores e o `tlmod_config.json`.
 
-**Para atualizar o aparelho:** troque só a `libtlmod_bridge.so` no seu carregador.
-A pasta `tlmod/` que já está no aparelho pode ficar como está.
+**Para atualizar o aparelho:** troque as duas `.so` no seu carregador e a
+`tlmod/mods/devtools/lib/android-arm64/libdevtools.so` (ou copie a pasta `tlmod/` de novo).
+Se você desligou algum mod no painel, guarde o seu `tlmod_config.json` antes de copiar a pasta.
 
 ## Conteúdo
 
@@ -70,7 +69,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `f48e0fe` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `51b5403` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -202,10 +201,13 @@ dependem do jogo real.
 - [ ] Busca: o teclado abre no campo, o texto não some enquanto você digita, e Buscar (ou o botão de
       busca do teclado) mostra os resultados; nomes com acento acham sem acento
 - [ ] Dar item: +1/+10/+100 entregam no inventário (itens do jogo e o Rubi Fictício)
+- [ ] Com o inventário cheio, o que não couber cai no chão em cima do personagem (o Rubi cai como
+      Rubi, com ícone e nome); ao abrir espaço, o personagem pega de volta
 - [ ] Invocar: os bosses e o Titã nascem perto do jogador; Os Gêmeos chegam os dois
 - [ ] Invencível impede o dano; Curar enche vida e mana; Matar inimigos mata os hostis próximos
       (com loot), sem matar NPCs da cidade
-- [ ] A resposta (ex.: "10x Lente no inventário") aparece no topo da aba e some depois de alguns segundos
+- [ ] A resposta (ex.: "10x Lente entregue (o que não couber cai no chão)") aparece no topo da aba e some
+      depois de alguns segundos
 - [ ] Desligar o devtools na aba Mods tira a aba Ferramentas na abertura seguinte
 
 **Cópia das bibliotecas e log**
@@ -264,11 +266,11 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 394080 | `f6f6f39a335d65a6eaff5635e01c713f9bdfe842e024d2a4a0cf3cdac5303452` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 891632 | `fd0b69e26678aaefbeb5bdccc21b951b2af57eb2295a80808575fba116b0347d` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 394992 | `a27e45f5f0bdccfdb4cb378e9f3be4699a5623878b07ec32f00f29ae96eb4396` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 892816 | `a3c3b686b34b76d5ba8bd7660bffed4b98b5114a555f141472a47819d9c443f5` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
-| `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490824 | `03049ce0171c378553eeaf0035e0f105a8affaaa51a65ba0bccdfdd1d2a8cd12` |
+| `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490840 | `931a7f67bec83deb9fa80e256b0ac61fca0194e7e95c75bce815f34d5c9ec8a8` |
 | `tlmod/mods/devtools/manifest.json` | 701 | `74cb60b82025d08314dab060767a8ced69c566cfc87a7e3fab06a2a546c0cf2e` |
 | `tlmod/mods/example_boss/lib/android-arm64/libexample_boss.so` | 225664 | `e07ca2d00d92d86d52d0c5ff3a47da6e856a7fb7136c7b94afd0d94bf3b57862` |
 | `tlmod/mods/example_boss/manifest.json` | 668 | `9264b2a34f56647e5a3cc9fd9f69362cd423c2c6df66d4ba086e537ff34ef38a` |
