@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "../../tests/fake_game.h"
 #include "json.h"
@@ -348,6 +349,82 @@ static void TestModTab(const fs::path& modsSrc, const fs::path& tmp) {
     CHECK(panel.HandleAction("tab", "mods") && panel.ActiveModTab().empty() && !panel.HandleAction("mod_command", "heal"));
 }
 
+// ---------------------------------------------------------------------------
+// Oficina de Mods: aberta pelo botão do menu do jogo (outra thread) ou pela aba Mods.
+static void TestWorkshop(const fs::path& mods, const fs::path& tmp) {
+    std::printf("\n== Oficina de Mods\n");
+    fs::path dir = tmp / "mods_ws";
+    fs::copy(mods, dir, fs::copy_options::recursive);
+    fs::create_directories(dir / "broken" / "lib" / "linux-x86_64");
+    std::ofstream(dir / "broken" / "manifest.json") << R"({"tlmod_api": 1, "id": "test.broken", "name": "Quebrado",
+        "version": "1.0.0", "entry": {"linux-x86_64": "lib/linux-x86_64/libbroken.so"}})";
+    std::ofstream(dir / "broken" / "lib" / "linux-x86_64" / "libbroken.so") << "sem ELF";
+    overlay::ConfigStore cfg(tmp / "ws" / "tlmod_config.json");
+    std::string err;
+    CHECK(cfg.SetEnabled("tlmod.example_boss", false, &err));
+
+    FakeGame game;
+    rt::ModLoader loader(&game);
+    loader.SetDisabled(cfg.Disabled());
+    loader.SetLibraryCacheDir(tmp / "code_cache_ws" / "tlmod");
+    loader.DiscoverDirectory(dir);
+    loader.LoadAll();
+    overlay::LoaderDataSource source(loader);
+    PanelController panel(source, cfg);
+    panel.Tick(0);
+    panel.SetOpen(true);
+
+    // Pedido da thread do jogo: só abre no Tick (thread do renderizador), e fecha o painel.
+    std::thread([&] { panel.RequestWorkshop(); }).join();
+    CHECK(!panel.IsWorkshopOpen() && panel.IsOpen());
+    CHECK(panel.Tick(1) && panel.IsWorkshopOpen() && !panel.IsOpen());
+    CHECK(!panel.Tick(2));  // o pedido foi consumido
+
+    auto snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    const rt::json::Value* ws = snap ? snap->Get("workshop") : nullptr;
+    CHECK(ws && *ws->Get("open")->AsBool() && *ws->Get("title")->AsString() == "Oficina de Mods");
+    CHECK(ws && *ws->Get("summary")->AsString() == "4 mods instalados · 2 ativos");
+    CHECK(snap && !*snap->Get("fab")->Get("visible")->AsBool());  // o botão flutuante some
+    const auto* sections = ws ? ws->Get("sections")->AsArray() : nullptr;
+    CHECK(sections && sections->size() == 3);
+    auto section = [&](size_t i) { return *(*sections)[i].Get("title")->AsString(); };
+    auto rowsOf = [&](size_t i) { return (*sections)[i].Get("rows")->AsArray(); };
+    CHECK(sections && section(0) == "Ativos (2)" && section(1) == "Desativados (1)" && section(2) == "Com erro (1)");
+    // Em ordem de nome: Boss Checklist antes de "Exemplo: Rubi Fictício".
+    const rt::json::Value* ruby = sections ? &(*rowsOf(0))[1] : nullptr;
+    CHECK(sections && *(*rowsOf(0))[0].Get("id")->AsString() == "tlmod.boss_checklist");
+    CHECK(ruby && *ruby->Get("id")->AsString() == "tlmod.example_item" && *ruby->Get("version")->AsString() == "v0.1.0");
+    CHECK(ruby && *ruby->Get("authors")->AsString() == "por TLMod" &&
+          *ruby->Get("content")->AsString() == "Adiciona: 1 item" &&
+          ruby->Get("description")->AsString()->find("registra um único item") != std::string::npos);
+    const rt::json::Value* broken = sections ? &(*rowsOf(2))[0] : nullptr;
+    CHECK(broken && *broken->Get("state_label")->AsString() == "Erro" && broken->Get("error")->AsString()->empty() &&
+          *broken->Get("error_toggle")->AsString() == "Ver o erro");
+
+    // Ver o erro: a mensagem inteira; tocar de novo esconde.
+    CHECK(panel.HandleAction("workshop_expand", "test.broken") && panel.IsExpanded("test.broken"));
+    snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    broken = &(*(*snap->Get("workshop")->Get("sections")->AsArray())[2].Get("rows")->AsArray())[0];
+    CHECK(*broken->Get("error")->AsString() == loader.Find("test.broken")->error &&
+          *broken->Get("error_toggle")->AsString() == "Esconder o erro");
+    CHECK(panel.HandleAction("workshop_expand", "test.broken") && !panel.IsExpanded("test.broken"));
+
+    // Ligar/desligar na Oficina: vale ao reiniciar; o mod não muda de seção.
+    CHECK(panel.HandleAction("toggle_mod", "tlmod.example_boss") && cfg.IsEnabled("tlmod.example_boss"));
+    snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    const rt::json::Value* boss = &(*(*snap->Get("workshop")->Get("sections")->AsArray())[1].Get("rows")->AsArray())[0];
+    CHECK(*boss->Get("id")->AsString() == "tlmod.example_boss" && *boss->Get("enabled")->AsBool() &&
+          *boss->Get("pending")->AsString() == "Será ativado ao reiniciar o jogo");
+    CHECK(*snap->Get("workshop")->Get("notice")->AsString() == "Reinicie o jogo para aplicar as mudanças.");
+
+    // Fechar; a aba Mods do painel também abre a Oficina.
+    CHECK(panel.HandleAction("workshop_close", "") && !panel.IsWorkshopOpen());
+    snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    CHECK(*snap->Get("fab")->Get("visible")->AsBool() &&
+          *snap->Get("mods")->Get("workshop_button")->AsString() == "Abrir a Oficina de Mods");
+    CHECK(panel.HandleAction("workshop_open", "") && panel.IsWorkshopOpen());
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -369,6 +446,7 @@ int main(int argc, char** argv) {
     TestChecklistNotLoaded(mods, tmp);
     TestErrorAndLog(tmp);
     TestModTab(argv[1], tmp);
+    TestWorkshop(mods, tmp);
     fs::remove_all(tmp);
     std::printf("\n%d checks, %d falha%s: %s\n", g_checks, g_failures, g_failures == 1 ? "" : "s",
                 g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM");

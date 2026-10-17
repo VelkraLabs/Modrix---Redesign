@@ -56,6 +56,10 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
    `Main.time`, `Main.SkipToTime`), vida/mana cheias, matar hostis com `NPC.StrikeNPCNoInteraction` e item no chão
    sobre o jogador (`TLMod_DropItemAtPlayer`, pelo `Item.NewItem`: o que não coube no inventário no `give_item`).
    Só na thread do jogo; usadas pelo mod `tlmod.devtools` e pelo runtime.
+13. Botão **Mods** no menu principal (`src/menu_hooks.cpp`, `TLMod_SetMainMenuButton`): hook em
+    `GUIMainMenu.Draw` (`0xA4397C`) que desenha, depois do original, um `GUITransactionButton` no layout
+    `MainMenu_Layout.PurchaseFullGame` (livre fora de `Main.TrialMode`), com o som 10 do menu no toque.
+    O clique chama o callback (no runtime, a Oficina de Mods do overlay).
 
 ## Log
 

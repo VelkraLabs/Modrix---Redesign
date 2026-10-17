@@ -1,6 +1,7 @@
 #include "tlmod/overlay/panel.h"
 
 #include <algorithm>
+#include <cctype>
 
 #include "json.h"
 #include "json_writer.h"
@@ -66,6 +67,86 @@ const char* StateKey(ModState s) {
         case ModState::Discovered: return "skipped";
     }
     return "skipped";
+}
+
+// "2 itens, 1 NPC": o que o mod declara no "content" do manifest.
+std::string ContentSummary(const rt::ModManifest& m) {
+    static const char* const kNames[TLMOD_CONTENT_KIND_COUNT][2] = {
+        {"item", "itens"},  {"NPC", "NPCs"},     {"projétil", "projéteis"},
+        {"bloco", "blocos"}, {"parede", "paredes"}, {"efeito", "efeitos"}};
+    std::string out;
+    for (int k = 0; k < TLMOD_CONTENT_KIND_COUNT; ++k) {
+        size_t n = m.content[static_cast<size_t>(k)].size();
+        if (n == 0) continue;
+        out += (out.empty() ? "" : ", ") + std::to_string(n) + " " + kNames[k][n == 1 ? 0 : 1];
+    }
+    return out;
+}
+
+// Oficina de Mods (ver panel.h): seções pelo estado desta sessão, em ordem de nome.
+void WriteWorkshop(rt::JsonWriter& w, bool open, const std::vector<ModRow>& rows, const std::string& notice,
+                   const std::set<std::string>& expanded) {
+    struct Section {
+        const char* id;
+        const char* title;
+    };
+    static const Section kSections[] = {{"loaded", "Ativos"}, {"disabled", "Desativados"}, {"error", "Com erro"}};
+    auto sectionOf = [](const ModRow& r) {
+        return r.state == "loaded" ? "loaded" : r.state == "disabled" ? "disabled" : "error";
+    };
+    std::vector<const ModRow*> sorted;
+    for (const ModRow& r : rows) sorted.push_back(&r);
+    auto lower = [](std::string s) {
+        for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    std::stable_sort(sorted.begin(), sorted.end(),
+                     [&](const ModRow* a, const ModRow* b) { return lower(a->name) < lower(b->name); });
+    size_t active = 0;
+    for (const ModRow* r : sorted) active += r->state == "loaded";
+
+    w.Key("workshop").BeginObject();
+    w.Key("open").Bool(open);
+    w.Key("title").String("Oficina de Mods");
+    w.Key("summary").String(rows.empty() ? "Nenhum mod instalado"
+                                         : std::to_string(rows.size()) + (rows.size() == 1 ? " mod instalado" : " mods instalados") +
+                                               " · " + std::to_string(active) + (active == 1 ? " ativo" : " ativos"));
+    w.Key("notice").String(rows.empty() ? "" : notice);
+    w.Key("empty").String(rows.empty() ? "Coloque os mods na pasta tlmod/mods do Terraria e abra o jogo de novo." : "");
+    w.Key("footer").String("Ligar ou desligar um mod vale na próxima vez que o jogo abrir.");
+    w.Key("close_label").String("Fechar");
+    w.Key("sections").BeginArray();
+    for (const Section& s : kSections) {
+        size_t n = 0;
+        for (const ModRow* r : sorted) n += std::string(sectionOf(*r)) == s.id;
+        if (n == 0) continue;
+        w.BeginObject();
+        w.Key("id").String(s.id);
+        w.Key("title").String(std::string(s.title) + " (" + std::to_string(n) + ")");
+        w.Key("rows").BeginArray();
+        for (const ModRow* r : sorted) {
+            if (std::string(sectionOf(*r)) != s.id) continue;
+            const bool open = expanded.count(r->id) != 0;
+            w.BeginObject();
+            w.Key("id").String(r->id);
+            w.Key("name").String(r->name);
+            w.Key("version").String(r->version.empty() ? "" : "v" + r->version);
+            w.Key("authors").String(r->authors.empty() ? "" : "por " + r->authors);
+            w.Key("description").String(r->description);
+            w.Key("content").String(r->content.empty() ? "" : "Adiciona: " + r->content);
+            w.Key("state").String(r->state);
+            w.Key("state_label").String(r->stateLabel);
+            w.Key("enabled").Bool(r->enabled);
+            w.Key("pending").String(r->pending);
+            w.Key("error").String(open ? r->detail : "");
+            w.Key("error_toggle").String(r->detail.empty() ? "" : open ? "Esconder o erro" : "Ver o erro");
+            w.EndObject();
+        }
+        w.EndArray();
+        w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
 }
 
 const char* StatusLabel(const std::string& status) {
@@ -179,6 +260,9 @@ std::vector<ModInfo> LoaderDataSource::Mods() const {
         i.version = m.state == ModState::Rejected && m.manifest.name.empty() ? "" : m.manifest.version.ToString();
         i.state = m.state;
         i.error = m.error;
+        for (const std::string& a : m.manifest.authors) i.authors += (i.authors.empty() ? "" : ", ") + a;
+        i.description = m.manifest.description;
+        i.content = ContentSummary(m.manifest);
         out.push_back(std::move(i));
     }
     return out;
@@ -256,8 +340,21 @@ bool PanelController::HandleAction(const std::string& action, const std::string&
     else if (action == "tab" && arg.rfind("mod:", 0) == 0) return SelectModTab(arg.substr(4));
     else if (action == "mod_command") return ModCommand(arg);
     else if (action == "toggle_mod") return ToggleMod(arg);
-    else return false;
+    else if (action == "workshop_open") SetWorkshopOpen(true);
+    else if (action == "workshop_close") SetWorkshopOpen(false);
+    else if (action == "workshop_expand") {
+        if (!expanded_.erase(arg)) expanded_.insert(arg);
+        Bump();
+    } else return false;
     return true;
+}
+
+void PanelController::SetWorkshopOpen(bool open) {
+    if (open && !modsLoaded_) RebuildMods();
+    if (workshopOpen_ == open && (!open || !open_)) return;
+    workshopOpen_ = open;
+    if (open) open_ = false;  // a Oficina cobre a tela; o painel volta pelo botão flutuante
+    Bump();
 }
 
 void PanelController::RebuildMods() {
@@ -283,6 +380,12 @@ void PanelController::RebuildMods() {
         r.subtitle = (m.version.empty() ? "" : "v" + m.version + " · ") + StateLabel(m.state);
         r.state = StateKey(m.state);
         if (m.state != ModState::Loaded && m.state != ModState::Disabled) r.detail = m.error;
+        r.name = m.name;
+        r.version = m.version;
+        r.stateLabel = StateLabel(m.state);
+        r.authors = m.authors;
+        r.description = m.description;
+        r.content = m.content;
         r.enabled = config_.IsEnabled(m.id);
         bool wasEnabled = m.state != ModState::Disabled;
         if (r.enabled != wasEnabled) {
@@ -388,6 +491,7 @@ bool PanelController::Tick(int64_t nowMs) {
         RebuildMods();
         Bump();
     }
+    if (workshopRequested_.exchange(false, std::memory_order_acq_rel)) SetWorkshopOpen(true);
     if (open_ && tab_ == Tab::ModTab && (modDirty_ || nowMs - lastModMs_ >= kModTabRefreshMs)) {
         modDirty_ = false;
         lastModMs_ = nowMs;
@@ -452,7 +556,7 @@ std::string PanelController::SnapshotJson() const {
     w.Key("small_sp").Int(theme::kSmallSp);
     w.EndObject();
 
-    w.Key("fab").BeginObject().Key("label").String("M").EndObject();
+    w.Key("fab").BeginObject().Key("label").String("M").Key("visible").Bool(!workshopOpen_).EndObject();
 
     w.Key("tabs").BeginArray();
     w.BeginObject().Key("id").String("mods").Key("label").String("Mods").Key("active").Bool(tab_ == Tab::Mods).EndObject();
@@ -481,6 +585,7 @@ std::string PanelController::SnapshotJson() const {
 
     w.Key("mods").BeginObject();
     w.Key("notice").String(modsNotice_);
+    w.Key("workshop_button").String("Abrir a Oficina de Mods");
     w.Key("rows").BeginArray();
     for (const ModRow& r : modRows_) {
         w.BeginObject();
@@ -495,6 +600,8 @@ std::string PanelController::SnapshotJson() const {
     }
     w.EndArray();
     w.EndObject();
+
+    WriteWorkshop(w, workshopOpen_, modRows_, modsNotice_, expanded_);
 
     w.Key("log").BeginObject();
     w.Key("file").String(log_.file);

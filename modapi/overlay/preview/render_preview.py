@@ -9,6 +9,7 @@ tema. Serve para ver o resultado antes do aparelho; não é uma captura de tela.
     overlay_snapshot sample_checklist.json out/ ../../mods/devtools/sample_panel.json
     python3 render_preview.py out/snapshot_checklist.json out/snapshot_mods.json out/snapshot_log.json \
         out/snapshot_tools.json preview.png
+    python3 render_preview.py out/snapshot_workshop.json workshop.png     # Oficina de Mods
 """
 
 import json
@@ -202,6 +203,11 @@ def render_panel(snap, layer, scroll_to_end=False):
 
 def draw_mods(p, mods, x0, x1, y):
     t = p.t
+    if mods.get("workshop_button"):  # Java: botão de largura toda, padding 10/8, fundo accent
+        bh = line_h(font(t["text_sp"], True)) + dp(16)
+        p.rounded((x0, y, x1, y + bh), 8, "accent")
+        p.text(((x0 + x1) / 2, y + bh / 2), mods["workshop_button"], "text_sp", "panel_bg", True, "mm")
+        y += bh + dp(8)
     if mods.get("notice"):
         h = p.text((x0 + dp(4), y), mods["notice"], "small_sp", "accent")
         y += h + dp(8)
@@ -397,12 +403,128 @@ def draw_checklist(p, c, x0, x1, y):
     return y - dp(4)
 
 
+def draw_toggle(p, x1, cy, on):
+    """Interruptor do Java: trilho 40x22 dp, botão de 18 dp."""
+    p.rounded((x1 - dp(40), cy - dp(11), x1, cy + dp(11)), 11, "switch_on" if on else "switch_off")
+    kx = x1 - dp(20) if on else x1 - dp(38)
+    p.d.ellipse([kx, cy - dp(9), kx + dp(18), cy + dp(9)], fill=p.color("text"))
+
+
+def draw_workshop_row(p, r, x0, x1, y):
+    """Java: workshopRow. Cartão com nome, versão/autores, estado, interruptor e detalhes."""
+    t = p.t
+    pad_x, pad_y = dp(12), dp(10)
+    ix0, ix1 = x0 + pad_x, x1 - pad_x
+    pill_w = p.text_w(r["state_label"], "small_sp", True) + dp(16)
+    names_w = ix1 - dp(48) - pill_w - ix0
+    by = r["version"]
+    if r.get("authors"):
+        by = r["authors"] if not by else by + " · " + r["authors"]
+    top = [(ellipsize(p, r["name"], "text_sp", True, names_w), "text_sp", "text", True)]
+    if by:
+        top.append((ellipsize(p, by, "small_sp", False, names_w), "small_sp", "text_dim", False))
+    top_h = max(sum(line_h(font(t[s], b)) for _, s, _, b in top), dp(22))
+    blocks = []  # (linhas, tamanho, cor, negrito, espaço acima, fundo)
+    for key, color, gap in (("description", "text", 6), ("content", "text_dim", 4), ("pending", "accent", 4)):
+        if r.get(key):
+            blocks.append((p.wrap(r[key], "small_sp", ix1 - ix0), "small_sp", color, False, dp(gap), False))
+    if r.get("error_toggle"):
+        blocks.append(([r["error_toggle"]], "small_sp", "error", True, dp(6), False))
+    if r.get("error"):
+        blocks.append((p.wrap(r["error"], "small_sp", ix1 - ix0 - dp(16)), "small_sp", "error", False, dp(2), True))
+    body_h = 0
+    for lines, s, _, b, gap, boxed in blocks:
+        body_h += gap + len(lines) * line_h(font(t[s], b)) + (dp(12) if boxed else 0)
+    h = pad_y * 2 + top_h + body_h
+    p.rounded((x0, y, x1, y + h), 10, "row_bg")
+    ty = y + pad_y + (top_h - sum(line_h(font(t[s], b)) for _, s, _, b in top)) / 2
+    for s, size, color, bold in top:
+        ty += p.text((ix0, ty), s, size, color, bold)
+    cy = y + pad_y + top_h / 2
+    draw_toggle(p, ix1, cy, r["enabled"])
+    state = r["state"]
+    p.pill(ix1 - dp(48), cy, r["state_label"], "defeated" if state == "loaded" else
+           ("unknown" if state == "disabled" else "error"))
+    ty = y + pad_y + top_h
+    for lines, s, color, bold, gap, boxed in blocks:
+        ty += gap
+        lh = line_h(font(t[s], bold))
+        if boxed:
+            p.rounded((ix0, ty, ix1, ty + len(lines) * lh + dp(12)), 6, "panel_bg")
+            ty += dp(6)
+        for ln in lines:
+            p.text((ix0 + (dp(8) if boxed else 0), ty), ln, s, color, bold)
+            if color == "error" and bold:  # "Ver o erro": sublinhado
+                yy = ty + lh - dp(2)
+                p.d.line([(ix0, yy), (ix0 + p.text_w(ln, s, True), yy)], fill=p.color("error"), width=dp(1))
+            ty += lh
+        if boxed:
+            ty += dp(6)
+    return y + h
+
+
+def render_workshop(snap, layer, scroll_to_end=False):
+    """Java: buildWorkshop/renderWorkshop. Fundo escurecido e cartão centralizado."""
+    t = snap["theme"]
+    ws = snap["workshop"]
+    p = Painter(layer, t)
+    sw, sh = layer.size
+    p.d.rectangle([0, 0, sw, sh], fill=(0, 0, 0, 0xB3))
+    margin = dp(t["margin_dp"])
+    cw = min(sw - 2 * margin, dp(720))
+    cx0, cy0, cx1, cy1 = (sw - cw) / 2, margin, (sw + cw) / 2, sh - margin
+    p.rounded((cx0, cy0, cx1, cy1), t["corner_dp"], "panel_bg", "panel_border")
+    pad = dp(14)
+    x0, x1 = cx0 + pad, cx1 - pad
+    y = cy0 + pad
+    title_f = font(t["title_sp"] + 4, True)
+    p.d.text((x0, y), ws["title"], font=title_f, fill=p.color("accent"))
+    sy = y + line_h(title_f)
+    p.text((x0, sy), ws["summary"], "small_sp", "text_dim")
+    header_h = line_h(title_f) + line_h(font(t["small_sp"]))
+    # Fechar: padding 14/8, fundo tab_active_bg.
+    cf = font(t["text_sp"], True)
+    bw, bh = p.d.textlength(ws["close_label"], font=cf) + dp(28), line_h(cf) + dp(16)
+    by = y + (header_h - bh) / 2
+    p.rounded((x1 - bw, by, x1, by + bh), 8, "tab_active_bg")
+    p.text((x1 - bw / 2, by + bh / 2), ws["close_label"], "text_sp", "text", True, "mm")
+    y += max(header_h, bh)
+    if ws.get("notice"):
+        y += dp(8)
+        y += p.text((x0, y), ws["notice"], "small_sp", "accent", True)
+    foot_h = dp(8) + line_h(font(t["small_sp"]))
+    p.text((x0, cy1 - pad - line_h(font(t["small_sp"]))), ws["footer"], "small_sp", "text_dim")
+    top, bottom = y + dp(8), cy1 - pad - foot_h
+
+    def draw_content(yy):
+        content = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+        cp = Painter(content, t)
+        if ws.get("empty"):
+            yy += dp(12) + cp.text((x0, yy + dp(12)), ws["empty"], "text_sp", "text_dim") + dp(12)
+        for i, sec in enumerate(ws["sections"]):
+            yy += dp(2 if i == 0 else 12)
+            yy += cp.text((x0 + dp(2), yy), sec["title"], "text_sp", "accent", True) + dp(6)
+            for r in sec["rows"]:
+                yy = draw_workshop_row(cp, r, x0, x1, yy) + dp(8)
+        return content, yy
+
+    content, end = draw_content(top)
+    if scroll_to_end and end > bottom:
+        content, _ = draw_content(top - (end - bottom))
+    mask = Image.new("L", layer.size, 0)
+    ImageDraw.Draw(mask).rectangle((cx0, top, cx1, bottom), fill=255)
+    layer.paste(content, (0, 0), Image.composite(content, Image.new("RGBA", layer.size), mask).getchannel("A"))
+
+
 def render_screen(snap, caption, scroll_to_end=False):
     w, h = dp(SCREEN_DP[0]), dp(SCREEN_DP[1])
     screen = Image.new("RGBA", (w, h))
     draw_game_background(screen)
     layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    render_panel(snap, layer, scroll_to_end)
+    if snap.get("workshop", {}).get("open"):
+        render_workshop(snap, layer, scroll_to_end)
+    else:
+        render_panel(snap, layer, scroll_to_end)
     screen = Image.alpha_composite(screen, layer)
     d = ImageDraw.Draw(screen)
     d.text((w - dp(10), dp(8)), caption, font=font(12, True), fill=(255, 255, 255, 230), anchor="ra",
@@ -418,7 +540,10 @@ def main():
     screens = []
     for path in snaps:
         snap = json.load(open(path, encoding="utf-8"))
-        if snap["tab"] == "checklist":
+        if snap.get("workshop", {}).get("open"):
+            screens.append(render_screen(snap, "Oficina de Mods (botão Mods do menu)"))
+            screens.append(render_screen(snap, "Oficina de Mods (rolada até o fim, erro aberto)", True))
+        elif snap["tab"] == "checklist":
             screens.append(render_screen(snap, "Aba Boss Checklist"))
             screens.append(render_screen(snap, "Aba Boss Checklist (rolada até o fim)", True))
         elif snap["tab"] == "log":

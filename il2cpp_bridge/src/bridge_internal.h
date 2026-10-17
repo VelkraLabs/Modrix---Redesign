@@ -56,6 +56,8 @@ bool ResolveDraw();
 void InstallDrawHooks();
 // Telas que leem TextureAssets.Item sozinhas e nome de NPC (screen_hooks.cpp).
 void InstallScreenHooks();
+// Botão Mods no menu principal (menu_hooks.cpp). Opcional.
+void InstallMenuHooks();
 
 // Propriedades de um item original para avaliar uma casca (item_traits.cpp).
 bool ResolveItemTraits();

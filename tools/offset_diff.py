@@ -61,6 +61,10 @@ FIELD_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "item_id_sets_static_off": ("Terraria.ID", "ItemID.Sets", "static"),
     "gui_instance_static_off": ("", "GUIInstance", "static"),
     "gui_instance_off": ("", "GUIInstance", "instance"),
+    "gui_settings_off": ("", "GUISettings", "instance"),
+    "main_menu_layout_static_off": ("", "MainMenu_Layout", "static"),
+    "main_menu_layout_off": ("", "MainMenu_Layout", "instance"),
+    "button_layout_off": ("", "Button_Layout", "instance"),
     "gui_crafting_off": ("", "GUICrafting", "instance"),
     "gui_craft_guide_popup_off": ("", "GUICraftGuidePopup", "instance"),
     "recipe_off": ("Terraria", "Recipe", "instance"),
@@ -92,6 +96,8 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
     "GUICrafting": ("", "GUICrafting"),
     "GUIVirtualInputController": ("", "GUIVirtualInputController"),
     "GUIQuickActionButton": ("", "GUIQuickActionButton"),
+    "GUIMainMenu": ("", "GUIMainMenu"),
+    "SoundEngine": ("Terraria.Audio", "SoundEngine"),
     "ItemSnippet": ("Terraria.GameContent.UI.Chat", "ItemTagHandler.ItemSnippet"),
 }
 

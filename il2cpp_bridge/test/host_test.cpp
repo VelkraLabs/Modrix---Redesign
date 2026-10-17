@@ -172,6 +172,39 @@ void ItemTooltip(Il2CppObject* item, int32_t) {
 }
 
 // Ferramentas de teste (mod tlmod.devtools): nomes, hora, vida/mana, matar inimigos.
+int g_menuClicks = 0;
+void OnMenuClick() { ++g_menuClicks; }
+
+int TestMenu(void* lib) {
+    std::printf("\n== menu principal: botão Mods\n");
+    auto menu = reinterpret_cast<size_t (*)(bool, char*, size_t)>(dlsym(lib, "mock_game_main_menu"));
+    auto set_trial = reinterpret_cast<void (*)(bool)>(dlsym(lib, "mock_set_trial_mode"));
+    auto set_settings = reinterpret_cast<void (*)(bool)>(dlsym(lib, "mock_set_settings_visible"));
+    auto sounds = reinterpret_cast<int (*)(int*)>(dlsym(lib, "mock_sounds_played"));
+    CHECK(menu && set_trial && set_settings && sounds);
+    char label[32];
+    int last = 0;
+    // Sem botão configurado: só os 6 do jogo.
+    CHECK(menu(false, label, sizeof(label)) == 6 && std::string(label).empty());
+    TLMod_SetMainMenuButton("Mods", &OnMenuClick);
+    CHECK(menu(false, label, sizeof(label)) == 7 && std::string(label) == "Mods" && g_menuClicks == 0);
+    // Toque: o callback e o som do menu (10), uma vez.
+    CHECK(menu(true, label, sizeof(label)) == 7 && g_menuClicks == 1);
+    CHECK(sounds(&last) == 1 && last == 10);
+    // Com Configurações aberta por cima, o botão fica desativado.
+    set_settings(true);
+    CHECK(menu(true, label, sizeof(label)) == 7 && g_menuClicks == 1 && sounds(&last) == 1);
+    set_settings(false);
+    // Versão de teste: o lugar é do "Comprar o jogo completo".
+    set_trial(true);
+    CHECK(menu(true, label, sizeof(label)) == 7 && std::string(label) == "Comprar" && g_menuClicks == 1);
+    set_trial(false);
+    // Tirar o botão.
+    TLMod_SetMainMenuButton(nullptr, nullptr);
+    CHECK(menu(true, label, sizeof(label)) == 6 && g_menuClicks == 1);
+    return 0;
+}
+
 int TestTools(void* lib) {
     std::printf("\n== ferramentas (nomes, hora, vida/mana, matar inimigos)\n");
     auto skipCalls = reinterpret_cast<int (*)()>(dlsym(lib, "mock_skip_to_time_calls"));
@@ -856,6 +889,7 @@ int main(int argc, char** argv) {
     CHECK(TLMod_ReadStaticBool(hard, &b) && b);
 
     if (int rc = TestTools(lib)) return rc;
+    if (int rc = TestMenu(lib)) return rc;
     if (int rc = TestItems(lib)) return rc;
     if (int rc = TestDraw(lib)) return rc;
     if (int rc = TestScreens(lib)) return rc;

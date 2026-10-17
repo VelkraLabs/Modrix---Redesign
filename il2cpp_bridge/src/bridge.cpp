@@ -253,6 +253,7 @@ bool TLMod_Init(int timeoutMs) {
             bridge::InstallScreenHooks();
         }
         if (bridge::ResolveSaves()) bridge::InstallSaveHooks();
+        bridge::InstallMenuHooks();
         g_ready.store(true);
     } else {
         LOGE("timeout resolvendo Terraria.Player em %s", terraria::kAssembly);

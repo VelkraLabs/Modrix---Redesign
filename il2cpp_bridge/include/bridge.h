@@ -231,6 +231,15 @@ int32_t TLMod_KillHostileNpcs(float x, float y, float radius);
 typedef void (*TLModFrameCallback)(void);
 void TLMod_SetFrameCallback(TLModFrameCallback cb);
 
+// Botão extra no menu principal, desenhado pelo próprio jogo (o mesmo
+// GUITransactionButton dos outros) na posição de "Comprar o jogo completo",
+// que só existe na versão de teste. Na versão de teste, ou se essa posição
+// coincidir com a de outro botão, ele não aparece (o log diz por quê).
+// onClick roda na thread do jogo, no meio do desenho do menu: só enfileirar
+// trabalho. label nulo/vazio ou onClick nulo tira o botão. Qualquer thread.
+typedef void (*TLModMenuButtonCallback)(void);
+void TLMod_SetMainMenuButton(const char* label, TLModMenuButtonCallback onClick);
+
 // Só na thread do jogo (ex.: dentro do TLModFrameCallback): 1 = menu,
 // 0 = dentro de um mundo, -1 = indisponível. Lê LocalUserGameState.Instance
 // (ThreadStatic) .gameMenu; em outra thread Instance é nulo e o resultado é -1.
@@ -474,6 +483,7 @@ int32_t TLMod_Hooked_GUITransactionButtonDraw(Il2CppObject* layout, Il2CppObject
                                               bool hasControllerFocus, bool forceOver, bool disablePressedState,
                                               const MethodInfo* method);
 void TLMod_Hooked_GUIReforgePopupDrawItem(Il2CppObject* self, const MethodInfo* method);
+void TLMod_Hooked_GUIMainMenuDraw(Il2CppObject* self, const MethodInfo* method);  // menu_hooks.cpp
 void TLMod_Hooked_GUIResearchDrawResearchItem(Il2CppObject* self, const MethodInfo* method);
 int32_t TLMod_Hooked_GUIResearchCanBeResearched(Il2CppObject* self, Il2CppObject* item, int32_t* percent,
                                                 const MethodInfo* method);

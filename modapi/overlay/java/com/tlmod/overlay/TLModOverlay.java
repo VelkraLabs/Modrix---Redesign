@@ -71,6 +71,11 @@ public final class TLModOverlay {
     private final Map<String, EditText> searchFields = new HashMap<>();
     private long renderedVersion = -1;
     private JSONObject theme;
+    // Oficina de Mods: tela grande por cima do jogo (aberta pelo botão "Mods" do menu).
+    private FrameLayout workshop;
+    private TextView wsTitle, wsSummary, wsNotice, wsFooter, wsClose;
+    private ScrollView wsScroll;
+    private LinearLayout wsContent;
 
     private TLModOverlay(Activity activity, long handle) {
         this.activity = activity;
@@ -100,6 +105,7 @@ public final class TLModOverlay {
         theme = snap.optJSONObject("theme");
         buildFab();
         buildPanel();
+        buildWorkshop();
         render(snap);
         handler.postDelayed(ticker, TICK_MS);
     }
@@ -260,7 +266,14 @@ public final class TLModOverlay {
         if (version == renderedVersion) return;
         renderedVersion = version;
 
-        fab.setText(s.optJSONObject("fab") != null ? s.optJSONObject("fab").optString("label", "M") : "M");
+        JSONObject fabState = s.optJSONObject("fab");
+        fab.setText(fabState != null ? fabState.optString("label", "M") : "M");
+        fab.setVisibility(fabState == null || fabState.optBoolean("visible", true) ? View.VISIBLE : View.GONE);
+        JSONObject ws = s.optJSONObject("workshop");
+        boolean wsOpen = ws != null && ws.optBoolean("open");
+        workshop.setVisibility(wsOpen ? View.VISIBLE : View.GONE);
+        if (wsOpen) renderWorkshop(ws);
+
         boolean open = s.optBoolean("open");
         panel.setVisibility(open ? View.VISIBLE : View.GONE);
         if (!open) return;
@@ -306,6 +319,17 @@ public final class TLModOverlay {
 
     private void renderMods(JSONObject mods) {
         if (mods == null) return;
+        String wsButton = mods.optString("workshop_button");
+        if (!TextUtils.isEmpty(wsButton)) {
+            TextView b = text(wsButton, "text_sp", "panel_bg", true);
+            b.setGravity(Gravity.CENTER);
+            b.setPadding(dp(10), dp(8), dp(10), dp(8));
+            b.setBackground(rounded(color("accent"), 8, 0));
+            b.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { act("workshop_open", ""); }
+            });
+            addRow(b, 8);
+        }
         String notice = mods.optString("notice");
         if (!TextUtils.isEmpty(notice)) {
             TextView n = text(notice, "small_sp", "accent", false);
@@ -345,6 +369,158 @@ public final class TLModOverlay {
             row.addView(sw);
             addRow(row, 6);
         }
+    }
+
+    // ------------------------------------------------------------------------
+    // Oficina de Mods: fundo escurecido (consome os toques: o menu do jogo fica
+    // inerte embaixo) e um cartão com cabeçalho, seções e rodapé.
+    private void buildWorkshop() {
+        workshop = new FrameLayout(activity);
+        workshop.setBackgroundColor(0xB3000000);
+        workshop.setClickable(true);
+        workshop.setVisibility(View.GONE);
+        root.addView(workshop, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        LinearLayout card = new LinearLayout(activity);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setClickable(true);
+        card.setBackground(rounded(color("panel_bg"), theme.optInt("corner_dp", 12), color("panel_border")));
+        int pad = dp(14);
+        card.setPadding(pad, pad, pad, pad);
+
+        LinearLayout header = new LinearLayout(activity);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout titles = new LinearLayout(activity);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        wsTitle = text("", "title_sp", "accent", true);
+        wsTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, theme.optInt("title_sp", 16) + 4);
+        titles.addView(wsTitle);
+        wsSummary = text("", "small_sp", "text_dim", false);
+        titles.addView(wsSummary);
+        header.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        wsClose = text("", "text_sp", "text", true);
+        wsClose.setPadding(dp(14), dp(8), dp(14), dp(8));
+        wsClose.setBackground(rounded(color("tab_active_bg"), 8, 0));
+        wsClose.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { act("workshop_close", ""); }
+        });
+        header.addView(wsClose);
+        card.addView(header);
+
+        wsNotice = text("", "small_sp", "accent", true);
+        wsNotice.setPadding(0, dp(8), 0, 0);
+        card.addView(wsNotice);
+
+        wsScroll = new ScrollView(activity);
+        wsContent = new LinearLayout(activity);
+        wsContent.setOrientation(LinearLayout.VERTICAL);
+        wsScroll.addView(wsContent);
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        sl.topMargin = dp(8);
+        card.addView(wsScroll, sl);
+
+        wsFooter = text("", "small_sp", "text_dim", false);
+        wsFooter.setPadding(0, dp(8), 0, 0);
+        card.addView(wsFooter);
+
+        int margin = dp(theme.optInt("margin_dp", 12));
+        int screenW = activity.getResources().getDisplayMetrics().widthPixels;
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                Math.min(screenW - 2 * margin, dp(720)), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER);
+        lp.topMargin = lp.bottomMargin = margin;
+        workshop.addView(card, lp);
+    }
+
+    private void renderWorkshop(JSONObject ws) {
+        wsTitle.setText(ws.optString("title"));
+        wsSummary.setText(ws.optString("summary"));
+        wsClose.setText(ws.optString("close_label", "Fechar"));
+        String notice = ws.optString("notice");
+        wsNotice.setText(notice);
+        wsNotice.setVisibility(TextUtils.isEmpty(notice) ? View.GONE : View.VISIBLE);
+        wsFooter.setText(ws.optString("footer"));
+        wsContent.removeAllViews();
+        String empty = ws.optString("empty");
+        if (!TextUtils.isEmpty(empty)) {
+            TextView e = text(empty, "text_sp", "text_dim", false);
+            e.setPadding(0, dp(12), 0, dp(12));
+            wsContent.addView(e);
+        }
+        JSONArray sections = ws.optJSONArray("sections");
+        for (int i = 0; sections != null && i < sections.length(); i++) {
+            JSONObject sec = sections.optJSONObject(i);
+            TextView h = text(sec.optString("title"), "text_sp", "accent", true);
+            h.setPadding(dp(2), dp(i == 0 ? 2 : 12), 0, dp(6));
+            wsContent.addView(h);
+            JSONArray rows = sec.optJSONArray("rows");
+            for (int k = 0; rows != null && k < rows.length(); k++) wsContent.addView(workshopRow(rows.optJSONObject(k)));
+        }
+    }
+
+    private View workshopRow(final JSONObject r) {
+        LinearLayout card = new LinearLayout(activity);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.setBackground(rounded(color("row_bg"), 10, 0));
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cl.bottomMargin = dp(8);
+        card.setLayoutParams(cl);
+
+        LinearLayout top = new LinearLayout(activity);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout names = new LinearLayout(activity);
+        names.setOrientation(LinearLayout.VERTICAL);
+        names.addView(line(r.optString("name"), "text_sp", "text", true));
+        String by = r.optString("version");
+        if (!TextUtils.isEmpty(r.optString("authors")))
+            by = TextUtils.isEmpty(by) ? r.optString("authors") : by + " · " + r.optString("authors");
+        if (!TextUtils.isEmpty(by)) names.addView(line(by, "small_sp", "text_dim", false));
+        top.addView(names, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        String state = r.optString("state");
+        String pillColor = "loaded".equals(state) ? "defeated" : ("disabled".equals(state) ? "unknown" : "error");
+        TextView pill = text(r.optString("state_label"), "small_sp", "panel_bg", true);
+        pill.setPadding(dp(8), dp(2), dp(8), dp(2));
+        pill.setBackground(rounded(color(pillColor), 10, 0));
+        top.addView(pill);
+        View sw = toggle(r.optBoolean("enabled"));
+        sw.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { act("toggle_mod", r.optString("id")); }
+        });
+        top.addView(sw);
+        card.addView(top);
+
+        addIf(card, r.optString("description"), "small_sp", "text", 6);
+        addIf(card, r.optString("content"), "small_sp", "text_dim", 4);
+        addIf(card, r.optString("pending"), "small_sp", "accent", 4);
+        String toggleErr = r.optString("error_toggle");
+        if (!TextUtils.isEmpty(toggleErr)) {
+            TextView t = text(toggleErr, "small_sp", "error", true);
+            t.setPaintFlags(t.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG);
+            t.setPadding(0, dp(6), dp(12), dp(2));
+            t.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { act("workshop_expand", r.optString("id")); }
+            });
+            card.addView(t);
+        }
+        String error = r.optString("error");
+        if (!TextUtils.isEmpty(error)) {
+            // Inteiro e selecionável (a causa costuma estar no fim do dlerror).
+            TextView e = text(error, "small_sp", "error", false);
+            e.setTextIsSelectable(true);
+            e.setPadding(dp(8), dp(6), dp(8), dp(6));
+            e.setBackground(rounded(color("panel_bg"), 6, 0));
+            card.addView(e);
+        }
+        return card;
+    }
+
+    private void addIf(LinearLayout parent, String s, String sizeKey, String colorKey, int topDp) {
+        if (TextUtils.isEmpty(s)) return;
+        TextView t = text(s, sizeKey, colorKey, false);
+        t.setPadding(0, dp(topDp), 0, 0);
+        parent.addView(t);
     }
 
     // ------------------------------------------------------------------------

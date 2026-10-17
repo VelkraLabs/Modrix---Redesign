@@ -1433,15 +1433,54 @@ MethodInfo g_mGetAvailableRecipe{nullptr, "get_availableRecipe", 0};
 MethodInfo g_mGetFocusRecipe{nullptr, "get_focusRecipe", 0};
 
 // Botão de transação: GUITransactionButton.Draw(layout, Item, label, disabled, ref scale, 4 bools).
-int32_t MockTransactionDraw(Il2CppObject*, Il2CppObject* item, Il2CppObject*, bool, float*, bool, bool, bool, bool,
-                            const MethodInfo*) {
+// Devolve Clicked (0) para o layout em g_clickLayout (um toque simulado), senão None (3).
+Il2CppObject* g_clickLayout = nullptr;
+std::vector<std::pair<Il2CppObject*, std::string>> g_buttonsDrawn;  // (layout, rótulo) do último menu
+int32_t MockTransactionDraw(Il2CppObject* layout, Il2CppObject* item, Il2CppObject* label, bool, float*, bool, bool,
+                            bool, bool, const MethodInfo*) {
     if (item && At<int32_t>(item, kItemType) >= 1 && At<int32_t>(item, kItemStack) >= 1) DrewNamed(item);
-    return 0;
+    if (label) g_buttonsDrawn.emplace_back(layout, Utf8Of(label));
+    return layout && layout == g_clickLayout ? 0 : 3;
 }
 using TransactionFn = decltype(&MockTransactionDraw);
 TransactionFn g_transactionEntry = &MockTransactionDraw;
 Il2CppClass g_guiTransaction{"", "GUITransactionButton", {}, {}};
 MethodInfo g_mTransactionDraw{reinterpret_cast<Il2CppMethodPointer>(&MockTransactionDraw), "Draw", 9};
+
+// Menu principal: MainMenu_Layout.Instance com um TransactionButton_Layout por
+// botão; GUIMainMenu.Draw desenha os 6 do jogo (PurchaseFullGame só com TrialMode).
+Il2CppClass g_mainMenuLayout{"", "MainMenu_Layout", {}, {}};
+Il2CppObject* g_menuLayout = nullptr;
+FieldInfo g_fMenuLayoutInstance{"Instance", 0x0, &g_menuLayout};
+const char* const kMenuButtonNames[] = {"Singleplayer", "Multiplayer", "Achievements", "Settings",
+                                        "Tutorial",     "Credits",     "PurchaseFullGame", "PlayerProfile"};
+FieldInfo g_fMenuButtons[8] = {};
+Il2CppClass g_buttonLayout{"", "Button_Layout", {}, {}};
+FieldInfo g_fButtonLayout[] = {{"AnchorControl", 0x10, nullptr}, {"Anchor", 0x14, nullptr}, {"Location", 0x18, nullptr}};
+bool g_trialMode = false;
+FieldInfo g_fTrialMode{"TrialMode", 0x11EC, &g_trialMode, sizeof(bool)};
+Il2CppClass g_guiSettings{"", "GUISettings", {}, {}};
+FieldInfo g_fGuiSettingsVisible{"Visible", 0x10, nullptr};
+FieldInfo g_fGuiSettings{"GUISettings", 0x1C0, nullptr};
+Il2CppClass g_guiMainMenu{"", "GUIMainMenu", {}, {}};
+Il2CppClass g_soundEngine{"Terraria.Audio", "SoundEngine", {}, {}};
+MethodInfo g_mPlaySound{nullptr, "PlaySound", 6};
+int g_soundsPlayed = 0, g_lastSound = -1;
+Il2CppObject* MenuButton(int i) { return At<Il2CppObject*>(g_menuLayout, 0x20 + 8 * static_cast<size_t>(i)); }
+void MockMainMenuDraw(Il2CppObject*, const MethodInfo*) {
+    static const char* const kLabels[] = {"Um Jogador", "Multijogador", "Conquistas", "Configurações",
+                                          "Tutorial", "Créditos"};
+    float scale = 1.0f;
+    for (int i = 0; i < 6; ++i)
+        g_transactionEntry(MenuButton(i), nullptr, il2cpp_string_new(kLabels[i]), false, &scale, false, false, false,
+                           false, &g_mTransactionDraw);
+    if (g_trialMode)
+        g_transactionEntry(MenuButton(6), nullptr, il2cpp_string_new("Comprar"), false, &scale, false, false, false,
+                           false, &g_mTransactionDraw);
+}
+using MainMenuFn = decltype(&MockMainMenuDraw);
+MainMenuFn g_mainMenuEntry = &MockMainMenuDraw;
+MethodInfo g_mMainMenuDraw{reinterpret_cast<Il2CppMethodPointer>(&MockMainMenuDraw), "Draw", 0};
 
 // Reforja: GUIInstance.Active.GUIReforge.get_ReforgeItem().
 void MockReforgePopupDrawItem(Il2CppObject*, const MethodInfo*) {
@@ -1632,6 +1671,11 @@ bool InvokeScreens(const MethodInfo* m, void* obj, void** params, Il2CppObject**
         g_box.value = g_ammoItem != nullptr;
         return *result = &g_box.header, true;
     }
+    if (m == &g_mPlaySound) {
+        ++g_soundsPlayed;
+        g_lastSound = *static_cast<int32_t*>(params[0]);
+        return *result = nullptr, true;
+    }
     if (m == &g_mFromLiteral) {
         Il2CppObject* t = il2cpp_object_new(&g_networkText);
         At<Il2CppObject*>(t, kNetworkTextLiteral) = static_cast<Il2CppObject*>(params[0]);
@@ -1646,6 +1690,7 @@ bool PatchScreens(void* target, void* r) {
     else if (target == reinterpret_cast<void*>(&MockReforgePopupDrawItem)) g_reforgePopupEntry = reinterpret_cast<InstanceFn>(r);
     else if (target == reinterpret_cast<void*>(&MockDrawResearchItem)) g_researchEntry = reinterpret_cast<InstanceFn>(r);
     else if (target == reinterpret_cast<void*>(&MockCanBeResearched)) g_canResearchEntry = reinterpret_cast<CanResearchFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockMainMenuDraw)) g_mainMenuEntry = reinterpret_cast<MainMenuFn>(r);
     else if (target == reinterpret_cast<void*>(&MockSacrificeCap)) g_sacrificeCapEntry = reinterpret_cast<SacrificeCapFn>(r);
     else if (target == reinterpret_cast<void*>(&MockTooltipLines)) g_tooltipLinesEntry = reinterpret_cast<TooltipLinesFn>(r);
     else if (target == reinterpret_cast<void*>(&MockGuidePopupDrawItem)) g_guidePopupEntry = reinterpret_cast<InstanceFn>(r);
@@ -1665,7 +1710,25 @@ void InitScreens() {
     g_guiActive = NewObject(0x400);
     At<Il2CppObject*>(g_guiActive, 0x1A8) = NewObject(0x40);  // GUIReforge
     At<Il2CppObject*>(g_guiActive, 0xB0) = NewObject(0x40);   // GUICraftGuide
-    g_guiInstance.fields = {&g_fGuiActive, &g_fGuiFields[0], &g_fGuiFields[1]};
+    g_guiInstance.fields = {&g_fGuiActive, &g_fGuiFields[0], &g_fGuiFields[1], &g_fGuiSettings};
+    At<Il2CppObject*>(g_guiActive, 0x1C0) = NewObject(0x40);  // GUISettings
+    g_guiSettings.fields = {&g_fGuiSettingsVisible};
+    // Menu principal: botões em coluna (Location.Y de 60 em 60); PurchaseFullGame
+    // e PlayerProfile em lugares próprios.
+    g_menuLayout = NewObject(0x80);
+    for (int i = 0; i < 8; ++i) {
+        g_fMenuButtons[i] = FieldInfo{kMenuButtonNames[i], 0x20 + 8 * static_cast<size_t>(i), nullptr};
+        g_mainMenuLayout.fields.push_back(&g_fMenuButtons[i]);
+        Il2CppObject* b = NewObject(0x150);
+        At<int32_t>(b, 0x14) = 18;  // CentreBoth
+        At<float>(b, 0x1C) = i < 6 ? 60.0f * static_cast<float>(i) : (i == 6 ? 400.0f : -300.0f);
+        At<Il2CppObject*>(g_menuLayout, 0x20 + 8 * static_cast<size_t>(i)) = b;
+    }
+    g_mainMenuLayout.fields.push_back(&g_fMenuLayoutInstance);
+    g_buttonLayout.fields = {&g_fButtonLayout[0], &g_fButtonLayout[1], &g_fButtonLayout[2]};
+    g_main.fields.push_back(&g_fTrialMode);
+    g_guiMainMenu.methods = {&g_mMainMenuDraw};
+    g_soundEngine.methods = {&g_mPlaySound};
     g_guiReforge.methods = {&g_mGuiReforgeItem};
     g_guiCraftGuide.methods = {&g_mGuiGuideItem};
     g_recipe.fields = {&g_fRecipe[0], &g_fRecipe[1]};
@@ -1706,7 +1769,8 @@ void InitScreens() {
                             {&g_guiInstance, &g_guiReforge, &g_guiCraftGuide, &g_recipe, &g_guiTransaction,
                              &g_guiReforgePopup, &g_guiResearch, &g_guiCraftGuidePopup, &g_guiCrafting,
                              &g_guiVirtualInput, &g_guiQuickAction, &g_itemTagHandler, &g_networkText,
-                             &g_sacrificesCatalog});
+                             &g_sacrificesCatalog, &g_mainMenuLayout, &g_buttonLayout, &g_guiSettings,
+                             &g_guiMainMenu, &g_soundEngine});
 }
 
 }  // namespace
@@ -1740,6 +1804,28 @@ __attribute__((visibility("default"))) void* mock_game_research(void* item) {
 }
 __attribute__((visibility("default"))) int32_t mock_game_can_research(void* item, int32_t* percent) {
     return g_canResearchEntry(nullptr, static_cast<Il2CppObject*>(item), percent, &g_mCanBeResearched);
+}
+// Menu principal: desenha (com toque simulado no botão Mods se `clickMods`) e
+// devolve os rótulos desenhados, separados por '|'; `modsLabel` = o rótulo
+// desenhado na posição de PurchaseFullGame ("" se nenhum).
+__attribute__((visibility("default"))) size_t mock_game_main_menu(bool clickMods, char* modsLabel, size_t size) {
+    g_buttonsDrawn.clear();
+    g_clickLayout = clickMods ? MenuButton(6) : nullptr;
+    g_mainMenuEntry(NewObject(0x40), &g_mMainMenuDraw);
+    g_clickLayout = nullptr;
+    std::string mods;
+    for (const auto& [layout, label] : g_buttonsDrawn)
+        if (layout == MenuButton(6)) mods = label;
+    std::snprintf(modsLabel, size, "%s", mods.c_str());
+    return g_buttonsDrawn.size();
+}
+__attribute__((visibility("default"))) void mock_set_trial_mode(bool trial) { g_trialMode = trial; }
+__attribute__((visibility("default"))) void mock_set_settings_visible(bool visible) {
+    At<bool>(At<Il2CppObject*>(g_guiActive, 0x1C0), 0x10) = visible;
+}
+__attribute__((visibility("default"))) int mock_sounds_played(int* last) {
+    *last = g_lastSound;
+    return g_soundsPlayed;
 }
 // Tooltip: índice da linha "Pesquise mais N" (-1 = sem a linha), como no jogo.
 __attribute__((visibility("default"))) int32_t mock_game_tooltip_research_line(void* item) {

@@ -6,6 +6,13 @@ erro de carga inteiro e liga/desliga), aba **Boss Checklist** (JSON do mod
 com o caminho do `tlmod.log`). Mods que registram o canal `panel` (provedor e
 comando) ganham uma aba própria, como **Ferramentas** do `tlmod.devtools`.
 
+**Oficina de Mods.** Tela grande para gerenciar os mods, aberta pelo botão
+**Mods** que a ponte desenha no menu principal do jogo (ou pelo botão "Abrir a
+Oficina de Mods" da aba Mods). Mostra os mods em seções pelo estado desta
+sessão (Ativos, Desativados, Com erro), com versão, autores, descrição, o que
+cada um adiciona e o interruptor de liga/desliga. "Ver o erro" abre a mensagem
+inteira de um mod que falhou. A mudança vale na próxima abertura do jogo.
+
 ## Técnica: Views Android sobre a Activity do jogo
 
 O painel é feito de Views Android comuns, adicionadas à janela da Activity do
@@ -35,7 +42,14 @@ com o C++ é feita por JNI. Não precisa de permissão de sobreposição.
 
 O `PanelController` entrega um view-model em JSON (`SnapshotJson()`) que já
 traz textos, cores e medidas em dp. O Java só desenha esse JSON e devolve
-ações (`toggle_open`, `close`, `tab`, `toggle_mod`). A prévia lê o mesmo JSON.
+ações (`toggle_open`, `close`, `tab`, `toggle_mod`, `mod_command`,
+`workshop_open`, `workshop_close`, `workshop_expand`). A prévia lê o mesmo JSON.
+
+- **Oficina de Mods.** O botão do menu roda na thread do jogo: chama
+  `PanelController::RequestWorkshop()` (atômico), e a Oficina abre no próximo
+  `Tick`, na thread de UI. Abrir fecha o painel e esconde o botão flutuante; o
+  fundo escurecido consome os toques, então o menu do jogo fica inerte embaixo.
+  A posição do botão Mods no menu está em `il2cpp_bridge/src/menu_hooks.cpp`.
 
 - **Erro de carga.** O `detail` de um mod que falhou é a mensagem inteira (com
   o `dlerror()` completo). O Java quebra a linha em vez de pôr reticências, e o

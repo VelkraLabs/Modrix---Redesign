@@ -11,8 +11,10 @@
 // para chamar dessa thread.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -32,6 +34,9 @@ struct ModInfo {
     std::string version;
     rt::ModState state = rt::ModState::Discovered;
     std::string error;
+    std::string authors;      // "Ana, Bia"
+    std::string description;
+    std::string content;      // "2 itens, 1 NPC" (do "content" do manifest)
 };
 
 class PanelDataSource {
@@ -84,7 +89,20 @@ struct ModRow {
     std::string detail;     // mensagem de erro inteira, se houver (o renderizador quebra linha, não corta)
     bool enabled = true;    // valor do interruptor (configuração)
     std::string pending;    // "Será desativado ao reiniciar o jogo" ou vazio
+    // Só a Oficina de Mods usa:
+    std::string name;        // nome do mod
+    std::string version;     // "0.1.0" (vazio se o manifest não foi lido)
+    std::string stateLabel;  // "Carregado", "Erro"...
+    std::string authors;
+    std::string description;
+    std::string content;
 };
+
+// Oficina de Mods: a tela grande de gerenciar mods, aberta pelo botão "Mods"
+// do menu principal do jogo (ou pela aba Mods do painel). Seções pelo estado
+// desta sessão: Ativos (carregados), Desativados e Com erro. O interruptor muda
+// a configuração, que vale na próxima abertura do jogo (uma .so carregada não
+// é descarregada); a linha avisa o que vai mudar.
 
 struct SummaryItem {
     std::string label;  // "Bosses"
@@ -158,8 +176,17 @@ public:
     bool ToggleMod(const std::string& modId, std::string* error = nullptr);
     // Ponto de entrada do renderizador: "toggle_open", "close",
     // "tab" (arg "mods" | "checklist" | "log" | "mod:<id>"), "toggle_mod" (arg = id do mod),
-    // "mod_command" (arg = comando para o mod da aba aberta).
+    // "mod_command" (arg = comando para o mod da aba aberta), "workshop_open",
+    // "workshop_close", "workshop_expand" (arg = id do mod: mostra/esconde o erro).
     bool HandleAction(const std::string& action, const std::string& arg);
+
+    // Oficina de Mods. Abrir fecha o painel flutuante (a Oficina fica por cima de tudo).
+    void SetWorkshopOpen(bool open);
+    // Pedido de qualquer thread (o botão do menu roda na thread do jogo): a
+    // Oficina abre no próximo Tick, na thread do renderizador.
+    void RequestWorkshop() { workshopRequested_.store(true, std::memory_order_release); }
+    bool IsWorkshopOpen() const { return workshopOpen_; }
+    bool IsExpanded(const std::string& modId) const { return expanded_.count(modId) != 0; }
 
     // Chamado periodicamente pelo renderizador (ex.: a cada 250 ms).
     // Busca dados só com o painel aberto. Devolve true se o view-model mudou.
@@ -196,6 +223,10 @@ private:
     bool open_ = false;
     Tab tab_ = Tab::Mods;
     uint64_t version_ = 1;
+
+    bool workshopOpen_ = false;
+    std::atomic<bool> workshopRequested_{false};
+    std::set<std::string> expanded_;  // mods com o erro aberto na Oficina
 
     std::vector<ModInfo> mods_;     // lidos uma vez: não mudam com o jogo rodando
     bool modsLoaded_ = false;

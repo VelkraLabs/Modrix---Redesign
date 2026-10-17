@@ -397,6 +397,22 @@ Nenhum dos dois precisa de hook.
 
 Os dois são gerados por `tools/make_example_textures.py`.
 
+## Oficina de Mods
+
+Como a tela de mods do tModLoader: o botão **Mods** no menu principal do jogo abre a Oficina, com os
+mods em seções (**Ativos**, **Desativados**, **Com erro**), versão, autores, descrição, o que cada um
+adiciona (do `content` do manifest) e o interruptor de liga/desliga. Num mod que falhou, "Ver o erro"
+mostra a mensagem inteira. Ligar ou desligar vale na próxima abertura do jogo: uma `.so` carregada não
+é descarregada.
+
+O botão é desenhado pelo próprio jogo (`il2cpp_bridge/src/menu_hooks.cpp`): depois do
+`GUIMainMenu.Draw`, o mesmo `GUITransactionButton.Draw` dos outros botões, com o layout de "Comprar o
+jogo completo" (`MainMenu_Layout.PurchaseFullGame`). Esse botão só aparece na versão de teste
+(`Main.TrialMode`), então fora dela a posição está livre. Com Configurações aberta, o botão fica
+desativado, como os outros. Na primeira vez, o log registra a posição de cada botão do menu; se a do
+Mods coincidir com a de outro, ele não é desenhado e o log avisa. A Oficina continua acessível pela aba
+Mods do painel.
+
 ## Ferramentas e abas no painel
 
 API acrescentada ao fim da `TLModHostApi` (o `tlmod.hpp` confere o `struct_size`):

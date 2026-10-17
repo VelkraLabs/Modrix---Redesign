@@ -1,6 +1,7 @@
 // Gera view-models do painel a partir de dados fixos, para a prévia em PNG.
 //   overlay_snapshot sample_checklist.json <saída>/ [sample_panel.json]
-// Escreve snapshot_checklist.json, snapshot_mods.json e snapshot_log.json (e,
+// Escreve snapshot_checklist.json, snapshot_mods.json, snapshot_log.json e
+// snapshot_workshop.json (e,
 // com o terceiro argumento, snapshot_tools.json com a aba do tlmod.devtools):
 // exatamente o JSON que o renderizador Android recebe do PanelController.
 #include <cstdio>
@@ -27,13 +28,17 @@ public:
         : checklist_(std::move(checklist)), panel_(std::move(panel)) {}
     std::vector<overlay::ModInfo> Mods() const override {
         return {
-            {"tlmod.boss_checklist", "Boss Checklist", "0.1.0", rt::ModState::Loaded, ""},
-            {"tlmod.example_item", "Exemplo: Rubi Fictício", "0.1.0", rt::ModState::Loaded, ""},
+            {"tlmod.boss_checklist", "Boss Checklist", "0.1.0", rt::ModState::Loaded, "", "TLMod",
+             "Lista os bosses e eventos do mundo e marca os derrotados.", ""},
+            {"tlmod.example_item", "Exemplo: Rubi Fictício", "0.1.0", rt::ModState::Loaded, "", "TLMod",
+             "Um item que não existe no Terraria, para testar itens de mod.", "1 item"},
             {"tlmod.example_boss", "Exemplo: Titã de Brasa", "0.1.0", rt::ModState::Disabled,
-             "desativado nas configurações"},
+             "desativado nas configurações", "TLMod", "Um boss noturno com loot próprio.", "1 NPC"},
             {"acme.swords", "Espadas Lendárias", "1.4.0", rt::ModState::Rejected,
-             "dependência \"acme.core\" (^2.0.0) ausente ou rejeitada"},
-            {"acme.gems", "Gemas", "0.2.0", rt::ModState::Failed, kDlError},
+             "dependência \"acme.core\" (^2.0.0) ausente ou rejeitada", "Acme, Bia", "Doze espadas novas.",
+             "12 itens"},
+            {"acme.gems", "Gemas", "0.2.0", rt::ModState::Failed, kDlError, "Acme", "Gemas e joias.",
+             "4 itens, 1 bloco"},
         };
     }
     std::vector<rt::LogEntry> LogTail(size_t) const override {
@@ -96,6 +101,14 @@ int main(int argc, char** argv) {
     panel.SelectTab(overlay::Tab::Log);
     panel.Tick(2);
     std::ofstream(out / "snapshot_log.json") << panel.SnapshotJson();
+
+    // Oficina de Mods, com o erro do acme.gems aberto.
+    panel.HandleAction("workshop_open", "");
+    panel.HandleAction("workshop_expand", "acme.gems");
+    panel.Tick(3);
+    std::ofstream(out / "snapshot_workshop.json") << panel.SnapshotJson();
+    panel.HandleAction("workshop_close", "");
+    panel.SetOpen(true);
 
     if (argc > 3) {  // aba Ferramentas, logo depois de um toque em "+10"
         panel.SelectModTab("tlmod.devtools");

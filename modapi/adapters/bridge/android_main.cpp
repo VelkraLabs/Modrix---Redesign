@@ -33,6 +33,14 @@ void OnBridgeLog(int level, int64_t timeMs, const char* message) {
     tlmod::rt::RecordLog(static_cast<TLModLogLevel>(level), "ponte", message ? message : "", timeMs);
 }
 
+tlmod::overlay::PanelController* g_panel = nullptr;  // escrito antes de ligar o botão
+
+// Botão "Mods" do menu principal (thread do jogo, dentro do desenho do menu):
+// só pede a Oficina; ela abre no próximo Tick, na thread de UI.
+void OnMenuModsButton() {
+    if (g_panel) g_panel->RequestWorkshop();
+}
+
 std::string PackageName() {
     std::ifstream in("/proc/self/cmdline", std::ios::binary);
     std::string name;
@@ -108,8 +116,13 @@ void* RuntimeMain(void*) {
     static tlmod::overlay::LoaderDataSource source(loader);
     static tlmod::overlay::PanelController panel(source, config);
     std::string overlayError;
-    if (!tlmod::overlay::StartOverlay(&panel, 60000, &overlayError))
+    if (!tlmod::overlay::StartOverlay(&panel, 60000, &overlayError)) {
         tlmod::rt::Log(TLMOD_LOG_ERROR, "overlay", "painel não instalado: " + overlayError);
+        return nullptr;
+    }
+    // Oficina de Mods: botão "Mods" desenhado pelo jogo no menu principal.
+    g_panel = &panel;
+    TLMod_SetMainMenuButton("Mods", &OnMenuModsButton);
     return nullptr;
 }
 

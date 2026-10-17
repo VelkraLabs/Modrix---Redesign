@@ -302,6 +302,7 @@ constexpr size_t CreativeMenu = 0x50;          // CreativeUI Main.CreativeMenu
 constexpr size_t npcFrameCount = 0x1138;       // int[] Main.npcFrameCount (quadros na folha, por tipo)
 constexpr size_t itemAnimations = 0x10E8;      // DrawAnimation[] Main.itemAnimations (por type; nulo = sem animação)
 constexpr size_t recipe = 0x668;               // Recipe[] Main.recipe
+constexpr size_t TrialMode = 0x11EC;            // bool Main.TrialMode (privado): versão de teste
 }  // namespace main_static_off
 
 // --- Telas que leem TextureAssets.Item por conta própria (screen_hooks.cpp) -------
@@ -313,7 +314,36 @@ constexpr size_t Active = 0x0;  // GUIInstance
 namespace gui_instance_off {
 constexpr size_t GUICraftGuide = 0xB0;  // GUICraftGuide (guia: o item vem de get_guideItem)
 constexpr size_t GUIReforge = 0x1A8;    // GUIReforge (o item vem de get_ReforgeItem)
+constexpr size_t GUISettings = 0x1C0;   // GUISettings (aberta, desativa os botões do menu)
 }  // namespace gui_instance_off
+namespace gui_settings_off {
+constexpr size_t Visible = 0x10;  // bool
+}  // namespace gui_settings_off
+
+// --- Menu principal (menu_hooks.cpp) ----------------------------------------------
+// MainMenu_Layout.Instance: um TransactionButton_Layout por botão. PurchaseFullGame
+// ("Comprar o jogo completo") só é desenhado com Main.TrialMode: fora da versão de
+// teste a posição fica livre, e é onde vai o botão Mods.
+constexpr const char* kMainMenuLayoutClass = "MainMenu_Layout";  // namespace global
+namespace main_menu_layout_static_off {
+constexpr size_t Instance = 0x0;
+}  // namespace main_menu_layout_static_off
+namespace main_menu_layout_off {
+constexpr size_t Singleplayer = 0x20;
+constexpr size_t Multiplayer = 0x28;
+constexpr size_t Achievements = 0x30;
+constexpr size_t Settings = 0x38;
+constexpr size_t Tutorial = 0x40;
+constexpr size_t Credits = 0x48;
+constexpr size_t PurchaseFullGame = 0x50;
+constexpr size_t PlayerProfile = 0x58;
+}  // namespace main_menu_layout_off
+// Button_Layout (base de TransactionButton_Layout): onde o botão fica na tela.
+namespace button_layout_off {
+constexpr size_t AnchorControl = 0x10;  // ControlAnchor.ControlId (0 = Screen)
+constexpr size_t Anchor = 0x14;         // LayoutCalculator.AnchorType (9 = TopLeft ... 36 = BottomRight)
+constexpr size_t Location = 0x18;       // Vector2, relativo à âncora
+}  // namespace button_layout_off
 namespace gui_crafting_off {
 constexpr size_t CraftHover = 0x88;  // Recipe: a receita sob o dedo (ingredientes do tooltip)
 }  // namespace gui_crafting_off
@@ -467,6 +497,10 @@ constexpr uintptr_t GUIVirtualInputController_DrawControls = 0x9EF6D0;
 constexpr uintptr_t GUIQuickActionButton_Draw = 0x10604EC;      // botões rápidos (gancho: Grapple, GrappleFire)
 constexpr uintptr_t Main_DrawInterface_40_InteractItemIcon = 0xD0F8B8;  // ícone do item (e munição) junto do cursor
 constexpr uintptr_t ItemSnippet_UniqueDraw = 0x97F0D8;           // [i:ID] no chat (mede pela textura)
+// Menu principal: o botão Mods é desenhado depois do original, com o mesmo
+// GUITransactionButton.Draw (InputState: 0 = Clicked) e o som 10 do clique.
+constexpr uintptr_t GUIMainMenu_Draw = 0xA4397C;
+constexpr uintptr_t SoundEngine_PlaySound = 0x15F578C;  // (int type, int x, int y, int Style, float, float)
 // Nome de NPC: o jogo só lê Lang pelo netID (o da casca).
 constexpr uintptr_t NPC_get_TypeName = 0xED9240;   // Lang.GetNPCNameValue(netID): hover, barra, mapa, morte
 constexpr uintptr_t NPC_GetTypeNetName = 0xEDB0BC; // NetworkText.FromKey(...): "X despertou!", "X foi derrotado"
@@ -537,6 +571,8 @@ constexpr int GUIVirtualInputController_DrawControls = 0;
 constexpr int GUIQuickActionButton_Draw = 4;    // 2 overloads de 4: o do QuickActionControl
 constexpr int Main_DrawInterface_40_InteractItemIcon = 0;
 constexpr int ItemSnippet_UniqueDraw = 6;
+constexpr int GUIMainMenu_Draw = 0;
+constexpr int SoundEngine_PlaySound = 6;  // o único overload de 6
 constexpr int NPC_get_TypeName = 0;
 constexpr int NPC_GetTypeNetName = 0;
 }  // namespace argc
