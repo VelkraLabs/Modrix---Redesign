@@ -1,42 +1,40 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**16ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**17ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-**Receitas de mod.** Os mods agora podem cadastrar receitas, que aparecem na fabricação do jogo e no
-Guia como as outras. O mod de exemplo (Rubi Fictício) ganhou duas, ambas na **Bancada de Trabalho**:
+**Novo layout do overlay** (o que fica por cima do jogo):
 
-| receita | ingredientes |
-|---|---|
-| 1 Rubi Fictício | 10 Blocos de Pedra + 5 Géis |
-| 1 Rubi (o do jogo) | 5 Rubis Fictícios |
+- O botão amarelo **"M"** agora abre **só o Log**.
+- Dentro de um mundo, aparecem **dois ícones** numa coluna logo abaixo do "M":
+  - **prancheta** (Boss Checklist): abre uma **gaveta** que desliza da esquerda para a direita, na
+    altura toda da tela, com a lista de bosses;
+  - **chave inglesa** (Ferramentas): abre um **modal** no centro, com hora, jogador, invocar e dar item.
+- Só uma tela fica aberta por vez. Para fechar: tocar no ícone de novo, no **✕** ou no fundo escurecido.
+- No menu principal os ícones somem (o "M" continua). Sair do mundo fecha a gaveta e o modal.
+- A aba **Mods** saiu do painel: os mods se gerenciam pela Oficina de Mods, no botão **Mods** do menu
+  principal.
 
-A segunda usa o item de mod como ingrediente. O Rubi Fictício roda "dentro" de uma Lente (a casca),
-mas o jogo não confunde os dois: Lentes não servem no lugar de Rubis Fictícios, e Rubis Fictícios não
-servem nas receitas que pedem Lente. As receitas de mod também não são desfeitas no Shimmer.
-
-O `tlmod.log` ganha uma linha `receitas: N do jogo, 2 de mods (...), sobram K de 3000 posições`,
-seguida de uma linha por receita.
+As receitas da 16ª versão continuam no pacote (a lista do que conferir está mais abaixo).
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 428744 bytes, `fa433de2e89f9bb9…` | 435888 bytes, `a6557071e12c6d4d…` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 937264 bytes, `8f5ecb056839228b…` | 949984 bytes, `4451706eb8bd1afc…` |
-| `tlmod/mods/example_item/lib/android-arm64/libexample_item.so` | 224944 bytes, `e77a6be77d5620e0…` | 226528 bytes, `0d04150ed12ee97e…` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 949984 bytes, `4451706eb8bd1afc…` | 959080 bytes, `26dd0947edbe713e…` |
+| `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490840 bytes, `931a7f67bec83deb…` | 490872 bytes, `92fdc9e524e20302…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
-Todo o resto é idêntico, byte a byte, ao pacote anterior: as `.so` dos outros 3 mods, os
+Todo o resto é idêntico, byte a byte, ao pacote anterior: a ponte, as `.so` dos outros 3 mods, os
 manifestos, as texturas, os marcadores e o `tlmod_config.json`.
 
-**Para atualizar o aparelho:** troque as duas `.so` no seu carregador e a `.so` do mod de exemplo
-(`tlmod/mods/example_item/lib/android-arm64/libexample_item.so`). O resto da pasta `tlmod/` pode ficar
-como está.
+**Para atualizar o aparelho:** troque a `libtlmod_runtime.so` no seu carregador e a `.so` do mod
+Ferramentas (`tlmod/mods/devtools/lib/android-arm64/libdevtools.so`). O resto da pasta `tlmod/` pode
+ficar como está.
 
 ## Conteúdo
 
@@ -54,8 +52,8 @@ tlmod-teste/
         │   └── give_on_start       marcador: 3 rubis ao entrar num mundo
         ├── example_boss/           Titã de Brasa (boss de mod)
         │   └── spawn_on_start      marcador: invoca o boss ao entrar num mundo
-        ├── boss_checklist/         lista de bosses derrotados (aba do painel)
-        └── devtools/               aba Ferramentas: hora, itens, invocar, curar (só para testes)
+        ├── boss_checklist/         lista de bosses derrotados (gaveta da prancheta)
+        └── devtools/               Ferramentas (chave inglesa): hora, itens, invocar, curar (só para testes)
 ```
 
 ## Versão do jogo
@@ -73,7 +71,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `169f2fc` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `c43a38b` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -146,18 +144,16 @@ Acompanhe pelo logcat: `adb logcat -s TLMod TLModBridge`.
      `catálogo de nomes pronto: 5456 itens, 688 NPCs`.
    - `Rubi Fictício registrado com ID ...`, `give_on_start: 3 Rubis Fictícios ao entrar num mundo`,
      `Titã de Brasa registrado com ID ...` e `spawn_on_start: Titã de Brasa ao entrar num mundo`.
-2. **Botão do painel.** Um botão redondo com **"M"** no canto superior esquerdo, um pouco abaixo
-   do topo. Ele aparece no menu e no mundo, e pode ser arrastado. O toque abre o painel com quatro abas:
-   - **Mods**: os 4 mods como **Carregado**, cada um com um botão de liga/desliga. Mudanças valem
-     na próxima abertura do jogo e ficam gravadas em `tlmod/tlmod_config.json`. Se algum falhar,
-     o erro aparece inteiro embaixo do nome, em vermelho.
-   - **Boss Checklist**: bosses, minibosses e eventos com status. No menu tudo aparece como
-     desconhecido; dentro do mundo aparecem derrotado ou pendente, mais o próximo boss pendente.
-   - **Log**: o caminho do `tlmod.log` e as últimas 150 linhas (erros em vermelho, avisos em
-     amarelo), atualizadas a cada segundo e acompanhando o fim. Inclui as linhas da ponte
-     (`[ponte]`) desde o início do jogo.
-   - **Ferramentas**: a hora atual do mundo e os botões de hora, jogador, invocar e dar item (veja a
-     seção abaixo).
+2. **Botão "M" e ícones.** Um botão redondo com **"M"** no canto superior esquerdo, um pouco abaixo
+   do topo. Ele aparece no menu e no mundo, e pode ser arrastado. O toque abre o **Log**: o caminho do
+   `tlmod.log` e as últimas 150 linhas (erros em vermelho, avisos em amarelo), atualizadas a cada
+   segundo e acompanhando o fim, desde o início do jogo (inclui as linhas da ponte, `[ponte]`).
+   Dentro de um mundo, abaixo do "M", ficam dois ícones:
+   - **prancheta**: a gaveta do **Boss Checklist** (desliza da esquerda), com bosses, minibosses e
+     eventos (derrotado ou pendente) e o próximo boss pendente;
+   - **chave inglesa**: o modal **Ferramentas**, com a hora atual do mundo e os botões de hora,
+     jogador, invocar e dar item (veja a seção abaixo).
+   Os mods se ligam e desligam pela **Oficina de Mods** (botão **Mods** do menu principal).
 3. **Os 3 rubis.** No primeiro frame dentro do mundo chegam **3 Rubis Fictícios** ao
    inventário (empilhados num slot). Eles têm o ícone vermelho do mod, o nome "Rubi Fictício" e o
    tooltip "Não existe no Terraria. Existe no TLMod.", com raridade verde e valor de 50 de prata.
@@ -170,11 +166,11 @@ Acompanhe pelo logcat: `adb logcat -s TLMod TLModBridge`.
 
 Os dois marcadores valem **uma vez por abertura do jogo**: sair do mundo e entrar de novo não repete,
 fechar e abrir o jogo repete. Para parar, apague `give_on_start` e `spawn_on_start`, ou desligue
-o mod no painel.
+o mod na Oficina de Mods.
 
-## Testes rápidos com a aba Ferramentas
+## Testes rápidos com as Ferramentas
 
-Com a aba, quase toda a checklist abaixo pode ser feita sem esperar o jogo:
+Com o modal Ferramentas (chave inglesa), quase toda a checklist abaixo pode ser feita sem esperar o jogo:
 
 - **Noite para o Titã:** toque em Meia-noite e depois em Congelar hora.
 - **Boss:** em Invocar, toque em Titã de Brasa (ou num dos 16 bosses). Ele nasce perto de você.
@@ -186,7 +182,7 @@ Com a aba, quase toda a checklist abaixo pode ser feita sem esperar o jogo:
 - **Loja:** invoque o Mercador (busque `mercador` ou `17` em Invocar), abra a loja e venda um rubi: rende cerca de 10 de prata (1/5 do valor de 50 de prata; a felicidade do NPC muda um pouco, como
   11 prata 23 cobre).
 
-Os marcadores `give_on_start` e `spawn_on_start` continuam no pacote; com a aba, você pode apagá-los.
+Os marcadores `give_on_start` e `spawn_on_start` continuam no pacote; com as Ferramentas, você pode apagá-los.
 
 ## O que só dá para confirmar no aparelho
 
@@ -201,8 +197,17 @@ dependem do jogo real.
 - [ ] Todos os hooks aparecem como `instalado`, sem aviso de RVA ou offset divergente
 - [ ] O jogo abre e chega ao menu sem travar nem fechar
 
-**Aba Ferramentas (tlmod.devtools)**
-- [ ] A aba aparece com o nome Ferramentas, e as 4 abas cabem numa linha
+**Ícones, gaveta e modal**
+- [ ] No menu principal só aparece o "M"; ao entrar num mundo, surgem a prancheta e a chave inglesa
+      abaixo dele
+- [ ] O "M" abre só o Log (sem abas)
+- [ ] A prancheta abre a gaveta do Boss Checklist deslizando da esquerda para a direita; tocar no
+      fundo escurecido, no ✕ ou na prancheta de novo fecha (deslizando de volta)
+- [ ] A chave inglesa abre o modal Ferramentas no centro; o fundo escurecido, o ✕ ou a chave fecham
+- [ ] Abrir um fecha o outro (só uma tela por vez); voltar ao menu fecha o que estiver aberto
+- [ ] Os ícones têm o desenho certo (prancheta com marcas de "feito" e chave inglesa)
+
+**Ferramentas (tlmod.devtools)**
 - [ ] Hora: os 4 botões mudam a hora, e a nota "Agora: ..." acompanha; Congelar segura a hora
 - [ ] Busca: o teclado abre no campo, o texto não some enquanto você digita, e Buscar (ou o botão de
       busca do teclado) mostra os resultados; nomes com acento acham sem acento
@@ -212,9 +217,9 @@ dependem do jogo real.
 - [ ] Invocar: os bosses e o Titã nascem perto do jogador; Os Gêmeos chegam os dois
 - [ ] Invencível impede o dano; Curar enche vida e mana; Matar inimigos mata os hostis próximos
       (com loot), sem matar NPCs da cidade
-- [ ] A resposta (ex.: "10x Lente entregue (o que não couber cai no chão)") aparece no topo da aba e some
-      depois de alguns segundos
-- [ ] Desligar o devtools na aba Mods tira a aba Ferramentas na abertura seguinte
+- [ ] A resposta (ex.: "10x Lente entregue (o que não couber cai no chão)") aparece no topo do modal e
+      some depois de alguns segundos
+- [ ] Desligar o devtools na Oficina de Mods tira a chave inglesa na abertura seguinte
 
 **Receitas de mod**
 - [ ] O `tlmod.log` tem `receitas: ... 2 de mods` e as duas linhas `receita tlmod.example_item: ... na posição N`
@@ -260,20 +265,17 @@ dependem do jogo real.
 - [ ] `getCodeCacheDir` funciona (nenhum aviso `Context.getCodeCacheDir indisponível` no log)
 - [ ] `tlmod/tlmod.log` é criado, começa cada abertura com `===== TLMod: sessão iniciada`, e tem as
       linhas `[ponte]` do início (hooks instalados) e as do runtime e dos mods
-- [ ] Se um mod falhar, o erro aparece inteiro no painel e no `tlmod.log`, sem reticências
+- [ ] Se um mod falhar, o erro aparece inteiro nos detalhes da Oficina de Mods e no `tlmod.log`, sem reticências
 
 **Painel**
 - [ ] O botão "M" aparece por cima do jogo (OpenGL ES ou Vulkan) e pode ser arrastado
 - [ ] Toques fora do painel continuam indo para o jogo; toques no painel não vazam
-- [ ] A aba Mods mostra os 4 mods carregados; desligar um grava `tlmod_config.json` e vale na
-      abertura seguinte
-- [ ] A aba Log rola, acompanha linhas novas e deixa selecionar e copiar o texto
+- [ ] O Log rola, acompanha linhas novas e deixa selecionar e copiar o texto
 - [ ] Os acentos aparecem certos (Titã, Fictício)
 
 **Boss Checklist**
-- [ ] Fora do mundo tudo aparece como desconhecido
 - [ ] Num mundo, o status bate com o progresso real (comparar com um mundo conhecido)
-- [ ] Depois de derrotar um boss, a lista atualiza ao reabrir a aba
+- [ ] Depois de derrotar um boss, a lista atualiza (com a gaveta aberta, em até 1 s)
 
 **Rubi Fictício**
 - [ ] Os 3 rubis chegam ao entrar no mundo, empilhados, com ícone, nome e tooltip do mod
@@ -310,10 +312,10 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 | arquivo | bytes | SHA-256 |
 |---|---|---|
 | `lib/arm64-v8a/libtlmod_bridge.so` | 435888 | `a6557071e12c6d4d8d6a6e3052868bcf588f41c6fa8a7c069d4e1a869b0d89ed` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 949984 | `4451706eb8bd1afc3cec77a8788a2564fa7bba15f38a1567bf20635e5df7fc25` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 959080 | `26dd0947edbe713e9ede50f5b470e3d152a609e56283d43e62740003dd3c2a0f` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
-| `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490840 | `931a7f67bec83deb9fa80e256b0ac61fca0194e7e95c75bce815f34d5c9ec8a8` |
+| `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490872 | `92fdc9e524e203021e221e3e12d71422a8a75381f134ddfc926b7a64cb9e5d9c` |
 | `tlmod/mods/devtools/manifest.json` | 701 | `74cb60b82025d08314dab060767a8ced69c566cfc87a7e3fab06a2a546c0cf2e` |
 | `tlmod/mods/example_boss/lib/android-arm64/libexample_boss.so` | 225664 | `e07ca2d00d92d86d52d0c5ff3a47da6e856a7fb7136c7b94afd0d94bf3b57862` |
 | `tlmod/mods/example_boss/manifest.json` | 668 | `9264b2a34f56647e5a3cc9fd9f69362cd423c2c6df66d4ba086e537ff34ef38a` |

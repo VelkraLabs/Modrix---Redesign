@@ -1,18 +1,21 @@
-# Entrega: pacote de teste do TLMod (16ª versão)
+# Entrega: pacote de teste do TLMod (17ª versão)
 
 Branch só para download, sem o código. Pode ser apagada depois.
 
 | arquivo | SHA-256 |
 |---|---|
-| `tlmod-teste.zip` | `6a8a7914a5592d35407e50fd5b692ec7454509cf7077e7a51161c1b3cca74bb6` |
+| `tlmod-teste.zip` | `bb1285298def86dbff8eff1785f5ced82b3b43697721f1eab9870bd4494c7d4e` |
 | `libtlmod_bridge.so` | `a6557071e12c6d4d8d6a6e3052868bcf588f41c6fa8a7c069d4e1a869b0d89ed` |
-| `libtlmod_runtime.so` | `4451706eb8bd1afc3cec77a8788a2564fa7bba15f38a1567bf20635e5df7fc25` |
-| `libexample_item.so` | `0d04150ed12ee97ea566ca261d30179dfb671c0db89e675a85f21199b393a6de` |
-| `README_TESTE.md` | `16f260c51cddaaa302a31472aa4a27d5d5fd16b8c5abdff1c0f6fb49b3f75a8a` |
+| `libtlmod_runtime.so` | `26dd0947edbe713e9ede50f5b470e3d152a609e56283d43e62740003dd3c2a0f` |
+| `libdevtools.so` | `92fdc9e524e203021e221e3e12d71422a8a75381f134ddfc926b7a64cb9e5d9c` |
+| `README_TESTE.md` | `4ef80d6d4aba17f2790526f0d0269ec5819efb803b2bf2a6d36f6567337a2ae7` |
 
 - `tlmod-teste.zip`: o pacote completo.
-- `libtlmod_bridge.so`, `libtlmod_runtime.so` e `libexample_item.so` (vai em
-  `tlmod/mods/example_item/lib/android-arm64/`): as três que mudaram desde a 15ª versão
-  (receitas de mod; o mod de exemplo ganhou duas receitas). O resto da pasta `tlmod/` não mudou.
+- `libtlmod_runtime.so` e `libdevtools.so` (vai em `tlmod/mods/devtools/lib/android-arm64/`):
+  as duas que mudaram desde a 16ª versão (novo layout do overlay: "M" só com o Log, ícones do Boss
+  Checklist e das Ferramentas). A ponte e o resto da pasta `tlmod/` não mudaram.
+- `previa_overlay.png`: prévia do novo layout, desenhada no PC a partir dos mesmos dados do painel
+  (não é uma captura do jogo).
+- `libexample_item.so` (da 16ª versão) foi tirado daqui: não mudou.
 
-Gerado a partir do commit `169f2fc` da branch `ccr-bbd92bf9-i01buk`.
+Gerado a partir do commit `c43a38b` da branch `ccr-bbd92bf9-i01buk`.
