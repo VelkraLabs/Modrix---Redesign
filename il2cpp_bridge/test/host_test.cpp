@@ -331,6 +331,11 @@ int TestWorkshop(void* lib) {
     f = frame(0, 0, false);
     CHECK(has(f, "nome:Boss Checklist") && !has(f, "nome:Mod 5"));
 
+    // Toque fora da lista (sem região registrada ali): o jogo não o entrega; nada abre.
+    frame(50, 50, true);
+    frame(50, 50, false);
+    f = frame(0, 0, false);
+    CHECK(has(f, "titulo:Oficina de Mods") && has(f, "nome:Boss Checklist"));
     // Toque na 2ª linha (y 160..210): apertar e soltar no mesmo lugar abre os detalhes.
     frame(300, 190, true);
     frame(300, 190, false);

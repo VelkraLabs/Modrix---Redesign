@@ -64,8 +64,9 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
 14. Oficina de Mods nativa (`src/workshop_screen.cpp`, `TLMod_SetWorkshopSource`/`TLMod_OpenWorkshop`):
     com ela aberta, o hook do `GUIMainMenu.Draw` desenha a Oficina no lugar do menu, com as peças da seleção
     de mundos (`WorldSelectMenu_Layout`, `GUIPanel`, `GUIString`), linhas e texto de detalhes com rolagem
-    própria. O ícone do item de cada mod vai com `LayoutCalculator.DrawCentred`, e o toque vem de
-    `Mouse.GetUICursorPosition` (espaço da interface; `Main.mouseX/Y` é em pixels da tela).
+    própria. O ícone do item de cada mod vai com `LayoutCalculator.DrawCentred`. A área da lista
+    é registrada a cada frame com `GUIInputRegionManager.RegisterInputRegion`, como fazem os botões
+    do jogo: no celular, um toque fora das regiões registradas não chega à interface.
 
 ## Log
 

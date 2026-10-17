@@ -69,6 +69,8 @@ typedef bool (*KeyUpFn)(int32_t key, const MethodInfo*);
 typedef int32_t (*StaticIntFn)(const MethodInfo*);
 typedef bool (*StaticBoolFn)(const MethodInfo*);
 typedef TLModXnaVector2 (*StaticVectorFn)(const MethodInfo*);
+typedef TLModXnaVector2 (*InstanceVectorFn)(Il2CppObject* self, const MethodInfo*);
+typedef bool (*RegisterRegionFn)(Il2CppObject* self, TLModXnaRectangle rect, const MethodInfo*);
 typedef void (*DrawCentredFn)(Il2CppObject* batch, TLModXnaVector2 position, float scale, Il2CppObject* texture,
                               uint64_t color, const MethodInfo*);
 
@@ -110,8 +112,14 @@ struct Resolved {
     const MethodInfo* mouseY = nullptr;
     const MethodInfo* mouseLeft = nullptr;
     // Mouse.GetUICursorPosition(): o toque no espaço da interface (o dos layouts).
-    // Main.mouseX/Y é em pixels da tela, que no celular é maior (ex.: 1600 contra 969).
     const MethodInfo* uiCursor = nullptr;
+    // GUIInputRegionManager: no celular, um toque só chega à interface (Main.mouseLeft e a
+    // posição) se cair numa região registrada no frame anterior; cada botão do jogo
+    // registra a sua ao ser desenhado. RegisterInputRegion(Rectangle) devolve se o cursor
+    // da interface (MousePosition) está nela.
+    FieldInfo* inputManager = nullptr;  // static GUIInputRegionManager.Instance
+    const MethodInfo* registerRegion = nullptr;
+    const MethodInfo* inputMouse = nullptr;  // get_MousePosition
     const MethodInfo* drawCentred = nullptr;  // LayoutCalculator.DrawCentred(batch, Vector2, float, Texture2D, Color?)
 };
 Resolved r;
@@ -347,19 +355,24 @@ bool Inside(const TLModXnaRectangle& q, float x, float y) {
 // Toque numa área com rolagem: arrastar muda `scroll` (limitado a [0, maxScroll]);
 // ao soltar, a rolagem encaixa num múltiplo de `step`. Devolve true num toque
 // curto (soltar perto de onde apertou, sem arrastar); `at` = onde foi.
-int g_pressesLogged = 0;  // os primeiros toques vão para o log (os dois espaços de coordenadas)
+int g_pressesLogged = 0;  // os primeiros toques vão para o log
 
 bool TrackTouch(const TLModXnaRectangle& area, float* scroll, float maxScroll, float step, TLModXnaVector2* at) {
+    // A área entra nas regiões de toque da interface, como um botão do jogo: sem isso o
+    // toque nela não chega aqui (só o de cima de Voltar chegava).
+    Il2CppObject* manager = StaticObject(r.inputManager);
+    const bool over = manager && Ptr<RegisterRegionFn>(r.registerRegion)(manager, area, r.registerRegion);
     const bool down = Ptr<StaticBoolFn>(r.mouseLeft)(r.mouseLeft);
     const int32_t mx = Ptr<StaticIntFn>(r.mouseX)(r.mouseX), my = Ptr<StaticIntFn>(r.mouseY)(r.mouseY);
-    const TLModXnaVector2 ui = r.uiCursor ? Ptr<StaticVectorFn>(r.uiCursor)(r.uiCursor)
-                                          : TLModXnaVector2{static_cast<float>(mx), static_cast<float>(my)};
+    TLModXnaVector2 ui{static_cast<float>(mx), static_cast<float>(my)};
+    if (manager) ui = Ptr<InstanceVectorFn>(r.inputMouse)(manager, r.inputMouse);
+    else if (r.uiCursor) ui = Ptr<StaticVectorFn>(r.uiCursor)(r.uiCursor);
     const float x = ui.x, y = ui.y;
     bool tapped = false;
-    if (down && !g_touch.prevDown && g_pressesLogged < 3) {
+    if (down && !g_touch.prevDown && g_pressesLogged < 5) {
         ++g_pressesLogged;
-        LOGI("Oficina: toque em (%.0f, %.0f) na interface, (%d, %d) em Main.mouse; área (%d, %d) %dx%d", x, y, mx, my,
-             area.x, area.y, area.width, area.height);
+        LOGI("Oficina: toque em (%.0f, %.0f) na interface, (%d, %d) em Main.mouse, %s da área (%d, %d) %dx%d", x, y,
+             mx, my, over ? "dentro" : "fora", area.x, area.y, area.width, area.height);
     }
     if (down && !g_touch.prevDown) {
         g_touch.pressed = Inside(area, x, y);
@@ -556,6 +569,11 @@ bool ResolveWorkshop() {
     r.mouseY = Method(MainClass(), "get_mouseY", argc::Main_get_mouseY);
     r.mouseLeft = Method(MainClass(), "get_mouseLeft", argc::Main_get_mouseLeft);
     r.uiCursor = Method("Microsoft.Xna.Framework.Input", "Mouse", "GetUICursorPosition", argc::Mouse_GetUICursorPosition);
+    Il2CppClass* inputManager = api.il2cpp_class_from_name(img, "", "GUIInputRegionManager");
+    r.inputManager = inputManager ? api.il2cpp_class_get_field_from_name(inputManager, "Instance") : nullptr;
+    r.registerRegion = MethodWithParam(inputManager, "RegisterInputRegion", argc::GUIInputRegionManager_RegisterInputRegion,
+                                       0, "Microsoft.Xna.Framework.Rectangle");
+    r.inputMouse = Method(inputManager, "get_MousePosition", argc::GUIInputRegionManager_get_MousePosition);
     r.drawCentred = MethodWithParam(api.il2cpp_class_from_name(img, "", "LayoutCalculator"), "DrawCentred",
                                     argc::LayoutCalculator_DrawCentred, 1, "Microsoft.Xna.Framework.Vector2");
 
@@ -563,7 +581,7 @@ bool ResolveWorkshop() {
                             r.panelRegion,    r.stringDraw,    r.stringDrawColor,   r.stringRegion, r.wrap,
                             r.stringButton,   r.setGridRegion, r.anchored,          r.transactionDraw, r.begin,
                             r.end,            r.stringCtor,    r.stringCopy,        r.mouseX,       r.mouseY,
-                            r.mouseLeft};
+                            r.mouseLeft,      r.inputManager,  r.registerRegion,    r.inputMouse};
     int missing = 0;
     for (const void* p : needed) missing += p == nullptr;
     if (missing) {

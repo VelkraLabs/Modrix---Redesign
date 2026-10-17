@@ -111,6 +111,7 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
     "KeyboardInput": ("", "KeyboardInput"),
     "LayoutCalculator": ("", "LayoutCalculator"),
     "Mouse": ("Microsoft.Xna.Framework.Input", "Mouse"),
+    "GUIInputRegionManager": ("", "GUIInputRegionManager"),
     "SoundEngine": ("Terraria.Audio", "SoundEngine"),
     "ItemSnippet": ("Terraria.GameContent.UI.Chat", "ItemTagHandler.ItemSnippet"),
 }

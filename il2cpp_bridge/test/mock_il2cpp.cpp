@@ -1606,14 +1606,31 @@ void MockStringLayoutCopy(Il2CppObject* self, Il2CppObject* other, const MethodI
 }
 MethodInfo g_mStringLayoutCtor{reinterpret_cast<Il2CppMethodPointer>(&MockStringLayoutCtor), ".ctor", 0};
 MethodInfo g_mStringLayoutCopy{reinterpret_cast<Il2CppMethodPointer>(&MockStringLayoutCopy), "Copy", 1};
-// Como no aparelho: Main.mouseX/Y em pixels da tela (1,65 por unidade da interface) e
-// Mouse.GetUICursorPosition no espaço dos layouts.
+// Como no aparelho: um toque só chega à interface (Main.mouseLeft, Main.mouseX/Y e
+// Mouse.GetUICursorPosition) se começar numa região registrada no GUIInputRegionManager
+// no frame anterior; fora delas, nada muda. O cursor do gerenciador sempre segue o dedo.
 int32_t g_mouseX = 0, g_mouseY = 0;
-MockVec2 g_uiCursor{};
-bool g_mouseDown = false, g_escape = false;
+MockVec2 g_uiCursor{}, g_inputCursor{};
+bool g_mouseDown = false, g_escape = false, g_touchRouted = false;
+std::vector<MockRectI> g_regionsPrev, g_regionsNow;
+bool MockContains(const MockRectI& q, float x, float y) {
+    return x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h;
+}
 MockVec2 MockUICursor(const MethodInfo*) { return g_uiCursor; }
 MethodInfo g_mUICursor{reinterpret_cast<Il2CppMethodPointer>(&MockUICursor), "GetUICursorPosition", 0};
 Il2CppClass g_mouseClass{"Microsoft.Xna.Framework.Input", "Mouse", {}, {&g_mUICursor}};
+Il2CppObject* g_inputManager = nullptr;
+FieldInfo g_fInputManager{"Instance", 0x0, &g_inputManager};
+bool MockRegisterRegion(Il2CppObject* self, MockRectI rect, const MethodInfo*) {
+    if (self != g_inputManager) ++g_workshopErrors;
+    g_regionsNow.push_back(rect);
+    return MockContains(rect, g_inputCursor.x, g_inputCursor.y);
+}
+MockVec2 MockInputMouse(Il2CppObject*, const MethodInfo*) { return g_inputCursor; }
+MethodInfo g_mRegisterRegion{reinterpret_cast<Il2CppMethodPointer>(&MockRegisterRegion), "RegisterInputRegion", 1,
+                             "Microsoft.Xna.Framework.Rectangle"};
+MethodInfo g_mInputMouse{reinterpret_cast<Il2CppMethodPointer>(&MockInputMouse), "get_MousePosition", 0};
+Il2CppClass g_inputManagerClass{"", "GUIInputRegionManager", {&g_fInputManager}, {&g_mRegisterRegion, &g_mInputMouse}};
 // Ícones da Oficina: LayoutCalculator.DrawCentred(batch, posição, escala, textura, cor).
 std::vector<Il2CppObject*> g_icons;
 void MockDrawCentred(Il2CppObject* batch, MockVec2 pos, float scale, Il2CppObject* texture, uint64_t,
@@ -1661,10 +1678,11 @@ void InitWorkshop() {
     g_main.fields.push_back(&g_fSpriteBatch);
     g_main.methods.insert(g_main.methods.end(), {&g_mMouseX, &g_mMouseY, &g_mMouseLeft});
     g_layoutCalculator.methods.push_back(&g_mDrawCentred);
+    g_inputManager = NewObject(0x40);
     g_csharp.classes.insert(g_csharp.classes.end(),
                             {&g_worldSelectLayout, &g_panelLayout, &g_stringLayout, &g_guiPanel, &g_guiString,
                              &g_guiStringButton, &g_spriteBatchClass, &g_keyboardInput, &g_layoutCalculator,
-                             &g_mouseClass});
+                             &g_mouseClass, &g_inputManagerClass});
 }
 
 // Reforja: GUIInstance.Active.GUIReforge.get_ReforgeItem().
@@ -2019,9 +2037,17 @@ __attribute__((visibility("default"))) void mock_set_trial_mode(bool trial) { g_
 // ("menu" se o menu do jogo foi desenhado).
 __attribute__((visibility("default"))) size_t mock_workshop_frame(int32_t x, int32_t y, bool down, bool escape,
                                                                    int click, char* out, size_t size) {
-    g_uiCursor = {static_cast<float>(x), static_cast<float>(y)};
-    g_mouseX = x * 33 / 20, g_mouseY = y * 33 / 20;
-    g_mouseDown = down, g_escape = escape;
+    const float fx = static_cast<float>(x), fy = static_cast<float>(y);
+    g_inputCursor = {fx, fy};
+    g_regionsPrev.swap(g_regionsNow);
+    g_regionsNow.clear();
+    if (!down) g_touchRouted = false;
+    else if (!g_mouseDown)
+        g_touchRouted = std::any_of(g_regionsPrev.begin(), g_regionsPrev.end(),
+                                    [&](const MockRectI& q) { return MockContains(q, fx, fy); });
+    if (g_touchRouted) g_mouseX = x, g_mouseY = y, g_uiCursor = {fx, fy};
+    g_mouseDown = down && g_touchRouted;
+    g_escape = escape;
     g_clickLayout = click == 1 ? WsPart(0x38) : click == 2 ? WsPart(0x30) : nullptr;
     g_frame.clear();
     g_icons.clear();

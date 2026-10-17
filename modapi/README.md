@@ -422,10 +422,11 @@ do próprio jogo montada com as peças da seleção de mundos (`il2cpp_bridge/sr
 A lista própria do jogo (`GUIDraggableItemGrid`) não serve: nesta tela ela cresce para o lado e não
 recorta o que sai do painel. Cada linha marca sua região com `ControlAnchor.SetGridItemRegion`, e os
 textos ancorados em `GridItem` se posicionam sozinhos, como na seleção de mundos. A cor do estado vai
-como `Color` do XNA desta build, que guarda os bytes na ordem A, B, G, R. O toque é lido com
-`Mouse.GetUICursorPosition`, no mesmo espaço dos layouts (969x454 num aparelho de 1600x720);
-`Main.mouseX/Y` está em pixels da tela e, comparado com as regiões, só acertava perto do canto
-esquerdo de cada linha. Os dados vêm do runtime (`TLModWorkshopSource`, montado com `BuildWorkshopEntries`);
+como `Color` do XNA desta build, que guarda os bytes na ordem A, B, G, R. No celular, um toque só
+chega à interface (`Main.mouseLeft` e a posição) se cair numa região registrada no
+`GUIInputRegionManager` no frame anterior, que é o que cada botão do jogo faz ao ser desenhado; a
+Oficina registra a área da lista (ou do texto de detalhes) a cada frame, senão só o Voltar
+responderia. Os dados vêm do runtime (`TLModWorkshopSource`, montado com `BuildWorkshopEntries`);
 a configuração é thread-safe e o painel vê as mudanças pela revisão dela. Se alguma peça do jogo não
 resolver, o botão Mods abre a Oficina do painel (Views Android), que também abre pela aba Mods.
 
