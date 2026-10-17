@@ -419,7 +419,8 @@ do próprio jogo montada com as peças da seleção de mundos (`il2cpp_bridge/sr
   **Ativar/Desativar**. O texto é quebrado pelo próprio jogo (`GUIString.ApplyMultiLineAlignment`) e
   desenhado linha a linha na área da lista, com rolagem; nunca passa por cima dos botões. Um nome
   que não cabe no título (o botão de título do jogo quebraria a linha por cima do painel) é cortado
-  com "..."; o nome inteiro fica na 1ª linha do texto. A medida é a do próprio botão: a fonte do
+  no fim de uma palavra (por caractere, se a 1ª palavra já não cabe), com uma folga nas bordas e
+  "..."; o nome inteiro fica na 1ª linha do texto. A medida é a do próprio botão: a fonte do
   layout e `ChatManager.GetStringSize` na escala dele. O voltar do
   Android (Escape) volta uma página.
 - Ligar ou desligar vale na próxima abertura do jogo: uma `.so` carregada não é descarregada.

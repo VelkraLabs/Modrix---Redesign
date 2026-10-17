@@ -85,6 +85,7 @@ constexpr int32_t kAnchorTopLeft = 9;    // LayoutCalculator.AnchorType.TopLeft
 constexpr float kTapDistance = 30.0f;    // como o SINGLE_CLICK_DISTANCE da seleção de mundos
 constexpr float kDragStart = 10.0f;      // a partir daqui o toque vira arraste
 constexpr int32_t kPad = 12;             // margem do texto de detalhes
+constexpr float kTitleMargin = 10.0f;    // folga de cada lado do título, além do TextInset do jogo
 // Color do XNA nesta build: bytes A, B, G, R (o construtor grava r no byte 3 e a no 0).
 constexpr uint32_t Rgba(uint32_t r, uint32_t g, uint32_t b) { return 0xFFu | (b << 8) | (g << 16) | (r << 24); }
 constexpr uint32_t kStatusColors[] = {Rgba(130, 225, 120), Rgba(170, 170, 170), Rgba(255, 110, 110),
@@ -478,9 +479,10 @@ void DrawList(Il2CppObject* layout) {
 
 // O título dos detalhes é o nome do mod. O botão de título do jogo quebra a linha se o
 // texto passa da largura, e a 2ª linha sai por cima do painel: um nome comprido é
-// cortado (por caractere) e ganha "...". A medida é a do próprio DrawButton: a fonte
-// do layout, ChatManager.GetStringSize na escala do botão e a largura Size.x * escala
-// - 2 * TextInset. Devolve 0 se o nome inteiro cabe (ou sem como medir).
+// cortado no fim de uma palavra (por caractere, se a 1ª palavra já não cabe) e ganha
+// "...". A medida é a do próprio DrawButton: a fonte do layout, ChatManager.GetStringSize
+// na escala do botão e a largura Size.x * escala - 2 * TextInset, menos uma folga para o
+// texto não encostar nas bordas. Devolve 0 se o nome inteiro cabe (ou sem como medir).
 uint32_t FitTitle(Il2CppObject* title, uint32_t name) {
     Il2CppObject* full = Target(name);
     if (!title || !full || !r.titleFont || !r.stringSize) return 0;
@@ -488,22 +490,33 @@ uint32_t FitTitle(Il2CppObject* title, uint32_t name) {
     if (!font) return 0;
     const float scale = FieldAt<float>(title, sb::Scale) > 0 ? FieldAt<float>(title, sb::Scale) : 1.0f;
     const float limit = FieldAt<float>(title, sb::Size) * scale -
-                        2.0f * static_cast<float>(FieldAt<int32_t>(title, sb::TextInset));
+                        2.0f * static_cast<float>(FieldAt<int32_t>(title, sb::TextInset)) - 2.0f * kTitleMargin;
     auto width = [&](Il2CppObject* s) {
         return Ptr<StringSizeFn>(r.stringSize)(font, s, TLModXnaVector2{scale, scale}, -1.0f, r.stringSize).x;
     };
     const float fullWidth = width(full);
     if (limit <= 0 || fullWidth <= limit) return 0;
-    std::string text = bridge::Utf8String(full);
-    while (!text.empty()) {
-        while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0) == 0x80) text.pop_back();
-        if (!text.empty()) text.pop_back();  // o 1º byte do caractere
-        while (!text.empty() && text.back() == ' ') text.pop_back();
-        Il2CppObject* candidate = api.il2cpp_string_new((text + "...").c_str());
-        if (candidate && width(candidate) <= limit) {
-            LOGI("Oficina: título cortado para \"%s...\" (%.0f de largura; cabem %.0f)", text.c_str(), fullWidth, limit);
-            return Pin(candidate);
-        }
+    const std::string text = bridge::Utf8String(full);
+    auto trimmed = [](std::string head) {
+        while (!head.empty() && head.back() == ' ') head.pop_back();
+        return head;
+    };
+    auto tryCut = [&](const std::string& head) -> uint32_t {
+        if (head.empty()) return 0;
+        Il2CppObject* candidate = api.il2cpp_string_new((head + "...").c_str());
+        if (!candidate || width(candidate) > limit) return 0;
+        LOGI("Oficina: título cortado para \"%s...\" (%.0f de largura; cabem %.0f)", head.c_str(), fullWidth, limit);
+        return Pin(candidate);
+    };
+    // No fim de uma palavra, da mais comprida para a mais curta.
+    for (size_t space = text.rfind(' '); space != std::string::npos && space > 0; space = text.rfind(' ', space - 1))
+        if (uint32_t cut = tryCut(trimmed(text.substr(0, space)))) return cut;
+    // Uma palavra só que não cabe: por caractere.
+    std::string head = text;
+    while (!head.empty()) {
+        while (!head.empty() && (static_cast<unsigned char>(head.back()) & 0xC0) == 0x80) head.pop_back();
+        if (!head.empty()) head.pop_back();  // o 1º byte do caractere
+        if (uint32_t cut = tryCut(trimmed(head))) return cut;
     }
     return 0;
 }

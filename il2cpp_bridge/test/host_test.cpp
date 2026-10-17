@@ -244,7 +244,7 @@ struct WsMod {
     bool enabled;
 };
 WsMod g_wsMods[] = {{"Boss Checklist", "v0.1.0", true}, {"Exemplo: Rubi", "v0.1.0", true}, {"Gemas", "v0.2.0", true},
-                    {"Mod 4", "v1.0.0", true},          {"Mod 5", "v1.0.0", true},         {"Mod 6 de nome comprido", "v1.0.0", true}};
+                    {"Mod 4", "v1.0.0", true},          {"ModCincoSemEspacosNoNome", "v1.0.0", true},         {"Mod 6 de nome comprido", "v1.0.0", true}};
 // Ícones: Lente (original), item de mod com textura, de mod sem textura, nenhum; o resto Lente.
 int32_t DrawItemTexture(Il2CppObject*, int32_t netId);
 const int32_t kWsIcons[] = {kShell, kModItem, kModItem + 1, 0, kShell, kShell};
@@ -308,7 +308,7 @@ int TestWorkshop(void* lib) {
     CHECK(TLMod_WorkshopOpen() && !has(f, "menu"));
     CHECK(has(f, "titulo:Oficina de Mods") && has(f, "botao:voltar:Voltar") && f.find("botao:novo") == std::string::npos);
     CHECK(has(f, "nome:Boss Checklist") && has(f, "nome:Exemplo: Rubi") && has(f, "nome:Gemas") && has(f, "nome:Mod 4"));
-    CHECK(!has(f, "nome:Mod 5") && !has(f, "nome:Mod 6 de nome comprido"));
+    CHECK(!has(f, "nome:ModCincoSemEspacosNoNome") && !has(f, "nome:Mod 6 de nome comprido"));
     // Estado no modo (Color do jogo: bytes A, B, G, R), versão no tamanho, resumo no tempo.
     CHECK(has(f, "modo:Ativo#82e178ff") && has(f, "modo:Erro#ff6e6eff"));
     CHECK(has(f, "tamanho:v0.2.0") && has(f, "tempo:1 item") && has(f, "tempo:por TLMod"));
@@ -324,21 +324,30 @@ int TestWorkshop(void* lib) {
     f = frame(0, 0, false);
     CHECK(has(f, "titulo:Oficina de Mods") && has(f, "nome:Mod 6 de nome comprido") && has(f, "nome:Gemas") &&
           !has(f, "nome:Boss Checklist") && !has(f, "nome:Exemplo: Rubi"));
-    // Nome que não cabe no título (o do mock: 260 de largura, 12,5 por caractere na escala
-    // 1,25 do botão): cortado com "..."; o texto de detalhes traz o nome inteiro.
+    // Nome que não cabe no título (o do mock: 260 de largura menos 20 de folga, 12,5 por
+    // caractere na escala 1,25 do botão): cortado no fim de uma palavra, com "..."; o texto
+    // de detalhes traz o nome inteiro.
     frame(300, 300, true);
     frame(300, 300, false);
     f = frame(0, 0, false);
-    CHECK(has(f, "titulo:Mod 6 de nome com...") && has(f, "texto@106:Mod 6 de nome comprido com uma descrição"));
+    CHECK(has(f, "titulo:Mod 6 de nome...") && has(f, "texto@106:Mod 6 de nome comprido com uma descrição"));
     frame(0, 0, false, false, 1);
     f = frame(0, 0, false);
     CHECK(has(f, "titulo:Oficina de Mods") && has(f, "nome:Mod 6 de nome comprido"));
+    // Uma palavra só, comprida: por caractere (16 + "..." = 19 caracteres, 237,5 de 240).
+    frame(300, 240, true);
+    frame(300, 240, false);
+    f = frame(0, 0, false);
+    CHECK(has(f, "titulo:ModCincoSemEspac..."));
+    frame(0, 0, false, false, 1);
+    f = frame(0, 0, false);
+    CHECK(has(f, "titulo:Oficina de Mods"));
     // E de volta (puxar para baixo além do topo para no começo).
     frame(300, 120, true);
     frame(300, 360, true);
     frame(300, 360, false);
     f = frame(0, 0, false);
-    CHECK(has(f, "nome:Boss Checklist") && !has(f, "nome:Mod 5"));
+    CHECK(has(f, "nome:Boss Checklist") && !has(f, "nome:ModCincoSemEspacosNoNome"));
 
     // Toque fora da lista (sem região registrada ali): o jogo não o entrega; nada abre.
     frame(50, 50, true);
