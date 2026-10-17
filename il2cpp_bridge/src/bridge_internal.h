@@ -64,6 +64,12 @@ void InstallMenuHooks();
 bool ResolveWorkshop();
 bool DrawWorkshop();
 
+// Receitas de mod (recipe_hooks.cpp). Depois de ResolveItems (usa TLMod_SetItemDefaults).
+// TickRecipes: no frame (Main.DoUpdate), aplica se o SetupRecipes já passou sem elas.
+bool ResolveRecipes();
+void InstallRecipeHooks();
+void TickRecipes();
+
 // Propriedades de um item original para avaliar uma casca (item_traits.cpp).
 bool ResolveItemTraits();
 

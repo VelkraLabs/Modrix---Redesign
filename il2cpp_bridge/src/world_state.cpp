@@ -104,6 +104,7 @@ void TLMod_Hooked_MainDoUpdate(Il2CppObject* self, Il2CppObject* gameTime, const
     auto orig = reinterpret_cast<MainDoUpdateFn>(__atomic_load_n(&g_origDoUpdateSlot, __ATOMIC_ACQUIRE));
     g_gameThread.store(pthread_self(), std::memory_order_relaxed);
     g_gameThreadKnown.store(true, std::memory_order_release);
+    bridge::TickRecipes();
     if (TLModFrameCallback cb = g_frameCallback.load(std::memory_order_acquire)) cb();
     if (orig) orig(self, gameTime, method);
 }

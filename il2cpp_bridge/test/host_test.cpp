@@ -904,6 +904,79 @@ int TestSaves(void* lib) {
     return 0;
 }
 
+// --- Receitas de mod: depois do SetupRecipes, em Main.recipe --------------------------
+TLModRecipe MakeRecipe(int32_t result, int32_t stack, std::initializer_list<std::pair<int32_t, int32_t>> items,
+                       std::initializer_list<int32_t> stations, const char* label) {
+    TLModRecipe r{};
+    r.result = result;
+    r.result_stack = stack;
+    for (const auto& [id, n] : items) {
+        r.ingredients[r.ingredient_count] = id;
+        r.ingredient_stacks[r.ingredient_count++] = n;
+    }
+    for (int32_t t : stations) r.stations[r.station_count++] = t;
+    r.label = label;
+    return r;
+}
+
+int TestRecipes(void* lib) {
+    std::printf("\n== receitas de mod\n");
+    auto sym = [&](const char* name) { return dlsym(lib, name); };
+    auto setup = reinterpret_cast<void (*)()>(sym("mock_game_setup_recipes"));
+    auto count = reinterpret_cast<int32_t (*)()>(sym("mock_num_recipes"));
+    auto calls = reinterpret_cast<int (*)(int*)>(sym("mock_recipe_calls"));
+    auto recipe = reinterpret_cast<int (*)(int32_t, int32_t*, int32_t*, int32_t*, bool*)>(sym("mock_recipe"));
+    auto frame = reinterpret_cast<int (*)()>(sym("mock_game_frame"));
+    CHECK(setup && count && calls && recipe && frame);
+    TLModItemCallbacks cbs{&ItemRemap, &ItemApply, &ItemTooltip};
+    TLMod_SetItemCallbacks(&cbs);
+
+    // 5 receitas para 4 posições livres (o mock tem 12, 8 do jogo): a última não cabe.
+    TLModRecipe list[] = {
+        MakeRecipe(kModItem, 1, {{23, 5}}, {18}, "teste: rubi de gel"),
+        MakeRecipe(22, 2, {{kModItem, 2}, {23, 1}}, {16}, "teste: barra de rubi"),
+        MakeRecipe(kModItem, 3, {{kModItem, 1}}, {}, "teste: rubi de rubi"),
+        MakeRecipe(9, 1, {{23, 1}}, {}, "teste: madeira"),
+        MakeRecipe(9, 1, {{23, 2}}, {}, "teste: sem lugar"),
+    };
+    list[1].need_water = true;
+    CHECK(TLMod_ModRecipesAdded() == -1);
+    TLMod_SetModRecipes(list, 5);
+    list[0].result = 1;  // a ponte copiou
+    int errors = -1;
+    const int callsBefore = calls(&errors);
+    setup();  // Main.Initialize: originais + as de mod no hook
+    CHECK(count() == 12 && TLMod_ModRecipesAdded() == 4);
+    CHECK(calls(&errors) == callsBefore + 2 && errors == 0);  // o jogo e a ponte refazem a consulta rápida
+
+    int32_t result[3], quick[30], tiles[15];
+    bool flags[4];
+    // Rubi de gel: resultado é o item de mod (casca 38, netID 8192), na bancada (18).
+    CHECK(recipe(8, result, quick, tiles, flags) == 1);
+    CHECK(result[0] == kModItem && result[1] == kShell && result[2] == 1);
+    CHECK(quick[0] == 23 && quick[1] == 5 && tiles[0] == 18 && tiles[1] == -1);
+    CHECK(!flags[0] && !flags[1] && !flags[2] && flags[3]);  // sem desfabricar no Shimmer
+    // Barra de rubi: o ingrediente de mod é procurado pelo netID (8192), não pela casca (38).
+    CHECK(recipe(9, result, quick, tiles, flags) == 2);
+    CHECK(result[0] == 22 && result[1] == 22 && result[2] == 2);
+    CHECK(quick[0] == kModItem && quick[1] == 2 && quick[2] == 23 && quick[3] == 1);
+    CHECK(tiles[0] == 16 && flags[0] && flags[3]);
+    CHECK(recipe(10, result, quick, tiles, flags) == 1);
+    CHECK(result[0] == kModItem && result[2] == 3 && quick[0] == kModItem && quick[1] == 1 && tiles[0] == -1);
+    CHECK(recipe(11, result, quick, tiles, flags) == 1 && result[0] == 9 && quick[0] == 23);
+    // As do jogo continuam pelo type (a ponte só mexe nas de mod).
+    CHECK(recipe(0, result, quick, tiles, flags) == 0);
+
+    // Já aplicadas: o frame não refaz, e uma segunda lista é ignorada.
+    frame();
+    TLMod_SetModRecipes(list, 1);
+    frame();
+    CHECK(calls(&errors) == callsBefore + 2 && count() == 12 && TLMod_ModRecipesAdded() == 4);
+    TLModItemCallbacks off{};
+    TLMod_SetItemCallbacks(&off);
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1081,6 +1154,7 @@ int main(int argc, char** argv) {
     if (int rc = TestScreens(lib)) return rc;
     if (int rc = TestTraits(lib)) return rc;
     if (int rc = TestSaves(lib)) return rc;
+    if (int rc = TestRecipes(lib)) return rc;
 
     std::printf("TODOS OS TESTES PASSARAM\n");
     return 0;

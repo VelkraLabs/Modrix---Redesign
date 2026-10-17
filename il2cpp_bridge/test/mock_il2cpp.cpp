@@ -1432,6 +1432,77 @@ int32_t g_focusRecipe = 0;
 MethodInfo g_mGetAvailableRecipe{nullptr, "get_availableRecipe", 0};
 MethodInfo g_mGetFocusRecipe{nullptr, "get_focusRecipe", 0};
 
+// Cadastro de receitas como no jogo: Main.recipe tem kMockRecipeSlots posições,
+// as kMockVanillaRecipes primeiras ocupadas; Recipe.currentRecipe é a receita em
+// montagem e AddRecipe a põe em Main.recipe[numRecipes++]. A consulta rápida
+// (RequiredItemEntry {int id, int stack}) sai do type, como no jogo.
+constexpr uint32_t kMockRecipeSlots = 12;
+constexpr int32_t kMockVanillaRecipes = 8;
+constexpr size_t kRecipeTiles = 0x20, kRecipeQuick = 0x30, kRecipeHoney = 0x40, kRecipeWater = 0x41,
+                 kRecipeLava = 0x42, kRecipeNoDecraft = 0x4C, kRecipeSize = 0x50;
+int32_t g_numRecipes = 0;
+Il2CppObject* g_currentRecipe = nullptr;
+Il2CppObject* g_defaultRecipeItem = nullptr;
+int g_quickLookupCalls = 0, g_recipeErrors = 0;
+FieldInfo g_fNumRecipes{"numRecipes", 0x0, &g_numRecipes, sizeof(int32_t)};
+FieldInfo g_fCurrentRecipe{"currentRecipe", 0x8, &g_currentRecipe};
+Il2CppArray* NewIntArray(uint32_t n, int32_t value) {
+    Il2CppArray* a = NewArray(n);  // 8 bytes por elemento: cabem os int32 de um int[]
+    for (uint32_t i = 0; i < n; ++i) reinterpret_cast<int32_t*>(a + 1)[i] = value;
+    return a;
+}
+Il2CppObject* NewRecipe() {  // Recipe..ctor
+    Il2CppObject* r = NewObject(kRecipeSize);
+    At<Il2CppObject*>(r, 0x10) = NewMockItem();
+    Il2CppArray* req = NewArray(15);
+    for (uint32_t k = 0; k < 15; ++k) Elem(req, k) = NewMockItem();
+    At<Il2CppArray*>(r, 0x18) = req;
+    At<Il2CppArray*>(r, kRecipeTiles) = NewIntArray(15, -1);
+    return r;
+}
+void MockAddRecipe(const MethodInfo*) {
+    Il2CppArray* req = At<Il2CppArray*>(g_currentRecipe, 0x18);
+    for (uint32_t k = 0; k < 15; ++k)
+        if (At<int32_t>(Elem(req, k), kItemType) == 0) Elem(req, k) = g_defaultRecipeItem;
+    if (static_cast<uint32_t>(g_numRecipes) >= g_recipes->max_length) {
+        ++g_recipeErrors;  // no jogo: IndexOutOfRangeException
+        return;
+    }
+    Elem(g_recipes, static_cast<uint32_t>(g_numRecipes)) = g_currentRecipe;
+    g_currentRecipe = NewRecipe();
+    ++g_numRecipes;
+}
+void MockCreateQuickLookups(const MethodInfo*) {
+    ++g_quickLookupCalls;
+    for (int32_t i = 0; i < g_numRecipes; ++i) {
+        Il2CppObject* r = static_cast<Il2CppObject*>(Elem(g_recipes, static_cast<uint32_t>(i)));
+        Il2CppArray* req = At<Il2CppArray*>(r, 0x18);
+        std::vector<std::pair<int32_t, int32_t>> entries;
+        for (uint32_t k = 0; k < 15; ++k) {
+            void* it = Elem(req, k);
+            if (it && At<int32_t>(it, kItemType) > 0) entries.emplace_back(At<int32_t>(it, kItemType), At<int32_t>(it, kItemStack));
+        }
+        Il2CppArray* quick = NewArray(static_cast<uint32_t>(entries.size()));  // 8 bytes: {id, stack}
+        for (size_t k = 0; k < entries.size(); ++k) {
+            reinterpret_cast<int32_t*>(quick + 1)[2 * k] = entries[k].first;
+            reinterpret_cast<int32_t*>(quick + 1)[2 * k + 1] = entries[k].second;
+        }
+        At<Il2CppArray*>(r, kRecipeQuick) = quick;
+    }
+}
+// SetupRecipes: as originais já estão em Main.recipe; termina na consulta rápida.
+void MockSetupRecipes(const MethodInfo*) {
+    g_numRecipes = kMockVanillaRecipes;
+    g_currentRecipe = NewRecipe();
+    MockCreateQuickLookups(nullptr);
+}
+using SetupRecipesFn = decltype(&MockSetupRecipes);
+SetupRecipesFn g_setupRecipesEntry = &MockSetupRecipes;
+MethodInfo g_mSetupRecipes{reinterpret_cast<Il2CppMethodPointer>(&MockSetupRecipes), "SetupRecipes", 0};
+MethodInfo g_mAddRecipe{reinterpret_cast<Il2CppMethodPointer>(&MockAddRecipe), "AddRecipe", 0};
+MethodInfo g_mQuickLookups{reinterpret_cast<Il2CppMethodPointer>(&MockCreateQuickLookups),
+                           "CreateRequiredItemQuickLookups", 0};
+
 // Botão de transação: GUITransactionButton.Draw(layout, Item, label, disabled, ref scale, 4 bools).
 // Devolve Clicked (0) para o layout em g_clickLayout (um toque simulado), senão None (3).
 Il2CppObject* g_clickLayout = nullptr;
@@ -1876,6 +1947,8 @@ MethodInfo g_mTypeNetName{reinterpret_cast<Il2CppMethodPointer>(&MockNpcTypeNetN
 
 // runtime_invoke dos métodos das telas (nullptr = não é um deles).
 bool InvokeScreens(const MethodInfo* m, void* obj, void** params, Il2CppObject** result) {
+    if (m == &g_mAddRecipe) return MockAddRecipe(m), *result = nullptr, true;
+    if (m == &g_mQuickLookups) return MockCreateQuickLookups(m), *result = nullptr, true;
     if (m == &g_mGuiReforgeItem) return *result = g_reforgeItem, true;
     if (m == &g_mGuiGuideItem) return *result = g_guideItem, true;
     if (m == &g_mGetResearchItem) return *result = g_researchItem, true;
@@ -1905,7 +1978,8 @@ bool InvokeScreens(const MethodInfo* m, void* obj, void** params, Il2CppObject**
 }
 
 bool PatchScreens(void* target, void* r) {
-    if (target == reinterpret_cast<void*>(&MockTransactionDraw)) g_transactionEntry = reinterpret_cast<TransactionFn>(r);
+    if (target == reinterpret_cast<void*>(&MockSetupRecipes)) g_setupRecipesEntry = reinterpret_cast<SetupRecipesFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockTransactionDraw)) g_transactionEntry = reinterpret_cast<TransactionFn>(r);
     else if (target == reinterpret_cast<void*>(&MockReforgePopupDrawItem)) g_reforgePopupEntry = reinterpret_cast<InstanceFn>(r);
     else if (target == reinterpret_cast<void*>(&MockDrawResearchItem)) g_researchEntry = reinterpret_cast<InstanceFn>(r);
     else if (target == reinterpret_cast<void*>(&MockCanBeResearched)) g_canResearchEntry = reinterpret_cast<CanResearchFn>(r);
@@ -1954,16 +2028,11 @@ void InitScreens() {
     g_soundEngine.methods = {&g_mPlaySound};
     g_guiReforge.methods = {&g_mGuiReforgeItem};
     g_guiCraftGuide.methods = {&g_mGuiGuideItem};
-    g_recipe.fields = {&g_fRecipe[0], &g_fRecipe[1]};
-    g_recipes = NewArray(8);
-    for (uint32_t i = 0; i < 8; ++i) {
-        Il2CppObject* r = NewObject(0x40);
-        At<Il2CppObject*>(r, 0x10) = NewMockItem();
-        Il2CppArray* req = NewArray(15);
-        for (uint32_t k = 0; k < 15; ++k) Elem(req, k) = NewMockItem();
-        At<Il2CppArray*>(r, 0x18) = req;
-        Elem(g_recipes, i) = r;
-    }
+    g_recipe.fields = {&g_fRecipe[0], &g_fRecipe[1], &g_fNumRecipes, &g_fCurrentRecipe};
+    g_recipe.methods = {&g_mSetupRecipes, &g_mAddRecipe, &g_mQuickLookups};
+    g_defaultRecipeItem = NewMockItem();
+    g_recipes = NewArray(kMockRecipeSlots);  // vazias: Recipe sem nada, como no Main.Initialize
+    for (uint32_t i = 0; i < kMockRecipeSlots; ++i) Elem(g_recipes, i) = NewRecipe();
     g_availableRecipe = NewArray(8);
     g_main.fields.push_back(&g_fMainRecipe);
     g_main.methods.insert(g_main.methods.end(), {&g_mGetAvailableRecipe, &g_mGetFocusRecipe, &g_mInteractIcon,
@@ -2001,6 +2070,35 @@ void InitScreens() {
 
 // ---- exports das telas (o "jogo" chamando pelo endereço, com hook) ---------------------
 extern "C" {
+// Receitas: o Main.Initialize chamando Recipe.SetupRecipes (com hook, se houver).
+__attribute__((visibility("default"))) void mock_game_setup_recipes() { g_setupRecipesEntry(&g_mSetupRecipes); }
+__attribute__((visibility("default"))) int32_t mock_num_recipes() { return g_numRecipes; }
+__attribute__((visibility("default"))) int mock_recipe_calls(int* errors) {
+    *errors = g_recipeErrors;
+    return g_quickLookupCalls;
+}
+// Main.recipe[index]: resultado (netID, type, pilha), consulta rápida (até 15 pares
+// id/pilha; devolve quantos), estações (15) e flags (água, lava, mel, sem desfabricar).
+__attribute__((visibility("default"))) int mock_recipe(int32_t index, int32_t* result, int32_t* quick,
+                                                       int32_t* tiles, bool* flags) {
+    Il2CppObject* r = static_cast<Il2CppObject*>(Elem(g_recipes, static_cast<uint32_t>(index)));
+    void* create = At<void*>(r, 0x10);
+    result[0] = At<int32_t>(create, kItemNetId);
+    result[1] = At<int32_t>(create, kItemType);
+    result[2] = At<int32_t>(create, kItemStack);
+    Il2CppArray* q = At<Il2CppArray*>(r, kRecipeQuick);
+    const int n = q ? static_cast<int>(q->max_length) : -1;
+    for (int k = 0; k < n && k < 15; ++k) {
+        quick[2 * k] = reinterpret_cast<int32_t*>(q + 1)[2 * k];
+        quick[2 * k + 1] = reinterpret_cast<int32_t*>(q + 1)[2 * k + 1];
+    }
+    for (int k = 0; k < 15; ++k) tiles[k] = reinterpret_cast<int32_t*>(At<Il2CppArray*>(r, kRecipeTiles) + 1)[k];
+    flags[0] = At<bool>(r, kRecipeWater);
+    flags[1] = At<bool>(r, kRecipeLava);
+    flags[2] = At<bool>(r, kRecipeHoney);
+    flags[3] = At<bool>(r, kRecipeNoDecraft);
+    return n;
+}
 __attribute__((visibility("default"))) size_t mock_last_name(char* buf, size_t size) {
     std::snprintf(buf, size, "%s", g_lastName.c_str());
     return g_lastName.size();

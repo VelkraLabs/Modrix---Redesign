@@ -272,6 +272,7 @@ bool TLMod_Init(int timeoutMs) {
         if (bridge::ResolveItems()) {
             bridge::InstallItemHooks();
             bridge::ResolveItemTraits();
+            if (bridge::ResolveRecipes()) bridge::InstallRecipeHooks();
         }
         if (bridge::ResolveDraw()) {
             bridge::InstallDrawHooks();

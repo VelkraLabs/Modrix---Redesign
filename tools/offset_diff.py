@@ -112,6 +112,7 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
     "KeyboardInput": ("", "KeyboardInput"),
     "LayoutCalculator": ("", "LayoutCalculator"),
     "Mouse": ("Microsoft.Xna.Framework.Input", "Mouse"),
+    "Recipe": ("Terraria", "Recipe"),
     "GUIInputRegionManager": ("", "GUIInputRegionManager"),
     "StringButtonLayout": ("", "StringButton_Layout"),
     "ChatManager": ("Terraria.UI.Chat", "ChatManager"),
@@ -126,6 +127,8 @@ CONST_CHECKS: Dict[str, Tuple[str, str, str]] = {
     "kNpcVanillaCount": ("Terraria.ID", "NPCID", "Count"),
     "kMaxChests": ("Terraria", "Main", "maxChests"),
     "kItemVanillaCount": ("Terraria.ID", "ItemID", "Count"),
+    "kMaxRecipes": ("Terraria", "Recipe", "maxRecipes"),
+    "kRecipeMaxRequirements": ("Terraria", "Recipe", "maxRequirements"),
     "kDefaultItemShell": ("Terraria.ID", "ItemID", "Lens"),
 }
 

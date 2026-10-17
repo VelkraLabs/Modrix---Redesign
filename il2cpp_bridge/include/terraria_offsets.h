@@ -404,9 +404,20 @@ constexpr size_t focusGuideRecipe = 0xCC;      // int   (-1 = mostra o item da g
 constexpr size_t availableGuideRecipe = 0xD0;  // int[] índices em Main.recipe
 }  // namespace gui_craft_guide_popup_off
 namespace recipe_off {
-constexpr size_t createItem = 0x10;    // Item
-constexpr size_t requiredItem = 0x18;  // Item[]
+constexpr size_t createItem = 0x10;               // Item
+constexpr size_t requiredItem = 0x18;             // Item[15]; vazio = Recipe.defaultRecipeItem (ar)
+constexpr size_t requiredTile = 0x20;             // int[15]; -1 = nenhum
+constexpr size_t requiredItemQuickLookup = 0x30;  // RequiredItemEntry[]: {int itemIdOrRecipeGroup, int stack}
+constexpr size_t needHoney = 0x40;                // bool
+constexpr size_t needWater = 0x41;                // bool
+constexpr size_t needLava = 0x42;                 // bool
+constexpr size_t notDecraftable = 0x4C;           // bool: o Shimmer não desfaz
 }  // namespace recipe_off
+// Recipe.RequiredItemEntry (struct de 8 bytes no array): o ID que CollectItems
+// conta (netID; um grupo vira 100000+) e a pilha.
+constexpr size_t kRecipeEntrySize = 8;
+constexpr int32_t kMaxRecipes = 3000;          // Recipe.maxRecipes (o tamanho de Main.recipe)
+constexpr int32_t kRecipeMaxRequirements = 15;  // Recipe.maxRequirements
 namespace item_snippet_off {
 constexpr size_t _item = 0x30;  // Item  (ItemTagHandler.ItemSnippet: [i:ID] no chat)
 }  // namespace item_snippet_off
@@ -516,6 +527,13 @@ constexpr uintptr_t CreativeUI_GetItemByIndex = 0x8F643C;
 // false/null, e netDefaults (0xBAB378) também. Depois de ResetStats o próprio
 // SetDefaults faz `if (type >= 5456) type = 0` e indexa ~dezenas de tabelas por type.
 constexpr uintptr_t Item_SetDefaults = 0xBAD034;
+// Receitas: SetupRecipes (Main.Initialize_AlmostEverything) cadastra todas e
+// termina com UpdateWhichItemsAreCrafted, UpdateMaterialFieldForAllRecipes,
+// ReplaceItemUseFlagsWithRecipeGroups, CreateRequiredItemQuickLookups e
+// ShimmerTransforms.UpdateRecipeSets.
+constexpr uintptr_t Recipe_SetupRecipes = 0x122ECB8;
+constexpr uintptr_t Recipe_AddRecipe = 0x12B5A18;  // Main.recipe[numRecipes++] = currentRecipe; currentRecipe = new
+constexpr uintptr_t Recipe_CreateRequiredItemQuickLookups = 0x12B4148;
 // void Item.RebuildTooltip(): ToolTip = Lang.GetTooltip(netID). Chamado pelo fim
 // de SetDefaults e pelas telas GUICrafting.CraftButtonOver / GUIItemDuplication.
 constexpr uintptr_t Item_RebuildTooltip = 0xBAAFE8;
@@ -640,6 +658,9 @@ constexpr int CreativeUI_GetItemByIndex = 1;
 // Item.SetDefaults tem 2 overloads: o hook é no de 3 parâmetros; o de 1 é
 // chamado via runtime_invoke (TLMod_SetItemDefaults) e cai no hook.
 constexpr int Item_SetDefaults = 3;
+constexpr int Recipe_SetupRecipes = 0;
+constexpr int Recipe_AddRecipe = 0;
+constexpr int Recipe_CreateRequiredItemQuickLookups = 0;
 constexpr int Item_RebuildTooltip = 0;
 constexpr int Lang_GetTooltip = 1;
 constexpr int Item_get_Name = 0;

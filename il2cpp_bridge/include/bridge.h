@@ -443,6 +443,40 @@ typedef struct TLModItemTraits {
 bool TLMod_ReadItemTraits(int32_t type, TLModItemTraits* out);
 
 // ===========================================================================
+// Receitas de mod (recipe_hooks.cpp)
+// ===========================================================================
+// Recipe.SetupRecipes (Main.Initialize) monta as receitas originais em
+// Main.recipe (Recipe[3000]) e termina com os dados derivados. Depois dele, a
+// ponte acrescenta as receitas de mod do jeito do jogo (Recipe.currentRecipe +
+// AddRecipe) e refaz Recipe.CreateRequiredItemQuickLookups. Se a ponte chegou
+// depois do SetupRecipes, isso acontece no próximo frame (Main.DoUpdate).
+//
+// Casca: o item de mod tem type = casca e netID = ID de mod. O jogo conta o
+// inventário por netID (Recipe.CollectItems) e consome com Item.IsTheSameAs
+// (netID e type), mas a consulta rápida (RequiredItemEntry) sai do type: a
+// ponte troca, nas receitas de mod, o type da casca pelo netID. As receitas de
+// mod ficam com notDecraftable (o Shimmer indexa por type: desfabricar a casca
+// daria os ingredientes do item de mod) e não entram em UpdateWhichItemsAreCrafted
+// nem em ShimmerTransforms.UpdateRecipeSets.
+#define TLMOD_RECIPE_MAX_INGREDIENTS 15  // Recipe.maxRequirements
+#define TLMOD_RECIPE_MAX_STATIONS 15
+typedef struct TLModRecipe {
+    int32_t result;  // item original ou de mod
+    int32_t result_stack;
+    int32_t ingredient_count;  // 1..15
+    int32_t ingredients[TLMOD_RECIPE_MAX_INGREDIENTS];
+    int32_t ingredient_stacks[TLMOD_RECIPE_MAX_INGREDIENTS];
+    int32_t station_count;  // 0..15; TileID (18 bancada, 16 bigorna...)
+    int32_t stations[TLMOD_RECIPE_MAX_STATIONS];
+    bool need_water, need_lava, need_honey;
+    const char* label;  // para o log ("mod_id: nome do resultado"); copiado
+} TLModRecipe;
+// Qualquer thread, uma vez (as seguintes são ignoradas com aviso): copia a lista.
+void TLMod_SetModRecipes(const TLModRecipe* recipes, int32_t count);
+// Quantas receitas de mod entraram em Main.recipe; -1 = ainda não aplicadas.
+int32_t TLMod_ModRecipesAdded(void);
+
+// ===========================================================================
 // Texturas de mod
 // ===========================================================================
 //
@@ -516,6 +550,7 @@ int32_t TLMod_Hooked_GUITransactionButtonDraw(Il2CppObject* layout, Il2CppObject
                                               const MethodInfo* method);
 void TLMod_Hooked_GUIReforgePopupDrawItem(Il2CppObject* self, const MethodInfo* method);
 void TLMod_Hooked_GUIMainMenuDraw(Il2CppObject* self, const MethodInfo* method);  // menu_hooks.cpp
+void TLMod_Hooked_RecipeSetupRecipes(const MethodInfo* method);                   // recipe_hooks.cpp
 void TLMod_Hooked_GUIResearchDrawResearchItem(Il2CppObject* self, const MethodInfo* method);
 int32_t TLMod_Hooked_GUIResearchCanBeResearched(Il2CppObject* self, Il2CppObject* item, int32_t* percent,
                                                 const MethodInfo* method);
