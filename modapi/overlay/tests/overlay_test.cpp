@@ -628,6 +628,13 @@ static void TestButtonLayout(const fs::path& mods, const fs::path& tmp) {
     tapper.join();
     panel.Tick(80);
     CHECK(panel.OpenSurface() == Surface::None);
+    // O mesmo botão várias vezes até o próximo Tick é um toque só (abre, não abre e fecha).
+    for (int i = 0; i < 3; ++i) panel.HudTap("checklist");
+    panel.Tick(85);
+    CHECK(panel.OpenSurface() == Surface::Checklist);
+    panel.HudTap("checklist");
+    panel.Tick(86);
+    CHECK(panel.OpenSurface() == Surface::None);
     // No modo de edição e com a Oficina aberta: nenhum botão do jogo (o renderizador mostra os dele).
     panel.HandleAction("layout_edit", "");
     CHECK(panel.Hud().buttons.empty());

@@ -100,8 +100,10 @@ struct Resolved {
     const MethodInfo* panelRegion = nullptr;   // GUIPanel.Region
     const MethodInfo* drawButton = nullptr;    // GUIStringButton.DrawButton
     const MethodInfo* playSound = nullptr;
+    const MethodInfo* setMouseLeftRelease = nullptr;  // static Main.set_mouseLeftRelease(bool)
 };
 Resolved r;
+typedef void (*SetBoolFn)(bool value, const MethodInfo* method);
 
 // As abas do jogo, na ordem do DrawCategories.
 struct GameTab {
@@ -488,6 +490,8 @@ __attribute__((noinline)) void DrawModsTab(Il2CppObject* settings) {
     const int32_t state = Ptr<TextureDrawFn>(r.textureDraw)(tab, texture, Empty(), false, &g_tabScale, kWhiteItem,
                                                             selected, false, false, false, r.textureDraw);
     if (state == kInputClicked && !selected) {
+        // O toque é consumido como o jogo faz depois de um clique (Main.mouseLeftRelease = false).
+        if (r.setMouseLeftRelease) Ptr<SetBoolFn>(r.setMouseLeftRelease)(false, r.setMouseLeftRelease);
         PlaySound(kTabSound);
         g_loggedOpen = false;
         // Pelo hook, como o jogo chamaria (o endereço original já desvia para ele no aparelho).
@@ -602,6 +606,7 @@ void InstallSettingsHooks() {
                           argc::GUIStringButton_DrawButton);
     r.playSound = Method(api.il2cpp_class_from_name(img, "Terraria.Audio", "SoundEngine"), "PlaySound",
                          argc::SoundEngine_PlaySound);
+    r.setMouseLeftRelease = Method(MainClass(), "set_mouseLeftRelease", argc::Main_set_mouseLeftRelease);
 
     const void* needed[] = {r.layoutInstance, r.buttonClass,  r.sliderClass,   r.buttonCtor,    r.sliderCtor,
                             r.setCategory,    r.drawCategories, r.drawTitle,   r.resetPage,     r.close,

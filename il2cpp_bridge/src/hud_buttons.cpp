@@ -47,6 +47,7 @@ typedef int32_t (*TextureDrawFn)(Il2CppObject* layout, Il2CppObject* texture, Il
 typedef TLModXnaRectangle (*RegionFn)(Il2CppObject* layout, const MethodInfo* method);
 typedef TLModXnaRectangle (*ControlRegionFn)(int32_t controlId, const MethodInfo* method);
 typedef bool (*StaticBoolFn)(const MethodInfo* method);
+typedef void (*SetBoolFn)(bool value, const MethodInfo* method);
 
 constexpr int32_t kInputClicked = 0;     // GUITransactionButton.InputState.Clicked
 constexpr int32_t kTapSound = 12;        // o som das abas e dos botões do jogo
@@ -88,6 +89,7 @@ struct Resolved {
     const MethodInfo* buttonRegion = nullptr;
     const MethodInfo* controlRegion = nullptr;
     const MethodInfo* playerInventory = nullptr;  // static bool Main.get_playerInventory()
+    const MethodInfo* setMouseLeftRelease = nullptr;  // static Main.set_mouseLeftRelease(bool): consome o toque
     const MethodInfo* playSound = nullptr;
 };
 Resolved r;
@@ -100,6 +102,7 @@ struct Button {
     std::string id;
     uint32_t layout = 0;  // GC handle da cópia do layout
     float scale = 0.0f;   // animação do GUITransactionButton
+    bool clicked = false; // Clicked no frame anterior (um toque vira um clique só)
     int32_t opacity = -1; // opacidade aplicada às cores da cópia
 };
 std::vector<Button> g_buttons;
@@ -116,6 +119,8 @@ struct Calibration {
 };
 Calibration g_cal;
 bool g_loggedPlace = false;
+int g_tapsLogged = 0;
+constexpr int kTapsToLog = 10;  // os primeiros toques vão para o log
 int g_missingTemplate = 0;
 constexpr int kTemplateWaitFrames = 600;  // ~10 s a 60 fps
 
@@ -309,10 +314,21 @@ __attribute__((noinline)) void Draw(bool menu) {
             const TLModXnaRectangle q = Region(l);
             LOGI("botões de mods: %s em (%d, %d) %dx%d", b.id, q.x, q.y, q.width, q.height);
         }
-        if (state == kInputClicked) {
+        // Um toque = um clique: Main.mouseLeftRelease só volta a false quando quem trata o
+        // clique o apaga (o jogo faz isso depois de cada botão). Sem isso, com o dedo na tela,
+        // o botão "clica" em todo frame e a tela abre e fecha sem parar. A borda (Clicked agora
+        // e não no frame anterior) fica como segunda trava.
+        const bool clicked = state == kInputClicked;
+        if (clicked && !btn.clicked) {
+            if (r.setMouseLeftRelease) Ptr<SetBoolFn>(r.setMouseLeftRelease)(false, r.setMouseLeftRelease);
             PlaySound(kTapSound);
+            if (g_tapsLogged < kTapsToLog) {
+                ++g_tapsLogged;
+                LOGI("botões de mods: toque em %s", b.id);
+            }
             if (src->tap) src->tap(src->user, b.id);
         }
+        btn.clicked = clicked;
     }
     g_loggedPlace = true;
 }
@@ -357,6 +373,8 @@ void ResolveHud() {
     r.controlRegion = Method(api.il2cpp_class_from_name(img, "", "ControlAnchor"), "GetControlRegion",
                              off::argc::ControlAnchor_GetControlRegion);
     r.playerInventory = Method(MainClass(), "get_playerInventory", off::argc::Main_get_playerInventory);
+    r.setMouseLeftRelease = Method(MainClass(), "set_mouseLeftRelease", off::argc::Main_set_mouseLeftRelease);
+    if (!r.setMouseLeftRelease) LOGW("botões de mods: Main.set_mouseLeftRelease ausente; o toque não é consumido");
     r.playSound = Method(api.il2cpp_class_from_name(img, "Terraria.Audio", "SoundEngine"), "PlaySound",
                          off::argc::SoundEngine_PlaySound);
     const void* needed[] = {r.layoutInstance, tb, r.textureDraw, r.buttonRegion, r.controlRegion};

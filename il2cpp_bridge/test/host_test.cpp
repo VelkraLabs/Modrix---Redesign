@@ -1125,6 +1125,14 @@ int TestHud(void* lib) {
     const int before = sounds(&last);
     frame(false, 64, 288, false);
     CHECK(g_hudSrc.taps.size() == 1 && g_hudSrc.taps[0] == "menu" && sounds(&last) == before + 1 && last == 12);
+    // Dedo parado no botão: a ponte zerou o mouseLeftRelease, então os frames seguintes
+    // não são outro toque (antes cada frame abria e fechava a tela). Soltou: toca de novo.
+    frame(false, 64, 288, false);
+    frame(false, 64, 288, false);
+    CHECK(g_hudSrc.taps.size() == 1 && sounds(&last) == before + 1);
+    frame(false, -1, -1, false);
+    frame(false, 64, 288, false);
+    CHECK(g_hudSrc.taps.size() == 2 && g_hudSrc.taps[1] == "menu" && sounds(&last) == before + 2);
     g_hudSrc.checklistActive = true;
     frame(false, -1, -1, false);
     CHECK(draw(1, rect, &pressed, &colour, &layoutColour, &texture) && pressed);
@@ -1137,7 +1145,7 @@ int TestHud(void* lib) {
     CHECK(draw(1, rect, &pressed, &colour, &layoutColour, &texture) && rect[1] == 243 + 108);
 
     // Inventário aberto: nenhum (o toque valeria para os dois). Menu: só o "M". Sem botões: nada.
-    CHECK(frame(false, 64, 288, true) == 0 && g_hudSrc.taps.size() == 1);
+    CHECK(frame(false, 64, 288, true) == 0 && g_hudSrc.taps.size() == 2);
     CHECK(frame(true, -1, -1, false) == 1 && draw(0, rect, &pressed, &colour, &layoutColour, &texture));
     g_hudSrc.count = 0;
     CHECK(frame(false, -1, -1, false) == 0);

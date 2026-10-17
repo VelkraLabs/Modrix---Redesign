@@ -692,6 +692,9 @@ constexpr uintptr_t GUISliderSetting_GetStringValue = 0xA948E4;
 constexpr uintptr_t GUITransactionButton_DrawTexture = 0x1223F70;
 // Botões de mods (hud_buttons.cpp): com o inventário aberto eles não são desenhados.
 constexpr uintptr_t Main_get_playerInventory = 0xC67DD4;  // static bool (LocalUserGameState: thread do jogo)
+// static void Main.set_mouseLeftRelease(bool): os botões do jogo põem false depois de um clique
+// (DrawMainButtons, GUIOpenUIButtonSetting.Draw); sem isso o toque segurado clica a cada frame.
+constexpr uintptr_t Main_set_mouseLeftRelease = 0xC67CC8;
 // Nome de NPC: o jogo só lê Lang pelo netID (o da casca).
 constexpr uintptr_t NPC_get_TypeName = 0xED9240;   // Lang.GetNPCNameValue(netID): hover, barra, mapa, morte
 constexpr uintptr_t NPC_GetTypeNetName = 0xEDB0BC; // NetworkText.FromKey(...): "X despertou!", "X foi derrotado"
@@ -807,6 +810,7 @@ constexpr int GUISliderSetting_SetValue = 1;
 constexpr int GUISliderSetting_GetStringValue = 0;
 constexpr int GUITransactionButton_DrawTexture = 10;  // há 2 de 10: o do Texture2D no 2º parâmetro
 constexpr int Main_get_playerInventory = 0;
+constexpr int Main_set_mouseLeftRelease = 1;
 constexpr int NPC_get_TypeName = 0;
 constexpr int NPC_GetTypeNetName = 0;
 }  // namespace argc

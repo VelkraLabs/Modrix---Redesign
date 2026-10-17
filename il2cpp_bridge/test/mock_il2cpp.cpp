@@ -2017,6 +2017,12 @@ std::vector<HudDraw> g_textureDraws;
 bool g_playerInventory = false;
 bool MockGetPlayerInventory(const MethodInfo*) { return g_playerInventory; }
 MethodInfo g_mGetPlayerInventory{reinterpret_cast<Il2CppMethodPointer>(&MockGetPlayerInventory), "get_playerInventory", 0};
+// Main.mouseLeftRelease: com o dedo parado no botão, o jogo só dá Clicked de novo depois
+// de soltar se quem tratou o clique zerou o release (sem zerar: Clicked a cada frame).
+bool g_mouseLeftRelease = true;
+void MockSetMouseLeftRelease(bool value, const MethodInfo*) { g_mouseLeftRelease = value; }
+MethodInfo g_mSetMouseLeftRelease{reinterpret_cast<Il2CppMethodPointer>(&MockSetMouseLeftRelease),
+                                  "set_mouseLeftRelease", 1};
 // Toques do próximo frame.
 MockRect g_settingsTap{-1, -1, 0, 0};       // ponto tocado (x, y) para as abas
 Il2CppObject* g_clickEntry = nullptr;       // botão tocado
@@ -2124,7 +2130,7 @@ int32_t MockTextureDraw(Il2CppObject* layout, Il2CppObject* texture, Il2CppObjec
     g_drawnTab.rect = MockButtonRegion(layout, nullptr);
     g_drawnTab.colour = colour;
     g_textureDraws.push_back({layout, texture, g_drawnTab.rect, pressed, colour});
-    return Tapped(g_drawnTab.rect) ? 0 : 3;
+    return Tapped(g_drawnTab.rect) && g_mouseLeftRelease ? 0 : 3;
 }
 void MockDrawItemHandlerDraw() { std::abort(); }  // o overload errado de 10 parâmetros
 MethodInfo g_mTextureDraw{reinterpret_cast<Il2CppMethodPointer>(&MockTextureDraw), "Draw", 10,
@@ -2221,7 +2227,7 @@ void InitSettings() {
     g_listClass.methods = {&g_mListAdd};
     g_guiTransaction.methods.insert(g_guiTransaction.methods.end(), {&g_mHandlerDraw, &g_mTextureDraw});
     g_tabLayoutClass = &g_transactionLayoutClass;
-    g_main.methods.push_back(&g_mGetPlayerInventory);
+    g_main.methods.insert(g_main.methods.end(), {&g_mGetPlayerInventory, &g_mSetMouseLeftRelease});
     g_csharp.classes.insert(g_csharp.classes.end(),
                             {&g_settingsOverlayClass, &g_settingsLayoutClass, &g_settingsCategoriesClass,
                              &g_settingEntryClass, &g_transactionLayoutClass, &g_openUIClass, &g_sliderClass});
@@ -2512,6 +2518,7 @@ __attribute__((visibility("default"))) size_t mock_settings_frame(int32_t tapX, 
                                                                    int32_t drag, float dragValue, bool reset, bool back,
                                                                    char* out, size_t size) {
     g_settingsTap = {tapX, tapY, 0, 0};
+    g_mouseLeftRelease = true;
     g_clickEntry = click >= 0 && static_cast<size_t>(click) < g_categoryList.size() ? g_categoryList[click] : nullptr;
     g_dragEntry = drag >= 0 && static_cast<size_t>(drag) < g_categoryList.size() ? g_categoryList[drag] : nullptr;
     g_dragValue = dragValue;
@@ -2561,8 +2568,10 @@ __attribute__((visibility("default"))) size_t mock_settings_entries() { return g
 // Botões de mods: um frame dos controles de toque (no mundo) ou do menu principal, com
 // um toque em (tapX, tapY) e o inventário aberto ou não. Devolve quantos botões foram
 // desenhados; mock_hud_draw lê cada um (região, apertado, cor passada, Color do layout).
+// O dedo fica no lugar enquanto tapX >= 0: o release só volta num frame sem toque.
 __attribute__((visibility("default"))) size_t mock_hud_frame(bool menu, int32_t tapX, int32_t tapY, bool inventory) {
     g_settingsTap = {tapX, tapY, 0, 0};
+    if (tapX < 0) g_mouseLeftRelease = true;
     g_playerInventory = inventory;
     g_textureDraws.clear();
     if (menu) g_mainMenuEntry(NewObject(0x40), &g_mMainMenuDraw);

@@ -103,6 +103,10 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
     (`Main.get_playerInventory`, `0xC67DD4`) os botões não são desenhados: as regiões de toque do
     `GUIInputRegionManager` não têm ordem, e um toque valeria para os dois. No menu principal (hook do
     `GUIMainMenu.Draw`) só aparecem os botões marcados `menu`, e nenhum com as Configurações abertas.
+    O `Draw` devolve `Clicked` enquanto o dedo estiver no botão e `Main.mouseLeftRelease` valer; o jogo
+    zera o release (`set_mouseLeftRelease(false)`, `0xC67CC8`) depois de tratar um clique, e a ponte faz
+    o mesmo (aqui e no toque da aba Mods). Sem isso, um toque segurado clicava a cada frame e a tela
+    abria e fechava. A ponte também só repassa a borda (`Clicked` num frame sem `Clicked` no anterior).
 
 ## Log
 

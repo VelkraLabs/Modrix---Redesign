@@ -668,7 +668,13 @@ bool PanelController::Tick(int64_t nowMs) {
         std::lock_guard<std::mutex> lock(hudMutex_);
         taps.swap(hudTaps_);
     }
-    for (const std::string& id : taps) HandleAction("open", id == kMenuButtonId ? "log" : id);
+    // O mesmo botão mais de uma vez entre dois Ticks é o mesmo toque (abrir e fechar na hora não serve).
+    std::sort(taps.begin(), taps.end());
+    taps.erase(std::unique(taps.begin(), taps.end()), taps.end());
+    for (const std::string& id : taps) {
+        rt::Log(TLMOD_LOG_DEBUG, "overlay", "botão do jogo tocado: " + id);
+        HandleAction("open", id == kMenuButtonId ? "log" : id);
+    }
     // Fora de um mundo os ícones somem, e a gaveta e o modal fecham.
     const std::optional<bool> world = source_.InWorld();
     if (world.value_or(false) != inWorld_) {
