@@ -399,19 +399,36 @@ Os dois são gerados por `tools/make_example_textures.py`.
 
 ## Oficina de Mods
 
-Como a tela de mods do tModLoader: o botão **Mods** no menu principal do jogo abre a Oficina, com os
-mods em seções (**Ativos**, **Desativados**, **Com erro**), versão, autores, descrição, o que cada um
-adiciona (do `content` do manifest) e o interruptor de liga/desliga. Num mod que falhou, "Ver o erro"
-mostra a mensagem inteira. Ligar ou desligar vale na próxima abertura do jogo: uma `.so` carregada não
-é descarregada.
+Como a tela de mods do tModLoader: o botão **Mods** no menu principal do jogo abre a Oficina, uma tela
+do próprio jogo montada com as peças da seleção de mundos (`il2cpp_bridge/src/workshop_screen.cpp`):
 
-O botão é desenhado pelo próprio jogo (`il2cpp_bridge/src/menu_hooks.cpp`): depois do
+- **Lista.** Fundo, divisória, título "Oficina de Mods", a lista que rola com o dedo (o
+  `GUIDraggableItemGrid` do jogo, com arraste e momento) e Voltar. Cada linha usa o fundo de linha de
+  mundo e os textos de nome, versão, estado (colorido: ativo, desativado, erro, mudança pendente) e o
+  que o mod adiciona. Em ordem: ativos, desativados e com erro, cada grupo por nome.
+- **Detalhes.** Tocar numa linha abre o texto completo do mod (versão, autores, descrição, conteúdo,
+  estado e, se falhou, o erro inteiro), com Voltar e o botão "Novo" da tela de mundos virado em
+  **Ativar/Desativar**. O voltar do Android (Escape) volta uma página.
+- Ligar ou desligar vale na próxima abertura do jogo: uma `.so` carregada não é descarregada.
+
+A lista do jogo só aceita delegates gerenciados. Os três vêm de métodos que já existem:
+`GUIWorldSelectMenu.WorldScale` (devolve 1), `GUIWorldSelectMenu.WorldOver` (grava a linha sob o dedo
+numa instância própria) e `GUIItemGrid.DummyDraw` (vazio, sem chamadas diretas), que ganha um hook e
+desenha a linha enquanto a Oficina desenha a lista. Cada linha marca sua região com
+`ControlAnchor.SetGridItemRegion`, e os textos ancorados em `GridItem` se posicionam sozinhos, como na
+seleção de mundos. Os dados vêm do runtime (`TLModWorkshopSource`, montado com `BuildWorkshopEntries`);
+a configuração é thread-safe e o painel vê as mudanças pela revisão dela. Se alguma peça do jogo não
+resolver, o botão Mods abre a Oficina do painel (Views Android), que também abre pela aba Mods.
+
+**O botão** é desenhado pelo próprio jogo (`il2cpp_bridge/src/menu_hooks.cpp`): depois do
 `GUIMainMenu.Draw`, o mesmo `GUITransactionButton.Draw` dos outros botões, com o layout de "Comprar o
-jogo completo" (`MainMenu_Layout.PurchaseFullGame`). Esse botão só aparece na versão de teste
-(`Main.TrialMode`), então fora dela a posição está livre. Com Configurações aberta, o botão fica
-desativado, como os outros. Na primeira vez, o log registra a posição de cada botão do menu; se a do
-Mods coincidir com a de outro, ele não é desenhado e o log avisa. A Oficina continua acessível pela aba
-Mods do painel.
+jogo completo" (`MainMenu_Layout.PurchaseFullGame`), que só aparece na versão de teste
+(`Main.TrialMode`). Essa posição fica uma linha abaixo da coluna do menu e pode não caber em telas
+baixas. Por isso a ponte confere em pixels (`GUITransactionButton.GetRegion` e a região `Screen` do
+`ControlAnchor`) e escolhe, em ordem: a posição do PurchaseFullGame; a coluna inteira reespaçada por
+igual, com o topo no lugar, se os 7 botões couberem sem se sobrepor; ao lado do último botão da coluna.
+Refaz quando o tamanho da tela muda, e o log registra a decisão e a região de cada botão. Com
+Configurações aberta, o botão fica desativado, como os outros.
 
 ## Ferramentas e abas no painel
 

@@ -227,6 +227,7 @@ private:
     bool workshopOpen_ = false;
     std::atomic<bool> workshopRequested_{false};
     std::set<std::string> expanded_;  // mods com o erro aberto na Oficina
+    uint64_t configRevision_ = 0;     // a configuração pode mudar por fora (Oficina nativa)
 
     std::vector<ModInfo> mods_;     // lidos uma vez: não mudam com o jogo rodando
     bool modsLoaded_ = false;
@@ -252,5 +253,21 @@ private:
 
 // Rótulos em português usados no view-model (expostos para testes).
 const char* StateLabel(rt::ModState s);
+
+// Uma linha da Oficina de Mods nativa (a tela do jogo, il2cpp_bridge/src/
+// workshop_screen.cpp): textos prontos para a linha e para a página de detalhes.
+struct WorkshopEntry {
+    std::string id;
+    std::string name;
+    std::string version;      // "v0.1.0" (vazio se o manifest não foi lido)
+    std::string status;       // "Ativo", "Desativado", "Será desativado", "Erro"...
+    int kind = 0;             // 0 ativo, 1 desativado, 2 erro, 3 mudança pendente
+    std::string summary;      // "1 item"
+    std::string details;      // página de detalhes, várias linhas
+    std::string toggleLabel;  // "Desativar" / "Ativar"
+};
+// Em ordem: ativos, desativados e com erro (cada grupo por nome), como as
+// seções da Oficina do painel. O interruptor vem da configuração.
+std::vector<WorkshopEntry> BuildWorkshopEntries(const std::vector<ModInfo>& mods, const ConfigStore& config);
 
 }  // namespace tlmod::overlay

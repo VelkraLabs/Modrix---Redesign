@@ -240,6 +240,36 @@ void TLMod_SetFrameCallback(TLModFrameCallback cb);
 typedef void (*TLModMenuButtonCallback)(void);
 void TLMod_SetMainMenuButton(const char* label, TLModMenuButtonCallback onClick);
 
+// Oficina de Mods nativa (workshop_screen.cpp): uma tela no lugar do menu
+// principal, com as peças da tela de seleção de mundos do jogo. Lista com uma
+// linha por mod (nome, versão, estado colorido, resumo) e, ao tocar, a página
+// de detalhes (texto completo, Voltar e o botão de ativar/desativar).
+typedef struct TLModWorkshopEntry {
+    const char* name;         // nome do mod
+    const char* version;      // "v0.1.0"
+    const char* status;       // "Ativo", "Desativado", "Erro"...
+    int32_t statusKind;       // cor do estado: 0 ativo, 1 desativado, 2 erro, 3 mudança pendente
+    const char* summary;      // "1 item" (pode ser vazio)
+    const char* details;      // página de detalhes: texto inteiro ('\n' quebra a linha)
+    const char* toggleLabel;  // botão da página de detalhes: "Desativar" / "Ativar"
+} TLModWorkshopEntry;
+typedef struct TLModWorkshopSource {
+    void* user;
+    // Muda quando a lista ou algum texto muda (a Oficina refaz as strings).
+    uint64_t (*revision)(void* user);
+    int32_t (*count)(void* user);
+    // Strings de `out` valem até a próxima chamada.
+    bool (*entry)(void* user, int32_t index, TLModWorkshopEntry* out);
+    void (*toggle)(void* user, int32_t index);
+} TLModWorkshopSource;
+// Tudo na thread do jogo (dentro do desenho do menu). A fonte é copiada; nulo desliga.
+void TLMod_SetWorkshopSource(const TLModWorkshopSource* source);
+// As peças do jogo resolveram e há fonte: TLMod_OpenWorkshop vai abrir a tela.
+bool TLMod_WorkshopAvailable(void);
+// Qualquer thread: a Oficina abre no próximo desenho do menu principal.
+void TLMod_OpenWorkshop(void);
+bool TLMod_WorkshopOpen(void);
+
 // Só na thread do jogo (ex.: dentro do TLModFrameCallback): 1 = menu,
 // 0 = dentro de um mundo, -1 = indisponível. Lê LocalUserGameState.Instance
 // (ThreadStatic) .gameMenu; em outra thread Instance é nulo e o resultado é -1.
@@ -484,6 +514,8 @@ int32_t TLMod_Hooked_GUITransactionButtonDraw(Il2CppObject* layout, Il2CppObject
                                               const MethodInfo* method);
 void TLMod_Hooked_GUIReforgePopupDrawItem(Il2CppObject* self, const MethodInfo* method);
 void TLMod_Hooked_GUIMainMenuDraw(Il2CppObject* self, const MethodInfo* method);  // menu_hooks.cpp
+void TLMod_Hooked_GUIItemGridDummyDraw(Il2CppObject* gridLayout, int32_t index, TLModXnaVector2 position,
+                                       float scale, const MethodInfo* method);  // workshop_screen.cpp
 void TLMod_Hooked_GUIResearchDrawResearchItem(Il2CppObject* self, const MethodInfo* method);
 int32_t TLMod_Hooked_GUIResearchCanBeResearched(Il2CppObject* self, Il2CppObject* item, int32_t* percent,
                                                 const MethodInfo* method);

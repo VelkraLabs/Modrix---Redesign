@@ -423,6 +423,56 @@ static void TestWorkshop(const fs::path& mods, const fs::path& tmp) {
     CHECK(*snap->Get("fab")->Get("visible")->AsBool() &&
           *snap->Get("mods")->Get("workshop_button")->AsString() == "Abrir a Oficina de Mods");
     CHECK(panel.HandleAction("workshop_open", "") && panel.IsWorkshopOpen());
+
+    // Mudança feita por fora (a Oficina nativa, na thread do jogo): o próximo Tick refaz as linhas.
+    const bool before = Row(panel, "tlmod.example_item")->enabled;
+    CHECK(cfg.SetEnabled("tlmod.example_item", !before, &err));
+    CHECK(panel.Tick(10) && Row(panel, "tlmod.example_item")->enabled == !before);
+    CHECK(!panel.Tick(11));
+}
+
+// ---------------------------------------------------------------------------
+// Oficina nativa (a tela do jogo): entradas prontas e a configuração vista pelas duas threads.
+static void TestNativeWorkshop(const fs::path& tmp) {
+    std::printf("\n== Oficina nativa: entradas e configuração compartilhada\n");
+    std::vector<overlay::ModInfo> mods = {
+        {"b.gems", "gemas", "0.2.0", rt::ModState::Failed, "dlopen failed: símbolo ausente", "Acme", "Gemas.", "4 itens"},
+        {"a.ruby", "Rubi", "0.1.0", rt::ModState::Loaded, "", "TLMod", "Um rubi.", "1 item"},
+        {"c.boss", "Boss", "0.1.0", rt::ModState::Disabled, "desativado", "", "", "1 NPC"},
+        {"d.check", "Boss Checklist", "0.1.0", rt::ModState::Loaded, "", "", "", ""},
+    };
+    overlay::ConfigStore cfg(tmp / "native" / "tlmod_config.json");
+    std::string err;
+    CHECK(cfg.SetEnabled("c.boss", false, &err));
+    auto entries = overlay::BuildWorkshopEntries(mods, cfg);
+    // Ativos (por nome), desativados, com erro.
+    CHECK(entries.size() == 4 && entries[0].id == "d.check" && entries[1].id == "a.ruby" && entries[2].id == "c.boss" &&
+          entries[3].id == "b.gems");
+    CHECK(entries[1].status == "Ativo" && entries[1].kind == 0 && entries[1].version == "v0.1.0" &&
+          entries[1].summary == "1 item" && entries[1].toggleLabel == "Desativar");
+    CHECK(entries[1].details.find("por TLMod") != std::string::npos &&
+          entries[1].details.find("Adiciona: 1 item") != std::string::npos &&
+          entries[1].details.find("Estado: Carregado") != std::string::npos);
+    CHECK(entries[2].status == "Desativado" && entries[2].kind == 1 && entries[2].toggleLabel == "Ativar");
+    CHECK(entries[3].status == "Erro" && entries[3].kind == 2 &&
+          entries[3].details.find("Erro:\ndlopen failed: símbolo ausente") != std::string::npos);
+    // Desligar um ativo: "Será desativado", cor de aviso, e a pendência no texto.
+    uint64_t rev = cfg.Revision();
+    CHECK(cfg.SetEnabled("a.ruby", false, &err) && cfg.Revision() > rev);
+    entries = overlay::BuildWorkshopEntries(mods, cfg);
+    CHECK(entries[1].status == "Será desativado" && entries[1].kind == 3 && entries[1].toggleLabel == "Ativar" &&
+          entries[1].details.find("(Será desativado ao reiniciar o jogo)") != std::string::npos);
+    rev = cfg.Revision();
+    CHECK(cfg.SetEnabled("a.ruby", false, &err) && cfg.Revision() == rev);  // sem mudança, mesma revisão
+
+    // A Oficina nativa (thread do jogo) muda a configuração enquanto o painel lê (thread de UI).
+    std::thread game([&] {
+        for (int i = 0; i < 200; ++i) cfg.SetEnabled("d.check", i % 2 == 0, nullptr);
+    });
+    int reads = 0;
+    for (int i = 0; i < 200; ++i) reads += cfg.IsEnabled("d.check") ? 1 : 0, (void)cfg.Disabled();
+    game.join();
+    CHECK(reads >= 0 && !cfg.IsEnabled("d.check"));  // o último SetEnabled (i = 199) desliga
 }
 
 int main(int argc, char** argv) {
@@ -447,6 +497,7 @@ int main(int argc, char** argv) {
     TestErrorAndLog(tmp);
     TestModTab(argv[1], tmp);
     TestWorkshop(mods, tmp);
+    TestNativeWorkshop(tmp);
     fs::remove_all(tmp);
     std::printf("\n%d checks, %d falha%s: %s\n", g_checks, g_failures, g_failures == 1 ? "" : "s",
                 g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM");

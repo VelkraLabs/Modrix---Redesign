@@ -11,6 +11,8 @@
 namespace tlmod::overlay {
 
 bool ConfigStore::Load(std::string* error) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    revision_.fetch_add(1, std::memory_order_acq_rel);
     disabled_.clear();
     std::error_code ec;
     if (!std::filesystem::exists(file_, ec)) return true;  // primeira execução
@@ -33,12 +35,14 @@ bool ConfigStore::Load(std::string* error) {
 }
 
 bool ConfigStore::SetEnabled(const std::string& modId, bool enabled, std::string* error) {
+    std::lock_guard<std::mutex> lock(mutex_);
     std::set<std::string> next = disabled_;
     if (enabled) next.erase(modId);
     else next.insert(modId);
     if (next == disabled_) return true;
     if (!Save(next, error)) return false;
     disabled_ = std::move(next);
+    revision_.fetch_add(1, std::memory_order_acq_rel);
     return true;
 }
 

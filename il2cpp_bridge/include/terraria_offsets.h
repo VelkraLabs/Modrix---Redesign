@@ -338,6 +338,53 @@ constexpr size_t Credits = 0x48;
 constexpr size_t PurchaseFullGame = 0x50;
 constexpr size_t PlayerProfile = 0x58;
 }  // namespace main_menu_layout_off
+// --- Oficina de Mods nativa (workshop_screen.cpp) -----------------------------------
+// Montada com as peças da tela de seleção de mundos (WorldSelectMenu_Layout).
+constexpr const char* kWorldSelectLayoutClass = "WorldSelectMenu_Layout";  // namespace global
+namespace world_select_layout_static_off {
+constexpr size_t Instance = 0x0;
+}  // namespace world_select_layout_static_off
+namespace world_select_layout_off {
+constexpr size_t Backing = 0x18;               // Panel_Layout: fundo da tela
+constexpr size_t WorldGrid = 0x20;             // DraggableItemGrid_Layout: a lista que rola
+constexpr size_t Title = 0x28;                 // StringButton_Layout
+constexpr size_t New = 0x30;                   // TransactionButton_Layout ("Novo"): Ativar/Desativar
+constexpr size_t Back = 0x38;                  // TransactionButton_Layout ("Voltar")
+constexpr size_t MenuDivider = 0x40;           // Panel_Layout
+constexpr size_t ItemBacking = 0xA8;           // Panel_Layout: fundo de uma linha (Size = tamanho da linha)
+constexpr size_t ItemSelectedBacking = 0xB8;   // Panel_Layout: a linha sob o dedo
+constexpr size_t ItemName = 0x100;             // String_Layout (âncora GridItem: relativo à linha)
+constexpr size_t ItemNameDivider = 0x108;      // Panel_Layout
+constexpr size_t ItemTimeBacking = 0x110;      // Panel_Layout
+constexpr size_t ItemTime = 0x118;             // String_Layout: versão
+constexpr size_t ItemModeBacking = 0x120;      // Panel_Layout
+constexpr size_t ItemMode = 0x128;             // String_Layout: estado (colorido)
+constexpr size_t ItemSizeBacking = 0x130;      // Panel_Layout
+constexpr size_t ItemSize = 0x138;             // String_Layout: o que o mod adiciona
+constexpr size_t ItemImage = 0x150;            // Panel_Layout: moldura do ícone
+}  // namespace world_select_layout_off
+namespace panel_layout_off {
+constexpr size_t Size = 0x20;  // Vector2
+}  // namespace panel_layout_off
+namespace string_layout_off {
+constexpr size_t AnchorControl = 0x10;          // 2 = GridItem (a região de ControlAnchor.SetGridItemRegion)
+constexpr size_t Anchor = 0x14;
+constexpr size_t Location = 0x18;
+constexpr size_t Alignment = 0x24;              // LayoutCalculator.AnchorType (9 = TopLeft)
+constexpr size_t MultiLineUseAlignment = 0x30;  // bool: quebra em WrapWidth (GUIString.ApplyMultiLineAlignment)
+constexpr size_t WrapWidth = 0x34;              // float
+constexpr size_t MaxLines = 0x38;               // int
+}  // namespace string_layout_off
+namespace gui_world_select_menu_off {
+constexpr size_t worldOver = 0xCC;  // int: gravado por WorldOver(int), o CursorOver da lista
+}  // namespace gui_world_select_menu_off
+namespace gui_draggable_item_grid_static_off {
+constexpr size_t fullRegion = 0x10;  // Rectangle: a área da lista no último desenho
+}  // namespace gui_draggable_item_grid_static_off
+namespace gui_item_grid_static_off {
+constexpr size_t dummyDraw = 0x20;  // GUIItemGrid.DrawItemHandler para DummyDraw (vazio)
+}  // namespace gui_item_grid_static_off
+
 // Button_Layout (base de TransactionButton_Layout): onde o botão fica na tela.
 namespace button_layout_off {
 constexpr size_t AnchorControl = 0x10;  // ControlAnchor.ControlId (0 = Screen)
@@ -501,6 +548,29 @@ constexpr uintptr_t ItemSnippet_UniqueDraw = 0x97F0D8;           // [i:ID] no ch
 // GUITransactionButton.Draw (InputState: 0 = Clicked) e o som 10 do clique.
 constexpr uintptr_t GUIMainMenu_Draw = 0xA4397C;
 constexpr uintptr_t SoundEngine_PlaySound = 0x15F578C;  // (int type, int x, int y, int Style, float, float)
+constexpr uintptr_t GUITransactionButton_GetRegion = 0x121FA3C;  // Rectangle em pixels de tela
+constexpr uintptr_t ControlAnchor_GetControlRegion = 0xA0B4E8;  // (ControlId): Screen = 0
+// Oficina de Mods nativa: as chamadas da tela de seleção de mundos.
+constexpr uintptr_t ControlAnchor_SetGridItemRegion = 0xA0AD68;  // (Rectangle): âncora GridItem
+constexpr uintptr_t GUIPanel_Draw = 0x105B0EC;          // (Panel_Layout, bool, Color?, Color?, Color?)
+constexpr uintptr_t GUIPanel_DrawAtPosition = 0x105CCD0;  // (Panel_Layout, Vector2, Vector2, bool)
+constexpr uintptr_t GUIPanel_Region = 0x105AF2C;        // (Panel_Layout): Rectangle
+constexpr uintptr_t GUIString_Draw = 0x121DD6C;         // (String_Layout, string)
+constexpr uintptr_t GUIStringButton_DrawButton = 0x121F26C;  // (StringButton_Layout, string, ref float, bool, bool)
+// (DraggableItemGrid_Layout, scale, over, draw, int count, ref float scroll, ref float momentum,
+//  ref int dragging, ref Vector2 dragPosition, Vector2 itemSize, bool drawMissing, bool mouseScroll,
+//  bool disableDrag): o overload de tamanho fixo; ele cuida do arraste, do momento e do recorte.
+constexpr uintptr_t GUIDraggableItemGrid_Draw = 0x105614C;
+constexpr uintptr_t GUIItemGrid_DummyDraw = 0x1059FE0;  // DrawItemHandler vazio, sem chamadas diretas: o hook desenha a linha
+constexpr uintptr_t GUIWorldSelectMenu_WorldScale = 0xA8484C;  // float(int): devolve 1 (alvo do GetItemScaleHandler)
+constexpr uintptr_t GUIWorldSelectMenu_WorldOver = 0xA84854;   // void(int): grava worldOver (alvo do CursorOver)
+constexpr uintptr_t SpriteBatch_Begin = 0xB1CA74;  // (sort, blend, sampler, depth, raster, effect, Matrix?, bool)
+constexpr uintptr_t SpriteBatch_End = 0xB1C974;
+constexpr uintptr_t StringLayout_Copy = 0xA0E724;
+constexpr uintptr_t KeyboardInput_GetKeyUp = 0x71CCD8;  // (KeyCode): Escape (27) = voltar do Android
+constexpr uintptr_t Main_get_mouseX = 0xC635D0;
+constexpr uintptr_t Main_get_mouseY = 0xC6367C;
+constexpr uintptr_t Main_get_mouseLeft = 0xC639D8;
 // Nome de NPC: o jogo só lê Lang pelo netID (o da casca).
 constexpr uintptr_t NPC_get_TypeName = 0xED9240;   // Lang.GetNPCNameValue(netID): hover, barra, mapa, morte
 constexpr uintptr_t NPC_GetTypeNetName = 0xEDB0BC; // NetworkText.FromKey(...): "X despertou!", "X foi derrotado"
@@ -573,6 +643,25 @@ constexpr int Main_DrawInterface_40_InteractItemIcon = 0;
 constexpr int ItemSnippet_UniqueDraw = 6;
 constexpr int GUIMainMenu_Draw = 0;
 constexpr int SoundEngine_PlaySound = 6;  // o único overload de 6
+constexpr int GUITransactionButton_GetRegion = 1;
+constexpr int ControlAnchor_GetControlRegion = 1;
+constexpr int ControlAnchor_SetGridItemRegion = 1;
+constexpr int GUIPanel_Draw = 5;
+constexpr int GUIPanel_DrawAtPosition = 4;
+constexpr int GUIPanel_Region = 1;
+constexpr int GUIString_Draw = 2;  // o overload (String_Layout, string)
+constexpr int GUIStringButton_DrawButton = 5;
+constexpr int GUIDraggableItemGrid_Draw = 13;  // 3 overloads de 13: o do Vector2 itemSize
+constexpr int GUIItemGrid_DummyDraw = 4;
+constexpr int GUIWorldSelectMenu_WorldScale = 1;
+constexpr int GUIWorldSelectMenu_WorldOver = 1;
+constexpr int SpriteBatch_Begin = 8;
+constexpr int SpriteBatch_End = 0;
+constexpr int StringLayout_Copy = 1;
+constexpr int KeyboardInput_GetKeyUp = 1;
+constexpr int Main_get_mouseX = 0;
+constexpr int Main_get_mouseY = 0;
+constexpr int Main_get_mouseLeft = 0;
 constexpr int NPC_get_TypeName = 0;
 constexpr int NPC_GetTypeNetName = 0;
 }  // namespace argc

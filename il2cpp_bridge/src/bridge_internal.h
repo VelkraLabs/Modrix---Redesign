@@ -58,6 +58,11 @@ void InstallDrawHooks();
 void InstallScreenHooks();
 // Botão Mods no menu principal (menu_hooks.cpp). Opcional.
 void InstallMenuHooks();
+// Oficina de Mods nativa (workshop_screen.cpp): resolve as peças da tela de
+// mundos e instala o hook do DummyDraw. DrawWorkshop: chamado no lugar do
+// GUIMainMenu.Draw; true se desenhou a Oficina (o menu não é desenhado).
+bool ResolveWorkshop();
+bool DrawWorkshop();
 
 // Propriedades de um item original para avaliar uma casca (item_traits.cpp).
 bool ResolveItemTraits();

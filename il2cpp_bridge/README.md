@@ -59,7 +59,12 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
 13. Botão **Mods** no menu principal (`src/menu_hooks.cpp`, `TLMod_SetMainMenuButton`): hook em
     `GUIMainMenu.Draw` (`0xA4397C`) que desenha, depois do original, um `GUITransactionButton` no layout
     `MainMenu_Layout.PurchaseFullGame` (livre fora de `Main.TrialMode`), com o som 10 do menu no toque.
-    O clique chama o callback (no runtime, a Oficina de Mods do overlay).
+    Se essa posição não couber na tela, reespaça a coluna ou põe o botão ao lado (ver `modapi/README.md`,
+    "Oficina de Mods"). O clique chama o callback do runtime.
+14. Oficina de Mods nativa (`src/workshop_screen.cpp`, `TLMod_SetWorkshopSource`/`TLMod_OpenWorkshop`):
+    com ela aberta, o hook do `GUIMainMenu.Draw` desenha a Oficina no lugar do menu, com as peças da seleção
+    de mundos (`WorldSelectMenu_Layout`, `GUIDraggableItemGrid`, `GUIPanel`, `GUIString`); as linhas saem do
+    hook em `GUIItemGrid.DummyDraw` (`0x1059FE0`).
 
 ## Log
 

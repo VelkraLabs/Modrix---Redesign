@@ -108,9 +108,9 @@ void WriteWorkshop(rt::JsonWriter& w, bool open, const std::vector<ModRow>& rows
     w.Key("workshop").BeginObject();
     w.Key("open").Bool(open);
     w.Key("title").String("Oficina de Mods");
+    const std::string installed = std::to_string(rows.size()) + (rows.size() == 1 ? " mod instalado" : " mods instalados");
     w.Key("summary").String(rows.empty() ? "Nenhum mod instalado"
-                                         : std::to_string(rows.size()) + (rows.size() == 1 ? " mod instalado" : " mods instalados") +
-                                               " · " + std::to_string(active) + (active == 1 ? " ativo" : " ativos"));
+                                         : installed + " · " + std::to_string(active) + (active == 1 ? " ativo" : " ativos"));
     w.Key("notice").String(rows.empty() ? "" : notice);
     w.Key("empty").String(rows.empty() ? "Coloque os mods na pasta tlmod/mods do Terraria e abra o jogo de novo." : "");
     w.Key("footer").String("Ligar ou desligar um mod vale na próxima vez que o jogo abrir.");
@@ -249,6 +249,62 @@ ChecklistView BuildChecklist(const std::string& text) {
 }  // namespace
 
 // ---------------------------------------------------------------------------
+// Oficina de Mods nativa
+// ---------------------------------------------------------------------------
+std::vector<WorkshopEntry> BuildWorkshopEntries(const std::vector<ModInfo>& mods, const ConfigStore& config) {
+    auto group = [](ModState s) { return s == ModState::Loaded ? 0 : s == ModState::Disabled ? 1 : 2; };
+    auto lower = [](std::string s) {
+        for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    std::vector<const ModInfo*> sorted;
+    for (const ModInfo& m : mods) sorted.push_back(&m);
+    std::stable_sort(sorted.begin(), sorted.end(), [&](const ModInfo* a, const ModInfo* b) {
+        if (group(a->state) != group(b->state)) return group(a->state) < group(b->state);
+        return lower(a->name) < lower(b->name);
+    });
+    std::vector<WorkshopEntry> out;
+    for (const ModInfo* m : sorted) {
+        WorkshopEntry e;
+        e.id = m->id;
+        e.name = m->name;
+        e.version = m->version.empty() ? "" : "v" + m->version;
+        const bool enabled = config.IsEnabled(m->id);
+        const bool wasEnabled = m->state != ModState::Disabled;
+        std::string pending;
+        if (enabled != wasEnabled)
+            pending = enabled ? "Será ativado ao reiniciar o jogo" : "Será desativado ao reiniciar o jogo";
+        switch (group(m->state)) {
+            case 0:
+                e.status = enabled ? "Ativo" : "Será desativado";
+                e.kind = enabled ? 0 : 3;
+                break;
+            case 1:
+                e.status = enabled ? "Será ativado" : "Desativado";
+                e.kind = enabled ? 3 : 1;
+                break;
+            default:
+                e.status = StateLabel(m->state);
+                e.kind = 2;
+                break;
+        }
+        e.summary = m->content;
+        e.toggleLabel = enabled ? "Desativar" : "Ativar";
+        std::string d = m->name + (e.version.empty() ? "" : "  " + e.version);
+        if (!m->authors.empty()) d += "\npor " + m->authors;
+        if (!m->description.empty()) d += "\n\n" + m->description;
+        if (!m->content.empty()) d += "\n\nAdiciona: " + m->content;
+        d += "\n\nEstado: " + std::string(StateLabel(m->state));
+        if (!pending.empty()) d += " (" + pending + ")";
+        if (group(m->state) == 2 && !m->error.empty()) d += "\n\nErro:\n" + m->error;
+        d += "\n\nLigar ou desligar vale na próxima vez que o jogo abrir.";
+        e.details = std::move(d);
+        out.push_back(std::move(e));
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // LoaderDataSource
 // ---------------------------------------------------------------------------
 std::vector<ModInfo> LoaderDataSource::Mods() const {
@@ -371,6 +427,7 @@ void PanelController::RebuildMods() {
             RefreshModTab(modTabs_.back());  // título do próprio mod já no primeiro desenho
         }
     }
+    configRevision_ = config_.Revision();
     modRows_.clear();
     bool anyPending = false;
     for (const ModInfo& m : mods_) {
@@ -487,7 +544,7 @@ void PanelController::RefreshLog() {
 
 bool PanelController::Tick(int64_t nowMs) {
     uint64_t before = version_;
-    if (!modsLoaded_) {  // primeira vez: monta a lista de mods
+    if (!modsLoaded_ || config_.Revision() != configRevision_) {  // primeira vez, ou mudou por fora
         RebuildMods();
         Bump();
     }

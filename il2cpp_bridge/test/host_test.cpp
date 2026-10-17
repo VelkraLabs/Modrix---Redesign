@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -199,9 +200,132 @@ int TestMenu(void* lib) {
     set_trial(true);
     CHECK(menu(true, label, sizeof(label)) == 7 && std::string(label) == "Comprar" && g_menuClicks == 1);
     set_trial(false);
+    // Tela baixa: a linha abaixo da coluna não cabe; a coluna é reespaçada por
+    // igual (topo no lugar) e os 7 cabem. 980 px: limite 961; topo em 290 px;
+    // (961 - 290 - 80) / 6 = 98,5 px = 49,25 unidades.
+    auto set_screen = reinterpret_cast<void (*)(int32_t, int32_t)>(dlsym(lib, "mock_set_screen"));
+    auto location = reinterpret_cast<void (*)(int, float*, float*)>(dlsym(lib, "mock_menu_button_location"));
+    CHECK(set_screen && location);
+    float x = 0, y = 0;
+    set_screen(1600, 980);
+    CHECK(menu(false, label, sizeof(label)) == 7 && std::string(label) == "Mods");
+    location(6, &x, &y);
+    CHECK(x == -120.0f && std::fabs(y - (-100.0f + 6 * 49.25f)) < 0.01f);
+    location(3, &x, &y);  // Settings, o 6º da coluna
+    CHECK(std::fabs(y - (-100.0f + 5 * 49.25f)) < 0.01f);
+    location(4, &x, &y);  // Tutorial, o 3º
+    CHECK(std::fabs(y - (-100.0f + 2 * 49.25f)) < 0.01f);
+    // Mais baixa ainda: 7 botões se sobreporiam; o Mods vai ao lado de Settings,
+    // a uma largura de botão + o vão entre as linhas: (480 + 20) / 2 = 250 unidades.
+    set_screen(1600, 760);
+    CHECK(menu(false, label, sizeof(label)) == 7 && std::string(label) == "Mods");
+    location(6, &x, &y);
+    CHECK(x == 130.0f && y == 150.0f);
+    location(3, &x, &y);
+    CHECK(y == 150.0f);  // a coluna volta ao original
+    // Sem lugar nem ao lado: não desenha.
+    set_screen(900, 760);
+    CHECK(menu(false, label, sizeof(label)) == 6);
+    // Tela alta: tudo no lugar original.
+    set_screen(1600, 1200);
+    CHECK(menu(false, label, sizeof(label)) == 7 && std::string(label) == "Mods");
+    location(6, &x, &y);
+    CHECK(x == -120.0f && y == 200.0f);
     // Tirar o botão.
     TLMod_SetMainMenuButton(nullptr, nullptr);
     CHECK(menu(true, label, sizeof(label)) == 6 && g_menuClicks == 1);
+    return 0;
+}
+
+// Fonte de dados da Oficina para o teste: 3 mods; o do meio pode ser ligado/desligado.
+struct WsMod {
+    const char* name;
+    const char* version;
+    bool enabled;
+};
+WsMod g_wsMods[] = {{"Boss Checklist", "v0.1.0", true}, {"Exemplo: Rubi", "v0.1.0", true}, {"Gemas", "v0.2.0", true}};
+uint64_t g_wsRevision = 1;
+int g_wsToggles = 0;
+std::string g_wsDetails;
+TLModWorkshopSource WsSource() {
+    TLModWorkshopSource s{};
+    s.revision = [](void*) { return g_wsRevision; };
+    s.count = [](void*) { return 3; };
+    s.entry = [](void*, int32_t i, TLModWorkshopEntry* out) {
+        const WsMod& m = g_wsMods[i];
+        g_wsDetails = std::string(m.name) + "\nDescrição do mod\nErro: nenhum";
+        out->name = m.name;
+        out->version = m.version;
+        out->status = i == 2 ? "Erro" : m.enabled ? "Ativo" : "Será desativado";
+        out->statusKind = i == 2 ? 2 : m.enabled ? 0 : 3;
+        out->summary = i == 1 ? "1 item" : "";
+        out->details = g_wsDetails.c_str();
+        out->toggleLabel = m.enabled ? "Desativar" : "Ativar";
+        return true;
+    };
+    s.toggle = [](void*, int32_t i) {
+        g_wsMods[i].enabled = !g_wsMods[i].enabled;
+        ++g_wsToggles;
+        ++g_wsRevision;
+    };
+    return s;
+}
+
+int TestWorkshop(void* lib) {
+    std::printf("\n== Oficina de Mods nativa (peças da seleção de mundos)\n");
+    auto frame_fn = reinterpret_cast<size_t (*)(int32_t, int32_t, bool, bool, int, char*, size_t)>(
+        dlsym(lib, "mock_workshop_frame"));
+    auto errors = reinterpret_cast<int (*)(int*, int*)>(dlsym(lib, "mock_workshop_errors"));
+    CHECK(frame_fn && errors);
+    static char buf[4096];
+    auto frame = [&](int32_t x, int32_t y, bool down, bool escape = false, int click = 0) {
+        frame_fn(x, y, down, escape, click, buf, sizeof(buf));
+        return std::string(buf);
+    };
+    auto has = [](const std::string& f, const std::string& line) { return f.find(line + "\n") != std::string::npos; };
+
+    CHECK(!TLMod_WorkshopAvailable());  // sem fonte
+    TLModWorkshopSource src = WsSource();
+    TLMod_SetWorkshopSource(&src);
+    CHECK(TLMod_WorkshopAvailable() && !TLMod_WorkshopOpen());
+    CHECK(has(frame(0, 0, false), "menu"));  // fechada: o menu do jogo
+
+    // Abre: título, as 3 linhas (nome, versão, estado colorido, resumo) e Voltar; sem o menu.
+    TLMod_OpenWorkshop();
+    std::string f = frame(0, 0, false);
+    CHECK(TLMod_WorkshopOpen() && !has(f, "menu"));
+    CHECK(has(f, "titulo:Oficina de Mods") && has(f, "botao:voltar:Voltar") && f.find("botao:novo") == std::string::npos);
+    CHECK(has(f, "nome:Boss Checklist") && has(f, "nome:Exemplo: Rubi") && has(f, "nome:Gemas"));
+    CHECK(has(f, "versao:v0.2.0") && has(f, "resumo:1 item"));
+    CHECK(has(f, "estado:Ativo#ff78e182") && has(f, "estado:Erro#ff6e6eff"));  // verde e vermelho (ABGR)
+
+    // Toque na 2ª linha (y 160..210): apertar e soltar no mesmo lugar abre os detalhes.
+    frame(300, 190, true);
+    frame(300, 190, false);
+    f = frame(0, 0, false);
+    CHECK(has(f, "titulo:Exemplo: Rubi") && f.find("texto:Exemplo: Rubi\nDescrição do mod\nErro: nenhum") != std::string::npos);
+    CHECK(has(f, "botao:novo:Desativar") && has(f, "botao:voltar:Voltar") && f.find("nome:") == std::string::npos);
+    // Ativar/Desativar: chama a fonte e o rótulo muda no frame seguinte.
+    frame(0, 0, false, false, 2);
+    CHECK(g_wsToggles == 1 && !g_wsMods[1].enabled);
+    f = frame(0, 0, false);
+    CHECK(has(f, "botao:novo:Ativar"));
+    // Voltar: a lista, com o estado novo.
+    frame(0, 0, false, false, 1);
+    f = frame(0, 0, false);
+    CHECK(has(f, "titulo:Oficina de Mods") && has(f, "estado:Será desativado#ff5ad2ff"));
+    // Arrastar (soltar longe de onde apertou) não abre nada.
+    frame(300, 190, true);
+    frame(300, 260, false);  // soltou 70 px abaixo: foi arraste
+    f = frame(0, 0, false);
+    CHECK(has(f, "titulo:Oficina de Mods"));
+    // O voltar do Android (Escape) fecha; o menu volta no frame seguinte.
+    frame(0, 0, false, true);
+    CHECK(!TLMod_WorkshopOpen() && has(frame(0, 0, false), "menu"));
+    int begins = 0, ends = 0;
+    CHECK(errors(&begins, &ends) == 0 && begins == ends && begins > 0);
+    TLMod_SetWorkshopSource(nullptr);
+    CHECK(!TLMod_WorkshopAvailable());
     return 0;
 }
 
@@ -890,6 +1014,7 @@ int main(int argc, char** argv) {
 
     if (int rc = TestTools(lib)) return rc;
     if (int rc = TestMenu(lib)) return rc;
+    if (int rc = TestWorkshop(lib)) return rc;
     if (int rc = TestItems(lib)) return rc;
     if (int rc = TestDraw(lib)) return rc;
     if (int rc = TestScreens(lib)) return rc;

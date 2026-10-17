@@ -6,9 +6,11 @@ erro de carga inteiro e liga/desliga), aba **Boss Checklist** (JSON do mod
 com o caminho do `tlmod.log`). Mods que registram o canal `panel` (provedor e
 comando) ganham uma aba própria, como **Ferramentas** do `tlmod.devtools`.
 
-**Oficina de Mods.** Tela grande para gerenciar os mods, aberta pelo botão
-**Mods** que a ponte desenha no menu principal do jogo (ou pelo botão "Abrir a
-Oficina de Mods" da aba Mods). Mostra os mods em seções pelo estado desta
+**Oficina de Mods (painel).** Tela grande para gerenciar os mods, aberta pelo
+botão "Abrir a Oficina de Mods" da aba Mods (também dentro de um mundo). O botão
+**Mods** do menu principal abre a Oficina nativa, feita com as telas do próprio
+jogo (`il2cpp_bridge/src/workshop_screen.cpp`); esta só substitui aquela se
+alguma peça do jogo não resolver. Mostra os mods em seções pelo estado desta
 sessão (Ativos, Desativados, Com erro), com versão, autores, descrição, o que
 cada um adiciona e o interruptor de liga/desliga. "Ver o erro" abre a mensagem
 inteira de um mod que falhou. A mudança vale na próxima abertura do jogo.

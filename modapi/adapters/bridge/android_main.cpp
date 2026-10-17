@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "bridge.h"
 #include "bridge_adapter.h"
@@ -35,10 +36,63 @@ void OnBridgeLog(int level, int64_t timeMs, const char* message) {
 
 tlmod::overlay::PanelController* g_panel = nullptr;  // escrito antes de ligar o botão
 
+// Oficina de Mods nativa (a tela do jogo, workshop_screen.cpp na ponte). Os
+// callbacks rodam na thread do jogo; a configuração é thread-safe e o painel
+// (thread de UI) vê as mudanças pela revisão dela.
+struct NativeWorkshop {
+    std::vector<tlmod::overlay::ModInfo> mods;  // lidos uma vez: não mudam com o jogo rodando
+    tlmod::overlay::ConfigStore* config = nullptr;
+    std::vector<tlmod::overlay::WorkshopEntry> entries;
+    uint64_t builtFor = 0;
+
+    void Rebuild() {
+        if (builtFor == config->Revision() && !entries.empty()) return;
+        entries = tlmod::overlay::BuildWorkshopEntries(mods, *config);
+        builtFor = config->Revision();
+    }
+};
+NativeWorkshop g_workshop;
+
+TLModWorkshopSource WorkshopSource() {
+    TLModWorkshopSource s{};
+    s.user = &g_workshop;
+    s.revision = [](void* user) { return static_cast<NativeWorkshop*>(user)->config->Revision(); };
+    s.count = [](void* user) {
+        auto* w = static_cast<NativeWorkshop*>(user);
+        w->Rebuild();
+        return static_cast<int32_t>(w->entries.size());
+    };
+    s.entry = [](void* user, int32_t i, TLModWorkshopEntry* out) {
+        auto* w = static_cast<NativeWorkshop*>(user);
+        w->Rebuild();
+        if (i < 0 || static_cast<size_t>(i) >= w->entries.size()) return false;
+        const tlmod::overlay::WorkshopEntry& e = w->entries[static_cast<size_t>(i)];
+        *out = {e.name.c_str(), e.version.c_str(), e.status.c_str(), e.kind, e.summary.c_str(), e.details.c_str(),
+                e.toggleLabel.c_str()};
+        return true;
+    };
+    s.toggle = [](void* user, int32_t i) {
+        auto* w = static_cast<NativeWorkshop*>(user);
+        w->Rebuild();
+        if (i < 0 || static_cast<size_t>(i) >= w->entries.size()) return;
+        const std::string id = w->entries[static_cast<size_t>(i)].id;
+        std::string error;
+        bool enable = !w->config->IsEnabled(id);
+        if (w->config->SetEnabled(id, enable, &error))
+            tlmod::rt::Log(TLMOD_LOG_INFO, "oficina", id + (enable ? " ativado" : " desativado") +
+                                                          " (vale na próxima abertura do jogo)");
+        else
+            tlmod::rt::Log(TLMOD_LOG_ERROR, "oficina", "não foi possível salvar a configuração: " + error);
+    };
+    return s;
+}
+
 // Botão "Mods" do menu principal (thread do jogo, dentro do desenho do menu):
-// só pede a Oficina; ela abre no próximo Tick, na thread de UI.
+// abre a Oficina nativa; sem ela (peças do jogo não resolveram), a do painel,
+// que abre no próximo Tick, na thread de UI.
 void OnMenuModsButton() {
-    if (g_panel) g_panel->RequestWorkshop();
+    if (TLMod_WorkshopAvailable()) TLMod_OpenWorkshop();
+    else if (g_panel) g_panel->RequestWorkshop();
 }
 
 std::string PackageName() {
@@ -114,6 +168,10 @@ void* RuntimeMain(void*) {
 
     // Painel dentro do jogo (Views Android presas à Activity).
     static tlmod::overlay::LoaderDataSource source(loader);
+    g_workshop.mods = source.Mods();
+    g_workshop.config = &config;
+    TLModWorkshopSource workshop = WorkshopSource();
+    TLMod_SetWorkshopSource(&workshop);
     static tlmod::overlay::PanelController panel(source, config);
     std::string overlayError;
     if (!tlmod::overlay::StartOverlay(&panel, 60000, &overlayError)) {
