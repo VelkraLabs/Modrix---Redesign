@@ -1,24 +1,23 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**14ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**15ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-Oficina de Mods, ajuste pedido depois da 13ª versão:
-
-- **Título cortado com folga e no fim de uma palavra.** O título cortado encostava nas bordas do
-  quadro e cortava no meio da palavra ("Exemplo: Titã de Bras..."). Agora fica uma folga de cada
-  lado e o corte é no fim de uma palavra ("Exemplo: Titã de..."). Só um nome de uma palavra só,
-  comprida, ainda é cortado por letra.
+- **O jogo fechando na abertura.** Duas vezes o jogo fechou logo ao abrir, sempre no mesmo ponto
+  do log (depois de "libil2cpp.so em ..."). Não tem relação com apagar o `tlmod.log`. A ponte
+  esperava um sinal do motor do jogo que aparece no começo da inicialização dele, e começava a
+  usá-lo enquanto ele ainda se montava. Agora ela espera uma marca que o motor grava perto do fim
+  da inicialização. O log ganha a linha "il2cpp_init concluído (N ms depois do corlib)".
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 427128 bytes, `e7de3c7a4c91df0a…` | 428280 bytes, `a87fdb564ff0efab…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 428280 bytes, `a87fdb564ff0efab…` | 428744 bytes, `fa433de2e89f9bb9…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
 Todo o resto é idêntico, byte a byte, ao pacote anterior: o runtime, as `.so` dos 4 mods,
@@ -63,7 +62,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `fd4dca3` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `38adb8b` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -204,6 +203,12 @@ dependem do jogo real.
       depois de alguns segundos
 - [ ] Desligar o devtools na aba Mods tira a aba Ferramentas na abertura seguinte
 
+**Abertura do jogo**
+- [ ] O jogo abre normalmente várias vezes seguidas (feche e abra umas 10 vezes); se fechar sozinho,
+      mande o `tlmod.log`
+- [ ] O `tlmod.log` tem a linha "il2cpp_init concluído (N ms depois do corlib)" logo depois de
+      "libil2cpp.so em ..."
+
 **Oficina de Mods**
 - [ ] O botão **Mods** aparece inteiro, ao lado de Configurações, e abre a Oficina com o som do menu
 - [ ] As linhas ficam uma embaixo da outra, dentro do painel, acima da linha do Voltar
@@ -280,7 +285,7 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 428280 | `a87fdb564ff0efab56e7fec3ed40246278fae83f536ff4efa2abaf7ebf0145c1` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 428744 | `fa433de2e89f9bb9369fd517b137e2fad289ac8b4e606d4fa6f9a1bddb82932d` |
 | `lib/arm64-v8a/libtlmod_runtime.so` | 937264 | `8f5ecb056839228b166b21563ce54f41927a737245343a498a7f57e14c23c013` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |

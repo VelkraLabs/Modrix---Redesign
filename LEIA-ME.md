@@ -1,16 +1,17 @@
-# Entrega: pacote de teste do TLMod (14ª versão)
+# Entrega: pacote de teste do TLMod (15ª versão)
 
 Branch só para download, sem o código. Pode ser apagada depois.
 
 | arquivo | SHA-256 |
 |---|---|
-| `tlmod-teste.zip` | `c628cc48f84c5c5d366e41e0cbac36bf736ec0afcc0b520c25236b0db2bdd285` |
-| `libtlmod_bridge.so` | `a87fdb564ff0efab56e7fec3ed40246278fae83f536ff4efa2abaf7ebf0145c1` |
+| `tlmod-teste.zip` | `5604bcb74a7d00f87321b343829c8ebb1a6888d1f907b240a6940d2cb6df8c66` |
+| `libtlmod_bridge.so` | `fa433de2e89f9bb9369fd517b137e2fad289ac8b4e606d4fa6f9a1bddb82932d` |
 | `libtlmod_runtime.so` | `8f5ecb056839228b166b21563ce54f41927a737245343a498a7f57e14c23c013` |
-| `README_TESTE.md` | `318adff30eba577c8e937351cc79193070a0eb2362cd2e10dd3272d6724a2a68` |
+| `README_TESTE.md` | `35778327e9cbb4b424cd48e513ea44608dfc385ffbed3f9fa51f99feaec42760` |
 
 - `tlmod-teste.zip`: o pacote completo.
-- `libtlmod_bridge.so`: a única que mudou desde a 13ª versão (Oficina: título cortado no fim de
-  uma palavra, com folga nas bordas). `libtlmod_runtime.so` e a pasta `tlmod/` não mudaram.
+- `libtlmod_bridge.so`: a única que mudou desde a 14ª versão (a ponte espera o motor do jogo
+  terminar de iniciar; o jogo fechava às vezes na abertura). `libtlmod_runtime.so` e a pasta
+  `tlmod/` não mudaram.
 
-Gerado a partir do commit `fd4dca3` da branch `ccr-bbd92bf9-i01buk`.
+Gerado a partir do commit `38adb8b` da branch `ccr-bbd92bf9-i01buk`.
