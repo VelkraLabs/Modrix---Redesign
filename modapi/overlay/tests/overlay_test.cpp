@@ -127,6 +127,14 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     CHECK(item && item->title == "Exemplo: Rubi Fictício" && item->subtitle == "v0.1.0 · Carregado" && item->enabled);
     CHECK(boss && boss->state == "disabled" && boss->subtitle == "v0.1.0 · Desativado" && !boss->enabled);
     CHECK(bc && bc->state == "loaded" && boss->pending.empty() && panel.ModsNotice().empty());
+    // Ícone da Oficina nativa: o item registrado pelo mod; sem item (ou desativado), o Livro.
+    auto icon = [&](const std::string& id) {
+        for (const overlay::ModInfo& m : source.Mods())
+            if (m.id == id) return m.iconItem;
+        return -1;
+    };
+    CHECK(icon("tlmod.example_item") == 8192 && icon("tlmod.example_boss") == 149 &&
+          icon("tlmod.boss_checklist") == 149);
 
     // Desligar: grava, avisa que vale ao reiniciar, e NÃO descarrega nada.
     uint64_t v = panel.Version();
@@ -229,6 +237,9 @@ static void TestChecklistNotLoaded(const fs::path& mods, const fs::path& tmp) {
     panel.SelectTab(Tab::Checklist);
     panel.Tick(0);
     CHECK(panel.Checklist().message == "O mod Boss Checklist não está carregado.");
+    // Mod só de NPC carregado: o ícone é o Olho de Aparência Suspeita.
+    for (const overlay::ModInfo& m : source.Mods())
+        if (m.id == "tlmod.example_boss") CHECK(m.state == rt::ModState::Loaded && m.iconItem == 43);
 }
 
 // Erro de carga inteiro no painel e aba Log com as últimas linhas do log real.
@@ -439,8 +450,9 @@ static void TestNativeWorkshop(const fs::path& tmp) {
         {"b.gems", "gemas", "0.2.0", rt::ModState::Failed, "dlopen failed: símbolo ausente", "Acme", "Gemas.", "4 itens"},
         {"a.ruby", "Rubi", "0.1.0", rt::ModState::Loaded, "", "TLMod", "Um rubi.", "1 item"},
         {"c.boss", "Boss", "0.1.0", rt::ModState::Disabled, "desativado", "", "", "1 NPC"},
-        {"d.check", "Boss Checklist", "0.1.0", rt::ModState::Loaded, "", "", "", ""},
+        {"d.check", "Boss Checklist", "0.1.0", rt::ModState::Loaded, "", "", "", "", 149},
     };
+    mods[1].iconItem = 8192;
     overlay::ConfigStore cfg(tmp / "native" / "tlmod_config.json");
     std::string err;
     CHECK(cfg.SetEnabled("c.boss", false, &err));
@@ -454,6 +466,7 @@ static void TestNativeWorkshop(const fs::path& tmp) {
           entries[1].details.find("Adiciona: 1 item") != std::string::npos &&
           entries[1].details.find("Estado: Carregado") != std::string::npos);
     CHECK(entries[2].status == "Desativado" && entries[2].kind == 1 && entries[2].toggleLabel == "Ativar");
+    CHECK(entries[1].iconItem == 8192 && entries[0].iconItem == 149 && entries[2].iconItem == 0);
     CHECK(entries[0].summary.empty() && entries[2].summary == "1 NPC");  // sem conteúdo nem autores: vazio
     CHECK(entries[3].status == "Erro" && entries[3].kind == 2 &&
           entries[3].details.find("Erro:\ndlopen failed: símbolo ausente") != std::string::npos);

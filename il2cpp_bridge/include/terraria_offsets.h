@@ -559,6 +559,8 @@ constexpr uintptr_t GUIString_GetRegion = 0x121E030;    // (String_Layout, strin
 // (String_Layout, string, out int lineCount): o texto com '\n' na largura WrapWidth
 constexpr uintptr_t GUIString_ApplyMultiLineAlignment = 0x121CA00;
 constexpr uintptr_t LayoutCalculator_GetAnchoredPosition = 0xA28DB0;  // (ControlId, AnchorType, Vector2)
+constexpr uintptr_t LayoutCalculator_DrawCentred = 0xA2993C;  // (SpriteBatch, Vector2, float, Texture2D, Color?)
+constexpr uintptr_t Mouse_GetUICursorPosition = 0xB0F948;     // o toque no espaço da interface
 constexpr uintptr_t SpriteBatch_Begin = 0xB1CA74;  // (sort, blend, sampler, depth, raster, effect, Matrix?, bool)
 constexpr uintptr_t SpriteBatch_End = 0xB1C974;
 constexpr uintptr_t StringLayout_Copy = 0xA0E724;
@@ -649,6 +651,8 @@ constexpr int GUIStringButton_DrawButton = 5;
 constexpr int GUIString_GetRegion = 2;
 constexpr int GUIString_ApplyMultiLineAlignment = 3;
 constexpr int LayoutCalculator_GetAnchoredPosition = 3;
+constexpr int LayoutCalculator_DrawCentred = 5;  // o overload de 5: (batch, Vector2, float, Texture2D, Color?)
+constexpr int Mouse_GetUICursorPosition = 0;
 constexpr int SpriteBatch_Begin = 8;
 constexpr int SpriteBatch_End = 0;
 constexpr int StringLayout_Copy = 1;

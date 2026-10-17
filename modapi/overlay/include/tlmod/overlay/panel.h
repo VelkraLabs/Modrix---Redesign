@@ -37,6 +37,7 @@ struct ModInfo {
     std::string authors;      // "Ana, Bia"
     std::string description;
     std::string content;      // "2 itens, 1 NPC" (do "content" do manifest)
+    int32_t iconItem = 0;     // item cujo ícone representa o mod na Oficina (0 = nenhum)
 };
 
 class PanelDataSource {
@@ -265,6 +266,7 @@ struct WorkshopEntry {
     std::string summary;      // "1 item" (sem conteúdo: "por <autores>")
     std::string details;      // página de detalhes, várias linhas
     std::string toggleLabel;  // "Desativar" / "Ativar"
+    int32_t iconItem = 0;     // ícone no quadro da linha (0 = nenhum)
 };
 // Em ordem: ativos, desativados e com erro (cada grupo por nome), como as
 // seções da Oficina do painel. O interruptor vem da configuração.

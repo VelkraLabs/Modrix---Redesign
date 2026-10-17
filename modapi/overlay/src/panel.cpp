@@ -83,6 +83,18 @@ std::string ContentSummary(const rt::ModManifest& m) {
     return out;
 }
 
+// Ícone do mod na Oficina: o primeiro item que ele registrou; sem itens, um
+// item do jogo que lembre o conteúdo (Olho de Aparência Suspeita para mods de
+// NPC, Livro para o resto, inclusive os que não carregaram).
+int32_t IconItem(const rt::ContentRegistry& registry, const std::string& modId) {
+    constexpr int32_t kNpcIcon = 43, kDefaultIcon = 149;
+    for (const rt::ContentEntry& e : registry.Entries(TLMOD_CONTENT_ITEM))
+        if (e.modId == modId) return e.id;
+    for (const rt::ContentEntry& e : registry.Entries(TLMOD_CONTENT_NPC))
+        if (e.modId == modId) return kNpcIcon;
+    return kDefaultIcon;
+}
+
 // Oficina de Mods (ver panel.h): seções pelo estado desta sessão, em ordem de nome.
 void WriteWorkshop(rt::JsonWriter& w, bool open, const std::vector<ModRow>& rows, const std::string& notice,
                    const std::set<std::string>& expanded) {
@@ -291,6 +303,7 @@ std::vector<WorkshopEntry> BuildWorkshopEntries(const std::vector<ModInfo>& mods
         // O resumo vai num quadro da linha: sem conteúdo novo, os autores.
         e.summary = !m->content.empty() ? m->content : m->authors.empty() ? "" : "por " + m->authors;
         e.toggleLabel = enabled ? "Desativar" : "Ativar";
+        e.iconItem = m->iconItem;
         std::string d = m->name + (e.version.empty() ? "" : "  " + e.version);
         if (!m->authors.empty()) d += "\npor " + m->authors;
         if (!m->description.empty()) d += "\n\n" + m->description;
@@ -320,6 +333,7 @@ std::vector<ModInfo> LoaderDataSource::Mods() const {
         for (const std::string& a : m.manifest.authors) i.authors += (i.authors.empty() ? "" : ", ") + a;
         i.description = m.manifest.description;
         i.content = ContentSummary(m.manifest);
+        i.iconItem = IconItem(loader_.Registry(), m.manifest.id);
         out.push_back(std::move(i));
     }
     return out;

@@ -252,6 +252,7 @@ typedef struct TLModWorkshopEntry {
     const char* summary;      // "1 item" (pode ser vazio)
     const char* details;      // página de detalhes: texto inteiro ('\n' quebra a linha)
     const char* toggleLabel;  // botão da página de detalhes: "Desativar" / "Ativar"
+    int32_t iconItem;         // item cujo ícone vai na linha (de mod ou original); 0 = nenhum
 } TLModWorkshopEntry;
 typedef struct TLModWorkshopSource {
     void* user;
@@ -477,7 +478,8 @@ typedef struct TLModNpcDraw {
 
 typedef struct TLModDrawCallbacks {
     // Item com netID fora da faixa original prestes a ser desenhado: id da
-    // textura do mod, ou 0 para desenhar a da casca.
+    // textura do mod, ou 0 para desenhar a da casca. `item` é nulo quando só
+    // o ícone é pedido (a Oficina de Mods desenha o item pelo netID).
     int32_t (*item_texture)(Il2CppObject* item, int32_t net_id);
     // NPC prestes a ser desenhado (index em Main.npc; -1 se não for um deles).
     // true + out preenchido = desenhar com a textura do mod.

@@ -245,6 +245,9 @@ struct WsMod {
 };
 WsMod g_wsMods[] = {{"Boss Checklist", "v0.1.0", true}, {"Exemplo: Rubi", "v0.1.0", true}, {"Gemas", "v0.2.0", true},
                     {"Mod 4", "v1.0.0", true},          {"Mod 5", "v1.0.0", true},         {"Mod 6", "v1.0.0", true}};
+// Ícones: Lente (original), item de mod com textura, de mod sem textura, nenhum; o resto Lente.
+int32_t DrawItemTexture(Il2CppObject*, int32_t netId);
+const int32_t kWsIcons[] = {kShell, kModItem, kModItem + 1, 0, kShell, kShell};
 uint64_t g_wsRevision = 1;
 int g_wsToggles = 0;
 std::string g_wsDetails;
@@ -264,6 +267,7 @@ TLModWorkshopSource WsSource() {
         out->summary = i == 1 ? "1 item" : "por TLMod";
         out->details = g_wsDetails.c_str();
         out->toggleLabel = m.enabled ? "Desativar" : "Ativar";
+        out->iconItem = kWsIcons[i];
         return true;
     };
     s.toggle = [](void*, int32_t i) {
@@ -279,7 +283,12 @@ int TestWorkshop(void* lib) {
     auto frame_fn = reinterpret_cast<size_t (*)(int32_t, int32_t, bool, bool, int, char*, size_t)>(
         dlsym(lib, "mock_workshop_frame"));
     auto errors = reinterpret_cast<int (*)(int*, int*)>(dlsym(lib, "mock_workshop_errors"));
-    CHECK(frame_fn && errors);
+    auto icon = reinterpret_cast<void* (*)(size_t)>(dlsym(lib, "mock_workshop_icon"));
+    auto item_tex = reinterpret_cast<void* (*)(int32_t)>(dlsym(lib, "mock_item_asset_texture"));
+    CHECK(frame_fn && errors && icon && item_tex);
+    // Depois do TestDraw: TextureAssets carregado e a textura do rubi criada.
+    TLModDrawCallbacks cbs{&DrawItemTexture, nullptr, nullptr};
+    TLMod_SetDrawCallbacks(&cbs);
     static char buf[8192];
     auto frame = [&](int32_t x, int32_t y, bool down, bool escape = false, int click = 0) {
         frame_fn(x, y, down, escape, click, buf, sizeof(buf));
@@ -303,6 +312,9 @@ int TestWorkshop(void* lib) {
     // Estado no modo (Color do jogo: bytes A, B, G, R), versão no tamanho, resumo no tempo.
     CHECK(has(f, "modo:Ativo#82e178ff") && has(f, "modo:Erro#ff6e6eff"));
     CHECK(has(f, "tamanho:v0.2.0") && has(f, "tempo:1 item") && has(f, "tempo:por TLMod"));
+    // Ícones centrados na moldura (região 80,60 440x400): a Lente e a textura do rubi; o item
+    // de mod sem textura e a linha sem ícone ficam só com a moldura.
+    CHECK(has(f, "icone@300,260") && icon(0) == item_tex(kShell) && icon(1) && icon(1) != item_tex(kShell) && !icon(2));
 
     // Arrastar a lista 120 px para cima: rola 2 linhas (encaixa ao soltar) e não abre nada.
     frame(300, 300, true);
@@ -350,6 +362,7 @@ int TestWorkshop(void* lib) {
     int begins = 0, ends = 0;
     CHECK(errors(&begins, &ends) == 0 && begins == ends && begins > 0);
     TLMod_SetWorkshopSource(nullptr);
+    TLMod_SetDrawCallbacks(nullptr);
     CHECK(!TLMod_WorkshopAvailable());
     return 0;
 }
@@ -1039,9 +1052,9 @@ int main(int argc, char** argv) {
 
     if (int rc = TestTools(lib)) return rc;
     if (int rc = TestMenu(lib)) return rc;
-    if (int rc = TestWorkshop(lib)) return rc;
     if (int rc = TestItems(lib)) return rc;
     if (int rc = TestDraw(lib)) return rc;
+    if (int rc = TestWorkshop(lib)) return rc;
     if (int rc = TestScreens(lib)) return rc;
     if (int rc = TestTraits(lib)) return rc;
     if (int rc = TestSaves(lib)) return rc;

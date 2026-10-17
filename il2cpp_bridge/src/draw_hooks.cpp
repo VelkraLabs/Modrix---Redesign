@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstring>
 #include <initializer_list>
+#include <vector>
 
 #include "bridge.h"
 #include "bridge_internal.h"
@@ -169,6 +170,36 @@ bool drawx::BeginItem(Il2CppObject* item, ItemSwap* swap) {
 void drawx::EndItem(const ItemSwap& swap) {
     if (swap.animation) SwapOut(swap.anim);
     if (swap.texture) SwapOut(swap.tex);
+}
+
+Il2CppObject* drawx::ItemIconTexture(int32_t itemId, int32_t* width, int32_t* height) {
+    if (!d.ready || itemId <= 0) return nullptr;
+    Il2CppObject* asset = nullptr;
+    if (itemId >= terraria::kItemVanillaCount) {
+        const TLModDrawCallbacks* cb = g_callbacks.load(std::memory_order_acquire);
+        asset = cb && cb->item_texture ? AssetOf(cb->item_texture(nullptr, itemId)) : nullptr;
+    } else if (Il2CppArray* assets = StaticValue<Il2CppArray*>(d.itemAssets)) {
+        if (static_cast<uint32_t>(itemId) < api.il2cpp_array_length(assets)) asset = Elem(assets, itemId);
+    }
+    if (asset && FieldAt<int32_t>(asset, d.assetState) != terraria::kAssetStateLoaded) {
+        // Main.instance.LoadItem(id): o que o jogo chama antes de desenhar um item.
+        static std::vector<bool> requested(static_cast<size_t>(terraria::kItemVanillaCount));
+        if (itemId < terraria::kItemVanillaCount && !requested[static_cast<size_t>(itemId)]) {
+            requested[static_cast<size_t>(itemId)] = true;
+            FieldInfo* instance = api.il2cpp_class_get_field_from_name(bridge::MainClass(), "instance");
+            const MethodInfo* load = api.il2cpp_class_get_method_from_name(bridge::MainClass(), "LoadItem", 1);
+            Il2CppObject* main = StaticValue<Il2CppObject*>(instance);
+            void* params[] = {&itemId};
+            if (main && load) Invoke(load, main, params, "Main.LoadItem");
+        }
+        return nullptr;
+    }
+    Il2CppObject* texture = asset ? FieldAt<Il2CppObject*>(asset, d.assetValue) : nullptr;
+    if (texture) {
+        *width = FieldAt<int32_t>(texture, terraria::xna_texture2d_off::Width);
+        *height = FieldAt<int32_t>(texture, terraria::xna_texture2d_off::Height);
+    }
+    return texture;
 }
 
 bool drawx::ItemTexturesActive() {

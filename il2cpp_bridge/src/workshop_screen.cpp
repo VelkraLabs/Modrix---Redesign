@@ -27,6 +27,7 @@
 #include "bridge.h"
 #include "bridge_internal.h"
 #include "log.h"
+#include "draw_internal.h"
 #include "terraria_offsets.h"
 
 using namespace il2cpp;
@@ -67,6 +68,9 @@ typedef void (*CopyFn)(Il2CppObject* self, Il2CppObject* other, const MethodInfo
 typedef bool (*KeyUpFn)(int32_t key, const MethodInfo*);
 typedef int32_t (*StaticIntFn)(const MethodInfo*);
 typedef bool (*StaticBoolFn)(const MethodInfo*);
+typedef TLModXnaVector2 (*StaticVectorFn)(const MethodInfo*);
+typedef void (*DrawCentredFn)(Il2CppObject* batch, TLModXnaVector2 position, float scale, Il2CppObject* texture,
+                              uint64_t color, const MethodInfo*);
 
 constexpr int32_t kInputClicked = 0;     // GUITransactionButton.InputState.Clicked
 constexpr int32_t kKeyEscape = 27;       // KeyCode.Escape: o voltar do Android
@@ -105,6 +109,10 @@ struct Resolved {
     const MethodInfo* mouseX = nullptr;
     const MethodInfo* mouseY = nullptr;
     const MethodInfo* mouseLeft = nullptr;
+    // Mouse.GetUICursorPosition(): o toque no espaço da interface (o dos layouts).
+    // Main.mouseX/Y é em pixels da tela, que no celular é maior (ex.: 1600 contra 969).
+    const MethodInfo* uiCursor = nullptr;
+    const MethodInfo* drawCentred = nullptr;  // LayoutCalculator.DrawCentred(batch, Vector2, float, Texture2D, Color?)
 };
 Resolved r;
 
@@ -133,6 +141,7 @@ float g_detailScroll = 0;  // pixels; encaixa numa linha de texto ao soltar
 struct Row {
     uint32_t name = 0, version = 0, status = 0, summary = 0, details = 0, toggle = 0;  // GC handles
     int32_t kind = 0;
+    int32_t iconItem = 0;  // item cujo ícone vai na moldura da linha (0 = nenhum)
     TLModXnaRectangle rect{};  // onde foi desenhada neste frame
     bool drawn = false;
 };
@@ -265,6 +274,7 @@ void Refresh(bool force) {
         row.details = PinString(e.details);
         row.toggle = PinString(e.toggleLabel);
         row.kind = e.statusKind >= 0 && e.statusKind < 4 ? e.statusKind : 0;
+        row.iconItem = e.iconItem;
         g_rows.push_back(row);
     }
 }
@@ -337,11 +347,20 @@ bool Inside(const TLModXnaRectangle& q, float x, float y) {
 // Toque numa área com rolagem: arrastar muda `scroll` (limitado a [0, maxScroll]);
 // ao soltar, a rolagem encaixa num múltiplo de `step`. Devolve true num toque
 // curto (soltar perto de onde apertou, sem arrastar); `at` = onde foi.
+int g_pressesLogged = 0;  // os primeiros toques vão para o log (os dois espaços de coordenadas)
+
 bool TrackTouch(const TLModXnaRectangle& area, float* scroll, float maxScroll, float step, TLModXnaVector2* at) {
     const bool down = Ptr<StaticBoolFn>(r.mouseLeft)(r.mouseLeft);
-    const float x = static_cast<float>(Ptr<StaticIntFn>(r.mouseX)(r.mouseX));
-    const float y = static_cast<float>(Ptr<StaticIntFn>(r.mouseY)(r.mouseY));
+    const int32_t mx = Ptr<StaticIntFn>(r.mouseX)(r.mouseX), my = Ptr<StaticIntFn>(r.mouseY)(r.mouseY);
+    const TLModXnaVector2 ui = r.uiCursor ? Ptr<StaticVectorFn>(r.uiCursor)(r.uiCursor)
+                                          : TLModXnaVector2{static_cast<float>(mx), static_cast<float>(my)};
+    const float x = ui.x, y = ui.y;
     bool tapped = false;
+    if (down && !g_touch.prevDown && g_pressesLogged < 3) {
+        ++g_pressesLogged;
+        LOGI("Oficina: toque em (%.0f, %.0f) na interface, (%d, %d) em Main.mouse; área (%d, %d) %dx%d", x, y, mx, my,
+             area.x, area.y, area.width, area.height);
+    }
     if (down && !g_touch.prevDown) {
         g_touch.pressed = Inside(area, x, y);
         g_touch.dragging = false;
@@ -372,6 +391,20 @@ void DrawRow(Il2CppObject* layout, Row& row, const TLModXnaVector2& position, co
     Ptr<PanelDrawAtFn>(r.panelDrawAt)(backing, position, size, pressed, r.panelDrawAt);
     for (size_t part : {ws::ItemSizeBacking, ws::ItemModeBacking, ws::ItemTimeBacking, ws::ItemNameDivider})
         PanelDraw(Part(layout, part));
+    // Ícone: a moldura da imagem do mundo, com o item centralizado (até 70% dela, no máximo 2x).
+    Il2CppObject* frame = Part(layout, ws::ItemImage);
+    PanelDraw(frame);
+    int32_t w = 0, hgt = 0;
+    Il2CppObject* texture = row.iconItem > 0 ? drawx::ItemIconTexture(row.iconItem, &w, &hgt) : nullptr;
+    Il2CppObject* batch = StaticObject(r.spriteBatch);
+    if (texture && frame && batch && r.drawCentred) {
+        const TLModXnaRectangle box = PanelRegion(frame);
+        const float side = static_cast<float>(std::max(1, std::max(w, hgt)));
+        const float scale = std::min(2.0f, 0.7f * static_cast<float>(std::min(box.width, box.height)) / side);
+        const TLModXnaVector2 center{static_cast<float>(box.x) + 0.5f * static_cast<float>(box.width),
+                                     static_cast<float>(box.y) + 0.5f * static_cast<float>(box.height)};
+        Ptr<DrawCentredFn>(r.drawCentred)(batch, center, scale, texture, 0, r.drawCentred);
+    }
     // Na linha de mundo: modo (esquerda), tamanho (meio) e tempo (direita, o mais largo).
     StringDraw(Part(layout, ws::ItemName), row.name);
     StringDrawColor(Part(layout, ws::ItemMode), row.status, kStatusColors[row.kind]);
@@ -522,6 +555,9 @@ bool ResolveWorkshop() {
     r.mouseX = Method(MainClass(), "get_mouseX", argc::Main_get_mouseX);
     r.mouseY = Method(MainClass(), "get_mouseY", argc::Main_get_mouseY);
     r.mouseLeft = Method(MainClass(), "get_mouseLeft", argc::Main_get_mouseLeft);
+    r.uiCursor = Method("Microsoft.Xna.Framework.Input", "Mouse", "GetUICursorPosition", argc::Mouse_GetUICursorPosition);
+    r.drawCentred = MethodWithParam(api.il2cpp_class_from_name(img, "", "LayoutCalculator"), "DrawCentred",
+                                    argc::LayoutCalculator_DrawCentred, 1, "Microsoft.Xna.Framework.Vector2");
 
     const void* needed[] = {r.layoutInstance, r.spriteBatch,   r.stringLayoutClass, r.panelDraw,    r.panelDrawAt,
                             r.panelRegion,    r.stringDraw,    r.stringDrawColor,   r.stringRegion, r.wrap,
@@ -535,6 +571,8 @@ bool ResolveWorkshop() {
         return false;
     }
     if (!r.keyUp) LOGW("Oficina nativa: KeyboardInput.GetKeyUp ausente; o voltar do Android não fecha a Oficina");
+    if (!r.drawCentred) LOGW("Oficina nativa: LayoutCalculator.DrawCentred ausente; linhas sem ícone");
+    if (!r.uiCursor) LOGW("Oficina nativa: Mouse.GetUICursorPosition ausente; toques por Main.mouseX/Y");
     r.ready = true;
     LOGI("Oficina nativa pronta (peças da tela de seleção de mundos)");
     return true;

@@ -408,6 +408,10 @@ do próprio jogo montada com as peças da seleção de mundos (`il2cpp_bridge/sr
   de cima para baixo, a partir de onde a seleção de mundos põe a primeira (`FirstItemLocation` do
   `WorldGrid`), até a divisória acima do Voltar; arrastar rola e encaixa numa linha ao soltar. Em
   ordem: ativos, desativados e com erro, cada grupo por nome.
+- **Ícone.** Na moldura da imagem do mundo vai o ícone do primeiro item que o mod registrou (a textura
+  do mod, a mesma do inventário). Sem item: o Olho de Aparência Suspeita (43) para mods de NPC e o
+  Livro (149) para o resto, inclusive mods desativados ou com erro. Itens originais que o jogo ainda
+  não carregou são pedidos com `Main.LoadItem` e aparecem no frame seguinte.
 - **Detalhes.** Tocar numa linha abre o texto completo do mod (versão, autores, descrição, conteúdo,
   estado e, se falhou, o erro inteiro), com Voltar e o botão "Novo" da tela de mundos virado em
   **Ativar/Desativar**. O texto é quebrado pelo próprio jogo (`GUIString.ApplyMultiLineAlignment`) e
@@ -418,7 +422,10 @@ do próprio jogo montada com as peças da seleção de mundos (`il2cpp_bridge/sr
 A lista própria do jogo (`GUIDraggableItemGrid`) não serve: nesta tela ela cresce para o lado e não
 recorta o que sai do painel. Cada linha marca sua região com `ControlAnchor.SetGridItemRegion`, e os
 textos ancorados em `GridItem` se posicionam sozinhos, como na seleção de mundos. A cor do estado vai
-como `Color` do XNA desta build, que guarda os bytes na ordem A, B, G, R. Os dados vêm do runtime (`TLModWorkshopSource`, montado com `BuildWorkshopEntries`);
+como `Color` do XNA desta build, que guarda os bytes na ordem A, B, G, R. O toque é lido com
+`Mouse.GetUICursorPosition`, no mesmo espaço dos layouts (969x454 num aparelho de 1600x720);
+`Main.mouseX/Y` está em pixels da tela e, comparado com as regiões, só acertava perto do canto
+esquerdo de cada linha. Os dados vêm do runtime (`TLModWorkshopSource`, montado com `BuildWorkshopEntries`);
 a configuração é thread-safe e o painel vê as mudanças pela revisão dela. Se alguma peça do jogo não
 resolver, o botão Mods abre a Oficina do painel (Views Android), que também abre pela aba Mods.
 

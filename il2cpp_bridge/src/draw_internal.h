@@ -34,5 +34,10 @@ int32_t ItemType(Il2CppObject* item);
 bool IsModItem(Il2CppObject* item);  // netID na faixa de mods
 int32_t NpcIndex(Il2CppObject* npc);  // posição em Main.npc, -1 se não for um deles
 const TLModDrawCallbacks* Callbacks();
+// Ícone de um item (Oficina de Mods): o XNA Texture2D da textura do mod (pelo
+// callback item_texture) ou de TextureAssets.Item[id], e o tamanho. Nulo se o
+// asset ainda não carregou (para um item original, pede a carga ao jogo uma
+// vez). Só na thread do jogo.
+Il2CppObject* ItemIconTexture(int32_t itemId, int32_t* width, int32_t* height);
 
 }  // namespace drawx

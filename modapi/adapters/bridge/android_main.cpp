@@ -68,7 +68,7 @@ TLModWorkshopSource WorkshopSource() {
         if (i < 0 || static_cast<size_t>(i) >= w->entries.size()) return false;
         const tlmod::overlay::WorkshopEntry& e = w->entries[static_cast<size_t>(i)];
         *out = {e.name.c_str(), e.version.c_str(), e.status.c_str(), e.kind, e.summary.c_str(), e.details.c_str(),
-                e.toggleLabel.c_str()};
+                e.toggleLabel.c_str(), e.iconItem};
         return true;
     };
     s.toggle = [](void* user, int32_t i) {

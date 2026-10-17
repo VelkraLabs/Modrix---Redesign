@@ -1606,8 +1606,26 @@ void MockStringLayoutCopy(Il2CppObject* self, Il2CppObject* other, const MethodI
 }
 MethodInfo g_mStringLayoutCtor{reinterpret_cast<Il2CppMethodPointer>(&MockStringLayoutCtor), ".ctor", 0};
 MethodInfo g_mStringLayoutCopy{reinterpret_cast<Il2CppMethodPointer>(&MockStringLayoutCopy), "Copy", 1};
+// Como no aparelho: Main.mouseX/Y em pixels da tela (1,65 por unidade da interface) e
+// Mouse.GetUICursorPosition no espaço dos layouts.
 int32_t g_mouseX = 0, g_mouseY = 0;
+MockVec2 g_uiCursor{};
 bool g_mouseDown = false, g_escape = false;
+MockVec2 MockUICursor(const MethodInfo*) { return g_uiCursor; }
+MethodInfo g_mUICursor{reinterpret_cast<Il2CppMethodPointer>(&MockUICursor), "GetUICursorPosition", 0};
+Il2CppClass g_mouseClass{"Microsoft.Xna.Framework.Input", "Mouse", {}, {&g_mUICursor}};
+// Ícones da Oficina: LayoutCalculator.DrawCentred(batch, posição, escala, textura, cor).
+std::vector<Il2CppObject*> g_icons;
+void MockDrawCentred(Il2CppObject* batch, MockVec2 pos, float scale, Il2CppObject* texture, uint64_t,
+                     const MethodInfo*) {
+    if (!batch || !texture || !(scale > 0.0f)) ++g_workshopErrors;
+    char line[64];
+    std::snprintf(line, sizeof(line), "icone@%.0f,%.0f", pos.x, pos.y);
+    g_frame.push_back(line);
+    g_icons.push_back(texture);
+}
+MethodInfo g_mDrawCentred{reinterpret_cast<Il2CppMethodPointer>(&MockDrawCentred), "DrawCentred", 5,
+                          "Microsoft.Xna.Framework.Vector2"};
 bool MockKeyUp(int32_t key, const MethodInfo*) {
     bool hit = key == 27 && g_escape;
     if (hit) g_escape = false;
@@ -1642,9 +1660,11 @@ void InitWorkshop() {
     g_spriteBatch = NewObject(0x40);
     g_main.fields.push_back(&g_fSpriteBatch);
     g_main.methods.insert(g_main.methods.end(), {&g_mMouseX, &g_mMouseY, &g_mMouseLeft});
+    g_layoutCalculator.methods.push_back(&g_mDrawCentred);
     g_csharp.classes.insert(g_csharp.classes.end(),
                             {&g_worldSelectLayout, &g_panelLayout, &g_stringLayout, &g_guiPanel, &g_guiString,
-                             &g_guiStringButton, &g_spriteBatchClass, &g_keyboardInput, &g_layoutCalculator});
+                             &g_guiStringButton, &g_spriteBatchClass, &g_keyboardInput, &g_layoutCalculator,
+                             &g_mouseClass});
 }
 
 // Reforja: GUIInstance.Active.GUIReforge.get_ReforgeItem().
@@ -1989,15 +2009,22 @@ __attribute__((visibility("default"))) size_t mock_game_main_menu(bool clickMods
     std::snprintf(modsLabel, size, "%s", mods.c_str());
     return g_buttonsDrawn.size();
 }
+// Textura do i-ésimo ícone desenhado no último frame da Oficina (nulo se não houve).
+__attribute__((visibility("default"))) void* mock_workshop_icon(size_t index) {
+    return index < g_icons.size() ? g_icons[index] : nullptr;
+}
 __attribute__((visibility("default"))) void mock_set_trial_mode(bool trial) { g_trialMode = trial; }
 // Oficina: um frame do menu com o toque/teclas dados. `click`: 0 nada, 1 Voltar, 2 Novo
 // (o botão de ativar/desativar). Devolve as linhas desenhadas separadas por '\n'
 // ("menu" se o menu do jogo foi desenhado).
 __attribute__((visibility("default"))) size_t mock_workshop_frame(int32_t x, int32_t y, bool down, bool escape,
                                                                    int click, char* out, size_t size) {
-    g_mouseX = x, g_mouseY = y, g_mouseDown = down, g_escape = escape;
+    g_uiCursor = {static_cast<float>(x), static_cast<float>(y)};
+    g_mouseX = x * 33 / 20, g_mouseY = y * 33 / 20;
+    g_mouseDown = down, g_escape = escape;
     g_clickLayout = click == 1 ? WsPart(0x38) : click == 2 ? WsPart(0x30) : nullptr;
     g_frame.clear();
+    g_icons.clear();
     g_buttonsDrawn.clear();
     g_mainMenuEntry(NewObject(0x40), &g_mMainMenuDraw);
     g_clickLayout = nullptr;
