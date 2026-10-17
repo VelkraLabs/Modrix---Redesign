@@ -1,32 +1,31 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**9ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**10ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-Correções da Oficina de Mods depois das capturas de tela da 8ª versão:
+Oficina de Mods, depois do teste da 9ª versão:
 
-- **A lista agora é vertical.** A lista do jogo, nesta tela, punha o segundo mod ao lado do
-  primeiro, fora do painel. As linhas agora vão de cima para baixo, da posição da primeira linha de
-  mundo até a linha acima do Voltar. Arrastar rola a lista, que encaixa numa linha ao soltar.
-- **Cores certas.** O estado "Ativo" saía rosa: o jogo guarda as cores com os bytes na ordem
-  inversa da que eu usava. Agora: verde ativo, cinza desativado, vermelho erro e amarelo mudança
-  pendente.
-- **Quadros da linha.** Esquerda: estado. Meio: versão. Direita: o que o mod adiciona, ou o autor
-  ("por TLMod") quando ele não adiciona conteúdo. Nenhum quadro fica vazio.
-- **Detalhes sem invadir os botões.** O texto é quebrado pelo próprio jogo e desenhado só dentro do
-  painel, acima de Voltar e Desativar. Se não couber, arraste o texto para rolar.
-- O botão Mods continua ao lado de Configurações: na sua tela não cabem 7 botões na coluna.
+- **Toque na linha inteira.** Para abrir os detalhes era preciso tocar num ponto à esquerda do
+  nome. O toque era lido em pixels da tela (1600x720), mas as linhas são posicionadas no espaço da
+  interface do jogo (cerca de 969x454 no seu aparelho). Só a parte da esquerda coincidia. Agora o
+  toque vem do cursor da interface do próprio jogo, no mesmo espaço das linhas.
+- **Ícone do mod.** Cada linha tem a moldura de imagem da linha de mundo, com o ícone do primeiro
+  item que o mod adiciona (a mesma textura do inventário, ex.: o Rubi). Sem item, um item do jogo:
+  o Olho de Aparência Suspeita para mods de NPC e o Livro para os demais, inclusive os desativados
+  ou com erro.
+- Os três primeiros toques na Oficina vão para o `tlmod.log`, numa linha "Oficina: toque em ...",
+  com as duas coordenadas. Se ainda houver toque fora do lugar, ela mostra a causa.
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 421096 bytes, `0fec60f8361b672e…` | 421984 bytes, `857e4503ac12edbf…` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 936656 bytes, `f523d0f842cd2e49…` | 936848 bytes, `649d519652e6fa27…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 421984 bytes, `857e4503ac12edbf…` | 424512 bytes, `4ee8fb231f5547c9…` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 936848 bytes, `649d519652e6fa27…` | 937248 bytes, `c3a01e8929d4dacc…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
 Todo o resto é idêntico, byte a byte, ao pacote anterior: as `.so` dos 4 mods, os manifestos,
@@ -70,7 +69,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `4b1d778` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `704b22f` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -214,15 +213,19 @@ dependem do jogo real.
 **Oficina de Mods**
 - [ ] O botão **Mods** aparece inteiro, ao lado de Configurações, e abre a Oficina com o som do menu
 - [ ] As linhas ficam uma embaixo da outra, dentro do painel, acima da linha do Voltar
-- [ ] Cada linha: nome, estado colorido (verde Ativo), versão e o conteúdo ou o autor; nenhum quadro vazio
+- [ ] Cada linha: ícone na moldura da esquerda (Rubi no "Exemplo: Rubi Fictício", Olho de Aparência
+      Suspeita no "Titã de Brasa", Livro no Boss Checklist e nas "Ferramentas de teste"), nome, estado colorido, versão e
+      o conteúdo ou o autor
+- [ ] Tocar em qualquer ponto da linha (nome, quadros, à direita) abre os detalhes; arrastar a
+      lista não abre nada
 - [ ] Com mais mods do que cabem, arrastar a lista rola e para numa linha inteira
-- [ ] Tocar numa linha abre os detalhes; arrastar a lista não abre nada
 - [ ] Nos detalhes, o texto não passa por cima de Voltar/Desativar; texto longo rola ao arrastar
 - [ ] Desativar/Ativar muda o estado para "Será desativado"/"Será ativado" (amarelo); reabrindo o
-      jogo, o mod aparece Desativado (cinza), e volta ao religar
+      jogo, o mod aparece Desativado (cinza), com o Livro no lugar do ícone, e volta ao religar
 - [ ] Um mod com erro (ex.: apague a `.so` de um mod) mostra "Erro" em vermelho, e os detalhes
       trazem a mensagem inteira
 - [ ] Voltar (botão e o voltar do Android) volta dos detalhes para a lista e da lista para o menu
+- [ ] O `tlmod.log` tem até três linhas "Oficina: toque em ..." (mande junto se algo falhar)
 
 **Cópia das bibliotecas e log**
 - [ ] Os 4 mods aparecem como Carregado; o log mostra `biblioteca copiada para .../code_cache/tlmod/...`
@@ -280,8 +283,8 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 421984 | `857e4503ac12edbf2a296c9e6018b6efa5750afe5c0695b7848c0cfb2a59217d` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 936848 | `649d519652e6fa274c13e13a0f88ad8d42cd1176ac66ab6ca20a3e65f3c76a9b` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 424512 | `4ee8fb231f5547c92d27d3e4c75e135b09c6a150c4db3b9e03515b5652d02da6` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 937248 | `c3a01e8929d4dacc54650414a81ca5842fb41939e1190f27eecd467cf0d16f4c` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
 | `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490840 | `931a7f67bec83deb9fa80e256b0ac61fca0194e7e95c75bce815f34d5c9ec8a8` |

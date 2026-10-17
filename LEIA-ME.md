@@ -1,16 +1,16 @@
-# Entrega: pacote de teste do TLMod (9ª versão)
+# Entrega: pacote de teste do TLMod (10ª versão)
 
 Branch só para download, sem o código. Pode ser apagada depois.
 
 | arquivo | SHA-256 |
 |---|---|
-| `tlmod-teste.zip` | `0216486fc2832d75758a62e23cb4705662b5a4c2748679b8d853462329222edc` |
-| `libtlmod_bridge.so` | `857e4503ac12edbf2a296c9e6018b6efa5750afe5c0695b7848c0cfb2a59217d` |
-| `libtlmod_runtime.so` | `649d519652e6fa274c13e13a0f88ad8d42cd1176ac66ab6ca20a3e65f3c76a9b` |
-| `README_TESTE.md` | `bd3c72fb5c2c6488506dd8e67f8871aa1da44c932b5d2dc30b46cbade223eae0` |
+| `tlmod-teste.zip` | `a7082509d2dca98e43c5f3123656050667ea726aa96bde50823633d981b6119f` |
+| `libtlmod_bridge.so` | `4ee8fb231f5547c92d27d3e4c75e135b09c6a150c4db3b9e03515b5652d02da6` |
+| `libtlmod_runtime.so` | `c3a01e8929d4dacc54650414a81ca5842fb41939e1190f27eecd467cf0d16f4c` |
+| `README_TESTE.md` | `082a1f7c23ae03db61f9d25c69acc1d30ca4bef60d419e24db7c07309e9e2a9d` |
 
 - `tlmod-teste.zip`: o pacote completo.
-- `libtlmod_bridge.so` e `libtlmod_runtime.so`: as duas que mudaram desde a 8ª versão (Oficina:
-  lista vertical, cores, detalhes com rolagem). A pasta `tlmod/` não mudou.
+- `libtlmod_bridge.so` e `libtlmod_runtime.so`: as duas que mudaram desde a 9ª versão (Oficina:
+  toque na linha inteira e ícone do item do mod). A pasta `tlmod/` não mudou.
 
-Gerado a partir do commit `4b1d778` da branch `ccr-bbd92bf9-i01buk`.
+Gerado a partir do commit `704b22f` da branch `ccr-bbd92bf9-i01buk`.
