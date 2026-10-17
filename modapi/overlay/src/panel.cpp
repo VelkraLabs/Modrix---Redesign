@@ -369,7 +369,42 @@ PanelController::PanelController(const PanelDataSource& source, ConfigStore& con
     checklist_ = Message("Aguardando o jogo…");
 }
 
-void PanelController::Bump() { ++version_; }
+void PanelController::Bump() {
+    ++version_;
+    PublishHud();
+}
+
+// Os botões que a ponte desenha, copiados sob mutex: o "M" sempre (também no menu); os
+// ícones como os do renderizador (com um mundo carregado). Nenhum no modo de edição
+// (o renderizador mostra os dele para arrastar) nem com a Oficina aberta.
+void PanelController::PublishHud() {
+    HudSnapshot next;
+    const ButtonLayout layout = config_.Buttons();
+    next.scalePct = layout.scalePct;
+    next.opacityPct = layout.opacityPct;
+    auto placed = [&](const std::string& id) -> std::optional<ButtonPlacement> {
+        auto it = layout.positions.find(id);
+        return it == layout.positions.end() ? std::nullopt : std::optional<ButtonPlacement>(it->second);
+    };
+    if (!editingLayout_ && !workshopOpen_) {
+        next.buttons.push_back({kMenuButtonId, kMenuButtonItem, surface_ == Surface::Log, true, placed(kMenuButtonId)});
+        if (inWorld_) {
+            if (ChecklistInstalled())
+                next.buttons.push_back({"checklist", kLauncherIconItems[0], surface_ == Surface::Checklist, false,
+                                        placed("checklist")});
+            for (const ModTab& t : modTabs_) {
+                int32_t item = t.iconItem > 0 ? t.iconItem : kDefaultLauncherItem;
+                for (size_t i = 0; t.iconItem <= 0 && i < std::size(kLauncherIcons); ++i)
+                    if (t.icon == kLauncherIcons[i]) item = kLauncherIconItems[i];
+                const std::string id = "mod:" + t.modId;
+                next.buttons.push_back(
+                    {id, item, surface_ == Surface::ModTab && activeMod_ == t.modId, false, placed(id)});
+            }
+        }
+    }
+    std::lock_guard<std::mutex> lock(hudMutex_);
+    hud_ = std::move(next);
+}
 
 bool PanelController::Show(Surface s, const std::string& modId) {
     if (!modsLoaded_) RebuildMods();
@@ -597,6 +632,7 @@ void PanelController::RefreshModTab(ModTab& tab) {
     tab.icon.clear();
     for (const char* known : kLauncherIcons)
         if (icon == known) tab.icon = icon;
+    tab.iconItem = std::max(0, Num(doc ? &*doc : nullptr, "icon_item"));
     Bump();
 }
 
@@ -624,6 +660,15 @@ bool PanelController::Tick(int64_t nowMs) {
     }
     if (workshopRequested_.exchange(false, std::memory_order_acq_rel)) SetWorkshopOpen(true);
     if (layoutEditRequested_.exchange(false, std::memory_order_acq_rel)) SetLayoutEditing(true);
+    // Botões do jogo: estão de pé? E os toques que chegaram por eles.
+    const bool native = nativeProbe_ && nativeProbe_();
+    if (native != nativeHud_) nativeHud_ = native, Bump();
+    std::vector<std::string> taps;
+    {
+        std::lock_guard<std::mutex> lock(hudMutex_);
+        taps.swap(hudTaps_);
+    }
+    for (const std::string& id : taps) HandleAction("open", id == kMenuButtonId ? "log" : id);
     // Fora de um mundo os ícones somem, e a gaveta e o modal fecham.
     const std::optional<bool> world = source_.InWorld();
     if (world.value_or(false) != inWorld_) {
@@ -708,6 +753,7 @@ std::string PanelController::SnapshotJson() const {
     w.Key("scale_pct").Int(buttons.scalePct);
     w.Key("opacity_pct").Int(buttons.opacityPct);
     w.Key("placement_max").Int(ButtonLayout::kPlacementMax);
+    w.Key("native_hud").Bool(nativeHud_);  // os botões são do jogo: os do renderizador só na edição
     w.Key("positions").BeginObject();
     for (const auto& [id, p] : buttons.positions) w.Key(id).BeginArray().Int(p.x).Int(p.y).EndArray();
     w.EndObject();

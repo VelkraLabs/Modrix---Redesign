@@ -120,6 +120,35 @@ TLModSettingsTab SettingsSource() {
     return s;
 }
 
+// Botões de mods desenhados pelo jogo (hud_buttons.cpp na ponte): o retrato que o
+// painel publica (thread-safe) e os toques de volta para ele. Thread do jogo.
+struct NativeHud {
+    tlmod::overlay::PanelController* panel = nullptr;
+    tlmod::overlay::HudSnapshot snap;  // da última chamada de snapshot: os ids valem até a próxima
+};
+NativeHud g_hud;
+
+TLModHudSource HudSource() {
+    TLModHudSource s{};
+    s.user = &g_hud;
+    s.snapshot = [](void* user, TLModHudLayout* layout) {
+        auto* h = static_cast<NativeHud*>(user);
+        h->snap = h->panel->Hud();
+        *layout = {h->snap.scalePct, h->snap.opacityPct};
+        return static_cast<int32_t>(h->snap.buttons.size());
+    };
+    s.button = [](void* user, int32_t i, TLModHudButton* out) {
+        auto* h = static_cast<NativeHud*>(user);
+        if (i < 0 || static_cast<size_t>(i) >= h->snap.buttons.size()) return false;
+        const tlmod::overlay::HudButton& b = h->snap.buttons[static_cast<size_t>(i)];
+        *out = {b.id.c_str(), b.iconItem, b.active, b.menu, b.place.has_value(), b.place ? b.place->x : 0,
+                b.place ? b.place->y : 0};
+        return true;
+    };
+    s.tap = [](void* user, const char* id) { static_cast<NativeHud*>(user)->panel->HudTap(id ? id : ""); };
+    return s;
+}
+
 // Botão "Mods" do menu principal (thread do jogo, dentro do desenho do menu):
 // abre a Oficina nativa; sem ela (peças do jogo não resolveram), a do painel,
 // que abre no próximo Tick, na thread de UI.
@@ -206,6 +235,8 @@ void* RuntimeMain(void*) {
     TLModWorkshopSource workshop = WorkshopSource();
     TLMod_SetWorkshopSource(&workshop);
     static tlmod::overlay::PanelController panel(source, config);
+    // Com os botões desenhados pelo jogo, os do overlay só aparecem no modo de edição.
+    panel.SetNativeHud([] { return TLMod_HudAvailable(); });
     std::string overlayError;
     if (!tlmod::overlay::StartOverlay(&panel, 60000, &overlayError)) {
         tlmod::rt::Log(TLMOD_LOG_ERROR, "overlay", "painel não instalado: " + overlayError);
@@ -214,7 +245,13 @@ void* RuntimeMain(void*) {
     // Oficina de Mods: botão "Mods" desenhado pelo jogo no menu principal.
     g_panel = &panel;
     TLMod_SetMainMenuButton("Mods", &OnMenuModsButton);
-    // Aba Mods nas Configurações: tamanho, opacidade e posição dos botões do overlay.
+    // Botões de mods na tela, pelo jogo (o painel atende os toques no Tick).
+    g_hud.panel = &panel;
+    TLModHudSource hud = HudSource();
+    TLMod_SetHudSource(&hud);
+    if (!TLMod_HudAvailable())
+        tlmod::rt::Log(TLMOD_LOG_WARN, "overlay", "botões de mods pelo overlay: o jogo não os desenha nesta build");
+    // Aba Mods nas Configurações: tamanho, opacidade e posição dos botões de mods.
     static tlmod::overlay::ModSettingsTab settingsTab(config, &panel);
     g_settings.tab = &settingsTab;
     TLModSettingsTab settings = SettingsSource();

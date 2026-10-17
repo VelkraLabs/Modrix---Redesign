@@ -1,15 +1,15 @@
 // Aba "Mods" das Configurações do jogo (sem desenho).
 //
 // A ponte (il2cpp_bridge/src/settings_tab.cpp) põe uma aba a mais na tela de
-// Configurações, com o ícone da Caixa de Ferramentas, e desenha as linhas abaixo
+// Configurações, com o ícone da Chave Inglesa, e desenha as linhas abaixo
 // com as entradas do próprio jogo: um botão (como "Editar controles") e barras
 // deslizantes (como "Sensibilidade da mira"). Esta classe diz o que vai em cada
 // linha e aplica os toques na configuração.
 //
 //   0  Posição dos botões de mods   [Editar]   fecha as Configurações e abre o
 //                                              modo de edição do overlay
-//   1  Tamanho dos botões de mods   50%..150%
-//   2  Opacidade dos botões de mods 30%..100%
+//   1  Tamanho                      50%..150%   (o jogo desenha o valor logo depois do
+//   2  Opacidade                    30%..100%    título: título comprido fica embaixo dele)
 //   "Padrão" da tela: tamanho, opacidade e posições voltam ao padrão.
 //
 // Thread-safe (a ponte chama da thread do jogo): só usa a ConfigStore e o
@@ -37,7 +37,7 @@ struct SettingsRow {
 class ModSettingsTab {
 public:
     static constexpr const char* kTitle = "Mods";
-    static constexpr int32_t kIconItem = 1923;  // Caixa de Ferramentas
+    static constexpr int32_t kIconItem = 509;  // Chave Inglesa (prateada: aparece no azul da aba)
     static constexpr int32_t kStepPct = 10;     // cada passo das barras: 10%
     enum Row : int32_t { kRowPosition = 0, kRowScale = 1, kRowOpacity = 2, kRowCount = 3 };
 

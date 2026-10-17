@@ -56,6 +56,7 @@ bool ResolveDraw();
 void InstallDrawHooks();
 // Telas que leem TextureAssets.Item sozinhas e nome de NPC (screen_hooks.cpp).
 void InstallScreenHooks();
+bool VirtualControlsHooked();  // o hook de GUIVirtualInputController.DrawControls entrou
 // Botão Mods no menu principal (menu_hooks.cpp). Opcional.
 void InstallMenuHooks();
 // Oficina de Mods nativa (workshop_screen.cpp): resolve as peças da tela de
@@ -65,6 +66,12 @@ bool ResolveWorkshop();
 bool DrawWorkshop();
 // Aba Mods nas Configurações (settings_tab.cpp). Opcional; usa drawx::ItemIconTexture.
 void InstallSettingsHooks();
+// Botões de mods desenhados pelo jogo (hud_buttons.cpp). ResolveHud depois de
+// InstallScreenHooks (o desenho vem do hook de DrawControls) e InstallMenuHooks.
+// DrawHudButtons: no mundo, depois dos controles de toque; no menu (menu = true),
+// depois do menu principal (só os botões `menu`).
+void ResolveHud();
+void DrawHudButtons(bool menu);
 
 // Receitas de mod (recipe_hooks.cpp). Depois de ResolveItems (usa TLMod_SetItemDefaults).
 // TickRecipes: no frame (Main.DoUpdate), aplica se o SetupRecipes já passou sem elas.

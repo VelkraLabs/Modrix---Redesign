@@ -25,17 +25,18 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "tlmod/overlay/config_store.h"
 #include "tlmod/runtime/log.h"
 #include "tlmod/runtime/mod_loader.h"
 
 namespace tlmod::overlay {
-
-class ConfigStore;
 
 // ---------------------------------------------------------------------------
 // Fontes de dados
@@ -165,6 +166,7 @@ struct ModTab {
     std::string modId;
     std::string title;    // "title" do JSON do mod; o nome do mod se faltar
     std::string icon;     // "icon" do JSON do mod, se for um dos kLauncherIcons; senão vazio
+    int32_t iconItem = 0; // "icon_item" do JSON (item do jogo para o botão na tela); 0 = pelo "icon"
     std::string content;  // JSON do canal "panel" (objeto)
     std::string notice;   // "toast" da última resposta, ou erro
 };
@@ -173,6 +175,27 @@ constexpr const char* kModPanelChannel = "panel";
 constexpr const char* kLauncherIcons[] = {"checklist", "tools", "star", "gem", "sword", "book"};
 // Id do "M" nas posições salvas (ButtonLayout::positions); os ícones usam o id do lançador.
 constexpr const char* kMenuButtonId = "menu";
+// Itens do jogo usados como ícone dos botões desenhados pelo jogo (ver HudButton).
+constexpr int32_t kMenuButtonItem = 149;  // Livro: o Log
+// O item de cada kLauncherIcons, na mesma ordem: Olho de Aparência Suspeita, Chave
+// Inglesa Multicolorida, Estrela Cadente, Diamante, Espada Larga de Ferro, Tomo de Feitiço.
+constexpr int32_t kLauncherIconItems[] = {43, 3611, 75, 182, 4, 531};
+constexpr int32_t kDefaultLauncherItem = 149;  // ícone sem desenho conhecido: o Livro
+
+// Um botão de mod na tela, desenhado pelo próprio jogo (il2cpp_bridge/src/hud_buttons.cpp).
+struct HudButton {
+    std::string id;          // kMenuButtonId, "checklist" ou "mod:<id>"
+    int32_t iconItem = 0;
+    bool active = false;     // a tela dele está aberta
+    bool menu = false;       // também no menu principal (só o "M")
+    std::optional<ButtonPlacement> place;  // posição salva; sem ela, a coluna padrão
+};
+// O que a ponte desenha agora. Vazio = nenhum botão (modo de edição, Oficina aberta).
+struct HudSnapshot {
+    std::vector<HudButton> buttons;
+    int32_t scalePct = ButtonLayout::kScaleDefault;
+    int32_t opacityPct = ButtonLayout::kOpacityDefault;
+};
 
 // Canal do Boss Checklist que o painel consome.
 constexpr const char* kChecklistMod = "tlmod.boss_checklist";
@@ -215,6 +238,22 @@ public:
     bool IsEditingLayout() const { return editingLayout_; }
     // Grava a posição de um botão ("menu", "checklist" ou "mod:<id>").
     bool MoveButton(const std::string& id, int32_t x, int32_t y, std::string* error = nullptr);
+
+    // Botões desenhados pelo jogo. `probe` diz se eles estão de pé (TLMod_HudAvailable);
+    // com eles, o renderizador esconde os botões dele fora do modo de edição. Chamar
+    // antes de ligar o renderizador.
+    void SetNativeHud(std::function<bool()> probe) { nativeProbe_ = std::move(probe); }
+    bool NativeHud() const { return nativeHud_; }
+    // Qualquer thread (a ponte desenha na thread do jogo): os botões de agora.
+    HudSnapshot Hud() const {
+        std::lock_guard<std::mutex> lock(hudMutex_);
+        return hud_;
+    }
+    // Qualquer thread: um botão do jogo foi tocado; o painel atende no próximo Tick.
+    void HudTap(const std::string& id) {
+        std::lock_guard<std::mutex> lock(hudMutex_);
+        hudTaps_.push_back(id);
+    }
 
     // Oficina de Mods. Abrir fecha a superfície aberta (a Oficina fica por cima de tudo).
     void SetWorkshopOpen(bool open);
@@ -265,6 +304,12 @@ private:
     std::atomic<bool> workshopRequested_{false};
     bool editingLayout_ = false;
     std::atomic<bool> layoutEditRequested_{false};
+    std::function<bool()> nativeProbe_;
+    bool nativeHud_ = false;
+    mutable std::mutex hudMutex_;   // hud_ e hudTaps_ (a ponte lê e toca da thread do jogo)
+    HudSnapshot hud_;
+    std::vector<std::string> hudTaps_;
+    void PublishHud();
     std::string layoutNotice_;  // erro ao salvar uma posição
     std::set<std::string> expanded_;  // mods com o erro aberto na Oficina
     uint64_t configRevision_ = 0;     // a configuração pode mudar por fora (Oficina nativa)

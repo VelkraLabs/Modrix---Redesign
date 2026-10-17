@@ -502,7 +502,8 @@ devolve `-2`.
 tela. O provedor descreve o modal em JSON, e `"icon"` escolhe o desenho do ícone (`checklist`,
 `tools`, `star`, `gem`, `sword`, `book`; sem ele, a inicial do título). O jogador muda a posição,
 o tamanho e a opacidade dos ícones em **Configurações > Mods** (ver `overlay/README.md`). A posição
-fica salva pelo id `mod:<id do mod>`. O overlay desenha e devolve os toques como comandos:
+fica salva pelo id `mod:<id do mod>`. O botão é desenhado pelo jogo com o ícone de um item:
+`"icon_item"` escolhe o item (ex.: `3611`); sem ele, vem do `"icon"`. O overlay desenha e devolve os toques como comandos:
 
 ```json
 {"title": "Ferramentas", "icon": "tools", "sections": [

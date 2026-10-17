@@ -1544,13 +1544,16 @@ int32_t g_screenW = 1600, g_screenH = 1200;
 struct MockRect {
     int32_t x, y, w, h;
 };
-// Com overloadSize (+0x12C), o tamanho é overloadedSize (+0x130) em pixels (as abas das Configurações).
+// Com overloadSize (+0x12C), o tamanho é overloadedSize (+0x130) em pixels; sem ele, 60x60 para
+// as abas das Configurações (TransactionButton_Layout de verdade) e 480x80 para os botões do menu.
+void* g_tabLayoutClass = nullptr;
 MockRect MockButtonRegion(Il2CppObject* layout, const MethodInfo*) {
     float x = At<float>(layout, 0x18), y = At<float>(layout, 0x1C);
     const bool own = At<bool>(layout, 0x12C);
+    const bool tab = g_tabLayoutClass && layout->klass == g_tabLayoutClass;
     return {g_screenW / 2 + static_cast<int32_t>(x * 2), g_screenH / 2 + static_cast<int32_t>(y * 2),
-            own ? static_cast<int32_t>(At<float>(layout, 0x130)) : 480,
-            own ? static_cast<int32_t>(At<float>(layout, 0x134)) : 80};
+            own ? static_cast<int32_t>(At<float>(layout, 0x130)) : tab ? 60 : 480,
+            own ? static_cast<int32_t>(At<float>(layout, 0x134)) : tab ? 60 : 80};
 }
 // Faixa das abas das Configurações (SettingsOverlayCategories_Layout.Backing): GUIPanel.Region.
 Il2CppObject* g_settingsBacking = nullptr;
@@ -1886,8 +1889,10 @@ Il2CppObject* HeldItem() {
     return static_cast<Il2CppObject*>(Elem(At<Il2CppArray*>(g_localPlayer, kPInventory),
                                            static_cast<uint32_t>(At<int32_t>(g_localPlayer, kPSelectedItem))));
 }
+bool g_controlsWithoutItems = false;  // mock_hud_frame: só os botões de mods importam
 void MockDrawControls(Il2CppObject*, const MethodInfo*) {
     g_drawnFirst = g_drawnSecond = nullptr;
+    if (g_controlsWithoutItems) return;
     if (At<int32_t>(HeldItem(), kItemType) > 0) DrewItem(HeldItem()), g_drawnFirst = g_lastDrawn;
     if (g_grappleItem) DrewItem(g_grappleItem), g_drawnSecond = g_lastDrawn;
 }
@@ -1997,7 +2002,21 @@ FieldInfo g_fTransactionLayout[] = {
     {"DrawIcon", 0xA1, nullptr},        {"DrawItem", 0xA2, nullptr},           {"IconOffset", 0xBC, nullptr},
     {"DisableItemResize", 0x104, nullptr}, {"ForceItemScale", 0x105, nullptr}, {"ItemOffset", 0x10C, nullptr},
     {"ItemColour", 0x120, nullptr},     {"DisabledItemColour", 0x124, nullptr},
-    {"PressedItemColour", 0x128, nullptr}, {"PressedBorderColour", 0x1C8, nullptr}};
+    {"PressedItemColour", 0x128, nullptr}, {"PressedBorderColour", 0x1C8, nullptr},
+    {"overloadSize", 0x12C, nullptr},   {"overloadedSize", 0x130, nullptr},    {"Color", 0x34, nullptr},
+    {"NormalBorderColour", 0x1B8, nullptr}, {"PressedColour", 0x3D, nullptr}};
+// Botões de mods (hud_buttons.cpp): cada GUITransactionButton.Draw com textura de um frame.
+struct HudDraw {
+    Il2CppObject* layout;
+    Il2CppObject* texture;
+    MockRect rect;
+    bool pressed;
+    uint64_t colour;
+};
+std::vector<HudDraw> g_textureDraws;
+bool g_playerInventory = false;
+bool MockGetPlayerInventory(const MethodInfo*) { return g_playerInventory; }
+MethodInfo g_mGetPlayerInventory{reinterpret_cast<Il2CppMethodPointer>(&MockGetPlayerInventory), "get_playerInventory", 0};
 // Toques do próximo frame.
 MockRect g_settingsTap{-1, -1, 0, 0};       // ponto tocado (x, y) para as abas
 Il2CppObject* g_clickEntry = nullptr;       // botão tocado
@@ -2104,6 +2123,7 @@ int32_t MockTextureDraw(Il2CppObject* layout, Il2CppObject* texture, Il2CppObjec
     g_drawnTab.texture = texture;
     g_drawnTab.rect = MockButtonRegion(layout, nullptr);
     g_drawnTab.colour = colour;
+    g_textureDraws.push_back({layout, texture, g_drawnTab.rect, pressed, colour});
     return Tapped(g_drawnTab.rect) ? 0 : 3;
 }
 void MockDrawItemHandlerDraw() { std::abort(); }  // o overload errado de 10 parâmetros
@@ -2169,6 +2189,7 @@ void InitSettings() {
     g_fCategories[0] = FieldInfo{"Backing", 0x10, nullptr};
     for (int i = 0; i < 8; ++i) {
         Il2CppObject* tab = il2cpp_object_new(&g_transactionLayoutClass);
+        At<uint32_t>(tab, 0x34) = 0xFFFFFFFFu;  // Color: a opacidade multiplica
         At<int32_t>(tab, 0x10) = 0;    // AnchorControl: Screen
         At<int32_t>(tab, 0x14) = 18;   // Anchor: CentreBoth
         At<float>(tab, 0x18) = -160.0f + 40.0f * static_cast<float>(i);
@@ -2199,6 +2220,8 @@ void InitSettings() {
                              &g_mSliderString};
     g_listClass.methods = {&g_mListAdd};
     g_guiTransaction.methods.insert(g_guiTransaction.methods.end(), {&g_mHandlerDraw, &g_mTextureDraw});
+    g_tabLayoutClass = &g_transactionLayoutClass;
+    g_main.methods.push_back(&g_mGetPlayerInventory);
     g_csharp.classes.insert(g_csharp.classes.end(),
                             {&g_settingsOverlayClass, &g_settingsLayoutClass, &g_settingsCategoriesClass,
                              &g_settingEntryClass, &g_transactionLayoutClass, &g_openUIClass, &g_sliderClass});
@@ -2534,6 +2557,30 @@ __attribute__((visibility("default"))) void mock_settings_set_backing(int32_t x,
     g_settingsBackingRect = {x, y, w, h};
 }
 __attribute__((visibility("default"))) size_t mock_settings_entries() { return g_categoryList.size(); }
+
+// Botões de mods: um frame dos controles de toque (no mundo) ou do menu principal, com
+// um toque em (tapX, tapY) e o inventário aberto ou não. Devolve quantos botões foram
+// desenhados; mock_hud_draw lê cada um (região, apertado, cor passada, Color do layout).
+__attribute__((visibility("default"))) size_t mock_hud_frame(bool menu, int32_t tapX, int32_t tapY, bool inventory) {
+    g_settingsTap = {tapX, tapY, 0, 0};
+    g_playerInventory = inventory;
+    g_textureDraws.clear();
+    if (menu) g_mainMenuEntry(NewObject(0x40), &g_mMainMenuDraw);
+    else g_controlsWithoutItems = true, g_controlsEntry(nullptr, &g_mDrawControls), g_controlsWithoutItems = false;
+    g_settingsTap = {-1, -1, 0, 0};
+    return g_textureDraws.size();
+}
+__attribute__((visibility("default"))) bool mock_hud_draw(size_t i, int32_t* rect, bool* pressed, uint64_t* colour,
+                                                           uint32_t* layoutColour, void** texture) {
+    if (i >= g_textureDraws.size()) return false;
+    const HudDraw& d = g_textureDraws[i];
+    rect[0] = d.rect.x, rect[1] = d.rect.y, rect[2] = d.rect.w, rect[3] = d.rect.h;
+    *pressed = d.pressed;
+    *colour = d.colour;
+    *layoutColour = At<uint32_t>(d.layout, 0x34);
+    *texture = d.texture;
+    return true;
+}
 // Location do botão i do MainMenu_Layout (0 = Singleplayer ... 6 = PurchaseFullGame/Mods).
 __attribute__((visibility("default"))) void mock_menu_button_location(int i, float* x, float* y) {
     *x = At<float>(MenuButton(i), 0x18);

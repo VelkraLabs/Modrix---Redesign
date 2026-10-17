@@ -62,7 +62,8 @@ public final class TLModOverlay {
     static native boolean nativeAction(long handle, String action, String arg);
     static native boolean nativeTick(long handle, long nowMs);
 
-    private static final long TICK_MS = 250;
+    // 100 ms: o toque num botão desenhado pelo jogo chega pelo Tick.
+    private static final long TICK_MS = 100;
 
     private final Activity activity;
     private final long handle;
@@ -199,7 +200,12 @@ public final class TLModOverlay {
     private void act(String action, String arg) {
         hideKeyboard();
         nativeAction(handle, action, arg);
-        nativeTick(handle, SystemClock.uptimeMillis());  // resposta imediata ao toque
+        refresh();
+    }
+
+    /** Resposta imediata: um Tick e o desenho, sem esperar o próximo ciclo. */
+    private void refresh() {
+        nativeTick(handle, SystemClock.uptimeMillis());
         JSONObject snap = snapshot();
         if (snap != null) render(snap);
     }
@@ -278,10 +284,8 @@ public final class TLModOverlay {
                     dragging = null;
                     if (editing) {
                         if (moved) {
-                            int max = buttonLayout.optInt("placement_max", 10000);
-                            long cx = Math.round((p.leftMargin + p.width / 2.0) * max / screenW());
-                            long cy = Math.round((p.topMargin + p.height / 2.0) * max / screenH());
-                            act("layout_move", id + " " + cx + " " + cy);
+                            commitPosition(id, v);
+                            refresh();
                         }
                     } else if (!moved) {
                         tap.run();
@@ -506,7 +510,10 @@ public final class TLModOverlay {
         buttons.addView(editReset);
         editDone = barButton("accent", "panel_bg");
         editDone.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { act("layout_done", ""); }
+            @Override public void onClick(View v) {
+                commitPositions();
+                act("layout_done", "");
+            }
         });
         LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -519,6 +526,21 @@ public final class TLModOverlay {
                 Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         lp.topMargin = margin;
         editLayer.addView(bar, lp);
+    }
+
+    /** Grava a posição de todos os botões, como estão na tela (os botões do jogo usam as mesmas). */
+    private void commitPositions() {
+        commitPosition("menu", fab);
+        for (Map.Entry<String, LauncherView> e : launchers.entrySet()) commitPosition(e.getKey(), e.getValue());
+    }
+
+    private void commitPosition(String id, View v) {
+        FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) v.getLayoutParams();
+        if (p.width <= 0 || v.getVisibility() != View.VISIBLE) return;
+        int max = buttonLayout.optInt("placement_max", 10000);
+        long cx = Math.round((p.leftMargin + p.width / 2.0) * max / screenW());
+        long cy = Math.round((p.topMargin + p.height / 2.0) * max / screenH());
+        nativeAction(handle, "layout_move", id + " " + cx + " " + cy);
     }
 
     private TextView barButton(String bgKey, String textKey) {
@@ -804,9 +826,13 @@ public final class TLModOverlay {
 
         JSONObject fabState = s.optJSONObject("fab");
         fab.setText(fabState != null ? fabState.optString("label", "M") : "M");
-        fab.setVisibility(fabState == null || fabState.optBoolean("visible", true) ? View.VISIBLE : View.GONE);
         renderLaunchers(s);
         applyButtonLayout(s);
+        // Com os botões desenhados pelo jogo, os daqui só aparecem no modo de edição (para arrastar).
+        boolean nativeHud = buttonLayout.optBoolean("native_hud") && !editing;
+        fab.setVisibility(!nativeHud && (fabState == null || fabState.optBoolean("visible", true)) ? View.VISIBLE : View.GONE);
+        if (nativeHud)
+            for (LauncherView v : launchers.values()) v.setVisibility(View.GONE);
         renderEditLayer();
         JSONObject ws = s.optJSONObject("workshop");
         boolean wsOpen = ws != null && ws.optBoolean("open");

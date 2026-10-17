@@ -232,6 +232,13 @@ __attribute__((noinline)) void PlayMenuSound() {
     if (exc) bridge::LogException("SoundEngine.PlaySound", exc);
 }
 
+// Configurações abertas por cima do menu (GUIInstance.Active.GUISettings.Visible).
+bool SettingsOpen() {
+    Il2CppObject* gui = StaticObject(m.guiActive);
+    Il2CppObject* settings = gui ? FieldAt<Il2CppObject*>(gui, m.guiSettings) : nullptr;
+    return settings && FieldAt<bool>(settings, m.settingsVisible);
+}
+
 // Depois do menu original. Só PODs no frame: GUITransactionButton.Draw é
 // chamado direto, como o jogo faz.
 void DrawModsButton() {
@@ -252,9 +259,7 @@ void DrawModsButton() {
     Il2CppObject* label = Label(btn);
     if (!label) return;
     // Com Configurações aberta por cima, os botões do menu ficam desativados.
-    Il2CppObject* gui = StaticObject(m.guiActive);
-    Il2CppObject* settings = gui ? FieldAt<Il2CppObject*>(gui, m.guiSettings) : nullptr;
-    const bool disabled = settings && FieldAt<bool>(settings, m.settingsVisible);
+    const bool disabled = SettingsOpen();
     auto draw = reinterpret_cast<TransactionDrawFn>(m.transactionDraw->methodPointer);
     int32_t state = draw(mods, nullptr, label, disabled, &g_scale, false, false, false, false, m.transactionDraw);
     if (state == kInputClicked && !disabled) {
@@ -330,6 +335,9 @@ void TLMod_Hooked_GUIMainMenuDraw(Il2CppObject* self, const MethodInfo* method) 
     auto orig = LoadOrig<MainMenuDrawFn>(g_origMainMenuDraw);
     if (orig) orig(self, method);
     DrawModsButton();
+    // Botões de mods do menu (o do Log), menos com as Configurações abertas por cima:
+    // as telas do jogo vêm depois e as regiões de toque não têm ordem.
+    if (!SettingsOpen()) bridge::DrawHudButtons(true);
 }
 
 }  // extern "C"

@@ -281,6 +281,7 @@ bool TLMod_Init(int timeoutMs) {
         if (bridge::ResolveSaves()) bridge::InstallSaveHooks();
         bridge::InstallMenuHooks();
         bridge::InstallSettingsHooks();
+        bridge::ResolveHud();
         g_ready.store(true);
     } else {
         LOGE("timeout resolvendo Terraria.Player em %s", terraria::kAssembly);

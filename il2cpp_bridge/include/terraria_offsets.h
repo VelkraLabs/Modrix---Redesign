@@ -441,6 +441,8 @@ constexpr size_t IconOffset = 0xBC;          // Vector2
 constexpr size_t DisableItemResize = 0x104;  // bool
 constexpr size_t ForceItemScale = 0x105;     // bool
 constexpr size_t ItemOffset = 0x10C;         // Vector2
+constexpr size_t overloadSize = 0x12C;       // bool: a região e o fundo usam overloadedSize
+constexpr size_t overloadedSize = 0x130;     // Vector2: o tamanho (vezes Scale), em pixels da interface
 constexpr size_t ItemColour = 0x120;         // Color
 constexpr size_t DisabledItemColour = 0x124;
 constexpr size_t PressedItemColour = 0x128;
@@ -688,6 +690,8 @@ constexpr uintptr_t GUISliderSetting_GetStringValue = 0xA948E4;
 // GUITransactionButton.Draw(layout, Texture2D, string, bool, ref float, Color?, bool x4):
 // a aba Mods com a textura do item; Color? vai num registrador (5 bytes).
 constexpr uintptr_t GUITransactionButton_DrawTexture = 0x1223F70;
+// Botões de mods (hud_buttons.cpp): com o inventário aberto eles não são desenhados.
+constexpr uintptr_t Main_get_playerInventory = 0xC67DD4;  // static bool (LocalUserGameState: thread do jogo)
 // Nome de NPC: o jogo só lê Lang pelo netID (o da casca).
 constexpr uintptr_t NPC_get_TypeName = 0xED9240;   // Lang.GetNPCNameValue(netID): hover, barra, mapa, morte
 constexpr uintptr_t NPC_GetTypeNetName = 0xEDB0BC; // NetworkText.FromKey(...): "X despertou!", "X foi derrotado"
@@ -802,6 +806,7 @@ constexpr int GUISliderSetting_GetMaxValue = 0;
 constexpr int GUISliderSetting_SetValue = 1;
 constexpr int GUISliderSetting_GetStringValue = 0;
 constexpr int GUITransactionButton_DrawTexture = 10;  // há 2 de 10: o do Texture2D no 2º parâmetro
+constexpr int Main_get_playerInventory = 0;
 constexpr int NPC_get_TypeName = 0;
 constexpr int NPC_GetTypeNetName = 0;
 }  // namespace argc

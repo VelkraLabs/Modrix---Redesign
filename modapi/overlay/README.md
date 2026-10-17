@@ -16,9 +16,23 @@ Overlay do TLMod dentro do jogo, com uma superfície aberta por vez:
 
 Os ícones são desenhados com `Canvas` (`LauncherView`), sem imagens.
 
+**Botões desenhados pelo jogo.** Quando a ponte consegue
+(`il2cpp_bridge/src/hud_buttons.cpp`, `TLMod_HudAvailable`), o "M" e os ícones
+são desenhados pelo próprio Terraria, junto dos controles de toque: o botão
+quadrado do jogo com o ícone de um item. O Log usa o Livro, o Boss Checklist o
+Olho de Aparência Suspeita e as Ferramentas a Chave Inglesa Multicolorida (ver
+`kLauncherIconItems`; um mod escolhe o seu com `"icon_item"` no JSON do
+painel). Por isso as telas do jogo (pausa, Configurações, Bestiário, mapa)
+ficam por cima, e o toque passa pelo sistema do jogo. Com o inventário aberto,
+os botões somem. O painel publica o retrato dos botões (`PanelController::Hud`,
+com mutex), e a ponte devolve os toques (`HudTap`), atendidos no `Tick`. Com os
+botões do jogo, as Views do overlay só aparecem no modo de edição, e Concluir
+grava a posição de todos os botões. As telas abertas por eles (o Log, a gaveta
+e o modal) continuam Views Android.
+
 **Posição, tamanho e opacidade dos botões.** Ficam em **Configurações > Mods**,
 uma aba a mais na tela de Configurações do próprio jogo
-(`il2cpp_bridge/src/settings_tab.cpp`), com o ícone da Caixa de Ferramentas.
+(`il2cpp_bridge/src/settings_tab.cpp`), com o ícone da Chave Inglesa.
 As linhas usam as entradas do jogo, e o que elas fazem vem de `ModSettingsTab`
 (`settings_tab.h`):
 

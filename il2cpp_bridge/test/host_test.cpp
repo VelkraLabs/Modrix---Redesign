@@ -985,7 +985,7 @@ int TestSettings(void* lib) {
     CHECK(entries() == 2 && f.find("linha:opcao:63|Editar") != std::string::npos && f.find("titulo:4") != std::string::npos);
     CHECK(!tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour));
 
-    TLModSettingsTab src{nullptr, "Mods", 1923, &SettingsCount, &SettingsRow, &SettingsClick, &SettingsStep, &SettingsReset};
+    TLModSettingsTab src{nullptr, "Mods", 509, &SettingsCount, &SettingsRow, &SettingsClick, &SettingsStep, &SettingsReset};
     TLMod_SetSettingsTab(&src);
     src.title = "outro";  // a ponte copiou
     CHECK(TLMod_SettingsTabAvailable());
@@ -993,7 +993,7 @@ int TestSettings(void* lib) {
     CHECK(tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour));
     std::printf("    aba Mods em (%d, %d) %dx%d\n", rect[0], rect[1], rect[2], rect[3]);
     CHECK(rect[0] == 1120 && rect[1] == 100 && rect[2] == 60 && rect[3] == 60);  // depois da última, no mesmo passo
-    CHECK(!pressed && drawItem && !drawIcon && texture != nullptr);  // o ícone é a textura do item 1923
+    CHECK(!pressed && drawItem && !drawIcon && texture != nullptr);  // o ícone é a textura do item 509
     CHECK(colour == (0xFFFFFFFFull | (1ull << 32)));
     CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 4 && tabsPressed == 1 && errors == 0);
 
@@ -1066,6 +1066,82 @@ int TestSettings(void* lib) {
     CHECK(errors == 0);
     TLMod_SetSettingsTab(nullptr);
     CHECK(!TLMod_SettingsTabAvailable());
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Botões de mods desenhados pelo jogo: fonte de teste com 3 botões.
+struct TestHud {
+    int32_t count = 3, scale = 100, opacity = 50;
+    bool checklistActive = false;
+    std::vector<std::string> taps;
+} g_hudSrc;
+
+int32_t HudSnapshot(void*, TLModHudLayout* layout) {
+    *layout = {g_hudSrc.scale, g_hudSrc.opacity};
+    return g_hudSrc.count;
+}
+bool HudButton(void*, int32_t i, TLModHudButton* out) {
+    switch (i) {
+        case 0: *out = {"menu", 149, false, true, false, 0, 0}; return true;
+        case 1: *out = {"checklist", 43, g_hudSrc.checklistActive, false, false, 0, 0}; return true;
+        case 2: *out = {"mod:x", 3611, false, false, true, 5000, 5000}; return true;
+        default: return false;
+    }
+}
+void HudTap(void*, const char* id) { g_hudSrc.taps.push_back(id); }
+
+int TestHud(void* lib) {
+    std::printf("\n== botões de mods desenhados pelo jogo\n");
+    auto sym = [&](const char* name) { return dlsym(lib, name); };
+    auto frame = reinterpret_cast<size_t (*)(bool, int32_t, int32_t, bool)>(sym("mock_hud_frame"));
+    auto draw = reinterpret_cast<bool (*)(size_t, int32_t*, bool*, uint64_t*, uint32_t*, void**)>(sym("mock_hud_draw"));
+    auto setScreen = reinterpret_cast<void (*)(int32_t, int32_t)>(sym("mock_set_screen"));
+    auto sounds = reinterpret_cast<int (*)(int*)>(sym("mock_sounds_played"));
+    CHECK(frame && draw && setScreen && sounds);
+    setScreen(1600, 1200);
+    CHECK(TLMod_HudAvailable());
+    CHECK(frame(false, -1, -1, false) == 0);  // sem fonte, nada
+
+    TLModHudSource src{nullptr, &HudSnapshot, &HudButton, &HudTap};
+    TLMod_SetHudSource(&src);
+    int32_t rect[4];
+    bool pressed = false;
+    uint64_t colour = 0;
+    uint32_t layoutColour = 0;
+    void* texture = nullptr;
+    // No mundo: os 3. O botão do jogo tem 60x60 a 100%; o 1º sem posição abre a coluna em
+    // 4% x 24% da tela (64, 288), o 2º vem 72 abaixo (60 + 1/5); o 3º no centro salvo.
+    CHECK(frame(false, -1, -1, false) == 3);
+    CHECK(draw(0, rect, &pressed, &colour, &layoutColour, &texture));
+    std::printf("    menu em (%d, %d) %dx%d\n", rect[0], rect[1], rect[2], rect[3]);
+    CHECK(rect[0] == 34 && rect[1] == 258 && rect[2] == 60 && rect[3] == 60 && !pressed && texture != nullptr);
+    CHECK(colour == (0x7F7F7F7Full | (1ull << 32)) && layoutColour == 0x7F7F7F7Fu);  // opacidade 50%
+    CHECK(draw(1, rect, &pressed, &colour, &layoutColour, &texture) && rect[0] == 34 && rect[1] == 330);
+    CHECK(draw(2, rect, &pressed, &colour, &layoutColour, &texture) && rect[0] == 770 && rect[1] == 570);
+
+    // Toque no "M": som do jogo e o id de volta; a tela aberta desenha o botão apertado.
+    int last = 0;
+    const int before = sounds(&last);
+    frame(false, 64, 288, false);
+    CHECK(g_hudSrc.taps.size() == 1 && g_hudSrc.taps[0] == "menu" && sounds(&last) == before + 1 && last == 12);
+    g_hudSrc.checklistActive = true;
+    frame(false, -1, -1, false);
+    CHECK(draw(1, rect, &pressed, &colour, &layoutColour, &texture) && pressed);
+
+    // Tamanho 150% e opacidade 100%: 90x90, a coluna a 108 de distância, cores do jogo.
+    g_hudSrc.scale = 150, g_hudSrc.opacity = 100;
+    CHECK(frame(false, -1, -1, false) == 3);
+    CHECK(draw(0, rect, &pressed, &colour, &layoutColour, &texture) && rect[2] == 90 && rect[0] == 19 && rect[1] == 243);
+    CHECK(layoutColour == 0xFFFFFFFFu && colour == (0xFFFFFFFFull | (1ull << 32)));
+    CHECK(draw(1, rect, &pressed, &colour, &layoutColour, &texture) && rect[1] == 243 + 108);
+
+    // Inventário aberto: nenhum (o toque valeria para os dois). Menu: só o "M". Sem botões: nada.
+    CHECK(frame(false, 64, 288, true) == 0 && g_hudSrc.taps.size() == 1);
+    CHECK(frame(true, -1, -1, false) == 1 && draw(0, rect, &pressed, &colour, &layoutColour, &texture));
+    g_hudSrc.count = 0;
+    CHECK(frame(false, -1, -1, false) == 0);
+    TLMod_SetHudSource(nullptr);
     return 0;
 }
 
@@ -1306,6 +1382,7 @@ int main(int argc, char** argv) {
     if (int rc = TestSaves(lib)) return rc;
     if (int rc = TestRecipes(lib)) return rc;
     if (int rc = TestSettings(lib)) return rc;
+    if (int rc = TestHud(lib)) return rc;
 
     std::printf("TODOS OS TESTES PASSARAM\n");
     return 0;

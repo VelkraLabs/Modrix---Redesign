@@ -252,6 +252,8 @@ Il2CppClass* Nested(Il2CppClass* outer, const char* name) {
 // ===========================================================================
 namespace bridge {
 
+bool VirtualControlsHooked() { return __atomic_load_n(&g_origVirtualControls, __ATOMIC_ACQUIRE) != nullptr; }
+
 void InstallScreenHooks() {
     const Il2CppImage* img = Image();
     Il2CppClass* gui = api.il2cpp_class_from_name(img, "", off::kGuiInstanceClass);
@@ -474,6 +476,7 @@ void TLMod_Hooked_GUIVirtualInputControllerDrawControls(Il2CppObject* self, cons
     if (drawx::ItemTexturesActive()) BeginTwo(SelectedItem(), GrappleItem(), &swaps);
     orig(self, method);
     EndTwo(swaps);
+    bridge::DrawHudButtons(false);  // os botões de mods, junto dos controles de toque
 }
 
 void TLMod_Hooked_GUIQuickActionButtonDraw(int32_t actionType, Il2CppObject* layout, bool pressed, float* scale,
@@ -498,6 +501,7 @@ void TLMod_Hooked_MainDrawInterfaceInteractItemIcon(Il2CppObject* self, const Me
     }
     orig(self, method);
     EndTwo(swaps);
+    bridge::DrawHudButtons(false);  // os botões de mods, junto dos controles de toque
 }
 
 bool TLMod_Hooked_ItemSnippetUniqueDraw(Il2CppObject* self, bool justCheckingString, TLModXnaVector2* size,

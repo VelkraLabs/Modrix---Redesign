@@ -79,7 +79,7 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
     "Receitas de mod".
 16. Aba **Mods** nas Configurações (`src/settings_tab.cpp`, `TLMod_SetSettingsTab`). As abas da tela
     (`GUISettingsOverlay.DrawCategories`, `0xA68C68`) são 8 `GUITransactionButton.Draw` fixos. O hook pós
-    desenha uma 9ª: uma cópia do layout da última aba, com a textura de um item (Caixa de Ferramentas, 1923)
+    desenha uma 9ª: uma cópia do layout da última aba, com a textura de um item (Chave Inglesa, 509)
     pelo overload `Draw(layout, Texture2D, ...)` (`0x1223F70`, `DrawItem`). Ela fica depois da última, no
     mesmo passo; se não couber na faixa, antes da primeira; senão as 9 são reespaçadas na faixa. O log
     registra a geometria. O toque chama `SetCategory(20)`, uma categoria fora do enum (0..19), que nenhuma
@@ -91,6 +91,18 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
     nosso título e `ResetPageSettings` ("Padrão") chama o reset da fonte. Um botão que pede para fechar
     marca o pedido, e o mesmo `DrawCategories` chama `GUISettingsOverlay.Close`. Voltar fecha, porque o
     jogo só sobe de nível nas categorias 3..19.
+17. Botões de mods na tela, desenhados pelo jogo (`src/hud_buttons.cpp`, `TLMod_SetHudSource`). Depois dos
+    controles de toque (hook em `GUIVirtualInputController.DrawControls`), cada botão é desenhado com uma
+    cópia do layout de uma aba das Configurações, pelo `GUITransactionButton.Draw(layout, Texture2D, ...)`,
+    com o ícone de um item. O tamanho vem de `overloadSize`/`overloadedSize`. A posição é o centro em
+    frações da tela, convertido para `Location` (âncora Screen/TopLeft) medindo a região em duas posições.
+    A opacidade multiplica as cores do layout (alfa pré-multiplicado). A camada "Virtual Controllers" é
+    desenhada antes de Opções, Fancy UI, Inventário e Hotbar (`Main.SetupDrawInterfaceLayers`), e o
+    `DrawControls` só roda sem tela do jogo aberta (`GUIVirtualInputController.InGameUIOpen`). Assim, os
+    menus do jogo ficam por cima e os botões somem com eles. Com o inventário aberto
+    (`Main.get_playerInventory`, `0xC67DD4`) os botões não são desenhados: as regiões de toque do
+    `GUIInputRegionManager` não têm ordem, e um toque valeria para os dois. No menu principal (hook do
+    `GUIMainMenu.Draw`) só aparecem os botões marcados `menu`, e nenhum com as Configurações abertas.
 
 ## Log
 

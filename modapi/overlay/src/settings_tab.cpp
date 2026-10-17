@@ -33,9 +33,8 @@ std::vector<SettingsRow> ModSettingsTab::Rows() const {
     std::vector<SettingsRow> rows(kRowCount);
     rows[kRowPosition].label = "Posição dos botões de mods";
     rows[kRowPosition].value = "Editar";
-    rows[kRowScale] = Slider("Tamanho dos botões de mods", b.scalePct, ButtonLayout::kScaleMin, ButtonLayout::kScaleMax);
-    rows[kRowOpacity] =
-        Slider("Opacidade dos botões de mods", b.opacityPct, ButtonLayout::kOpacityMin, ButtonLayout::kOpacityMax);
+    rows[kRowScale] = Slider("Tamanho", b.scalePct, ButtonLayout::kScaleMin, ButtonLayout::kScaleMax);
+    rows[kRowOpacity] = Slider("Opacidade", b.opacityPct, ButtonLayout::kOpacityMin, ButtonLayout::kOpacityMax);
     return rows;
 }
 

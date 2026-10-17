@@ -554,6 +554,7 @@ static void TestButtonLayout(const fs::path& mods, const fs::path& tmp) {
     overlay::ModSettingsTab tab(cfg, &panel);
     std::vector<SettingsRow> rows = tab.Rows();
     CHECK(rows.size() == 3 && rows[0].kind == SettingsRow::Kind::Button && rows[0].value == "Editar");
+    CHECK(rows[1].label == "Tamanho" && rows[2].label == "Opacidade");  // curtos: o valor vem logo depois
     CHECK(rows[1].kind == SettingsRow::Kind::Slider && rows[1].steps == 10 && rows[1].step == 5 && rows[1].value == "100%");
     CHECK(rows[2].kind == SettingsRow::Kind::Slider && rows[2].steps == 7 && rows[2].step == 7 && rows[2].value == "100%");
     tab.SetStep(1, 8);
@@ -598,6 +599,46 @@ static void TestButtonLayout(const fs::path& mods, const fs::path& tmp) {
     CHECK(panel.HandleAction("layout_edit", "") && panel.IsEditingLayout() && panel.OpenSurface() == Surface::None);
     CHECK(panel.HandleAction("workshop_open", "") && panel.IsWorkshopOpen() && !panel.IsEditingLayout());
     panel.HandleAction("workshop_close", "");
+
+    // Botões desenhados pelo jogo: o retrato que a ponte lê e os toques de volta.
+    CHECK(panel.Hud().buttons.size() == 1 && panel.Hud().buttons[0].id == overlay::kMenuButtonId &&
+          panel.Hud().buttons[0].menu && panel.Hud().buttons[0].iconItem == overlay::kMenuButtonItem);
+    game.inWorld = true;
+    bool native = false;
+    panel.SetNativeHud([&] { return native; });
+    panel.Tick(30);
+    overlay::HudSnapshot hud = panel.Hud();
+    CHECK(hud.buttons.size() == 2 && hud.buttons[1].id == "checklist" && !hud.buttons[1].menu &&
+          hud.buttons[1].iconItem == overlay::kLauncherIconItems[0] && !hud.buttons[1].place);
+    CHECK(!panel.NativeHud());
+    native = true;
+    CHECK(panel.Tick(40) && panel.NativeHud());
+    snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    CHECK(snap && *snap->Get("layout")->Get("native_hud")->AsBool());
+    CHECK(panel.MoveButton("checklist", 7000, 3000) && panel.Tick(50));
+    hud = panel.Hud();
+    CHECK(hud.buttons[1].place && (*hud.buttons[1].place == ButtonPlacement{7000, 3000}));
+    panel.HudTap("checklist");  // da thread do jogo
+    CHECK(panel.OpenSurface() == Surface::None && panel.Tick(60) && panel.OpenSurface() == Surface::Checklist);
+    CHECK(panel.Hud().buttons[1].active && !panel.Hud().buttons[0].active);
+    panel.HudTap(overlay::kMenuButtonId);
+    panel.Tick(70);
+    CHECK(panel.OpenSurface() == Surface::Log && panel.Hud().buttons[0].active);
+    std::thread tapper([&] { panel.HudTap(overlay::kMenuButtonId); });  // outra thread
+    tapper.join();
+    panel.Tick(80);
+    CHECK(panel.OpenSurface() == Surface::None);
+    // No modo de edição e com a Oficina aberta: nenhum botão do jogo (o renderizador mostra os dele).
+    panel.HandleAction("layout_edit", "");
+    CHECK(panel.Hud().buttons.empty());
+    panel.HandleAction("layout_done", "");
+    CHECK(panel.Hud().buttons.size() == 2);
+    panel.HandleAction("workshop_open", "");
+    CHECK(panel.Hud().buttons.empty());
+    panel.HandleAction("workshop_close", "");
+    cfg.SetButtonOpacity(50, &err);
+    panel.Tick(90);
+    CHECK(panel.Hud().opacityPct == 50);
 
     // "Padrão" da aba e sem overlay.
     tab.SetStep(1, 0);

@@ -288,7 +288,7 @@ typedef struct TLModSettingRow {
 typedef struct TLModSettingsTab {
     void* user;
     const char* title;  // título da página ("Mods"); copiado
-    int32_t iconItem;   // item cujo ícone vai na aba (1923 = Caixa de Ferramentas)
+    int32_t iconItem;   // item cujo ícone vai na aba (ex.: 509 = Chave Inglesa)
     int32_t (*count)(void* user);  // linhas (no máximo TLMOD_SETTINGS_MAX_ROWS)
     // Strings de `out` valem até a próxima chamada.
     bool (*row)(void* user, int32_t index, TLModSettingRow* out);
@@ -302,6 +302,41 @@ typedef struct TLModSettingsTab {
 void TLMod_SetSettingsTab(const TLModSettingsTab* tab);
 // As peças do jogo resolveram e os hooks entraram (a aba vai aparecer se houver fonte).
 bool TLMod_SettingsTabAvailable(void);
+
+// Botões de mods na tela, desenhados pelo próprio jogo (hud_buttons.cpp): o
+// botão do jogo (a moldura das abas das Configurações) com o ícone de um item,
+// junto dos controles de toque (GUIVirtualInputController.DrawControls). O jogo
+// só desenha os controles sem nenhuma tela dele aberta (pausa, Configurações,
+// Bestiário, mapa...), e as telas dele vêm depois: elas ficam por cima e os
+// botões somem com elas. Com o inventário aberto os botões não são desenhados
+// (as regiões de toque do jogo não têm camadas: o toque valeria para os dois).
+// No menu principal, só os botões marcados `menu`. O toque passa pelo
+// GUITransactionButton (região de toque, som e animação como os do jogo).
+typedef struct TLModHudButton {
+    const char* id;    // "menu", "checklist", "mod:<id>": volta em tap
+    int32_t iconItem;  // item cujo ícone vai no botão (0 = sem ícone)
+    bool active;       // a tela do botão está aberta: desenhado apertado
+    bool menu;         // também no menu principal
+    bool placed;       // x/y valem; senão, coluna abaixo do primeiro botão
+    int32_t x, y;      // centro, em décimos de milésimo da tela (0..10000)
+} TLModHudButton;
+typedef struct TLModHudLayout {
+    int32_t scalePct;    // tamanho, em % do botão do jogo
+    int32_t opacityPct;  // opacidade
+} TLModHudLayout;
+typedef struct TLModHudSource {
+    void* user;
+    // Quantos botões (-1 ou 0 = nenhum agora, ex.: modo de edição) e o layout.
+    // Os ids de button() valem até a próxima chamada de snapshot.
+    int32_t (*snapshot)(void* user, TLModHudLayout* layout);
+    bool (*button)(void* user, int32_t index, TLModHudButton* out);
+    void (*tap)(void* user, const char* id);  // botão tocado
+} TLModHudSource;
+// Tudo na thread do jogo, dentro do desenho. A fonte é copiada; nulo desliga.
+void TLMod_SetHudSource(const TLModHudSource* source);
+// As peças do jogo resolveram e o desenho não falhou: os botões aparecem pelo jogo.
+// Se ficar false, o overlay volta a mostrar os botões Android.
+bool TLMod_HudAvailable(void);
 
 // Só na thread do jogo (ex.: dentro do TLModFrameCallback): 1 = menu,
 // 0 = dentro de um mundo, -1 = indisponível. Lê LocalUserGameState.Instance
