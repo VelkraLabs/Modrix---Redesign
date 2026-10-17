@@ -1,30 +1,34 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**12ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**13ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-Oficina de Mods, depois das capturas da 11ª versão (o toque nas linhas já funciona):
+Oficina de Mods, depois das capturas da 12ª versão:
 
-- **Título dos detalhes.** Um nome comprido, como "Exemplo: Titã de Brasa (esqueleto de boss)",
-  quebrava em duas linhas e saía por cima do painel. Agora ele é cortado com "..." para caber no
-  quadro do título, como a lista já faz. O nome inteiro continua na primeira linha do texto.
+- **Título dos detalhes, de novo.** O corte com "..." da 12ª versão não funcionou: ele media o nome
+  com a fonte do texto comum, menor que a do título, e o nome parecia caber. Agora a medida é a do
+  próprio botão de título do jogo (a fonte dele e a escala dele). Quando corta, o `tlmod.log` ganha
+  uma linha "Oficina: título cortado para ...".
+- **Ícone de mod desativado.** Mod desativado não registra conteúdo, então o Titã de Brasa aparecia
+  com o Livro. Agora o ícone segue o que o manifest declara: mod de NPC fica com o Olho de Aparência
+  Suspeita mesmo desativado.
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 425176 bytes, `ee066df7de128a88…` | 426552 bytes, `82c379282b5b266f…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 426552 bytes, `82c379282b5b266f…` | 427128 bytes, `e7de3c7a4c91df0a…` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 937248 bytes, `c3a01e8929d4dacc…` | 937264 bytes, `8f5ecb056839228b…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
-Todo o resto é idêntico, byte a byte, ao pacote anterior: o runtime, as `.so` dos 4 mods,
-os manifestos, as texturas, os marcadores e o `tlmod_config.json`.
+Todo o resto é idêntico, byte a byte, ao pacote anterior: as `.so` dos 4 mods, os manifestos,
+as texturas, os marcadores e o `tlmod_config.json`.
 
-**Para atualizar o aparelho:** troque só a `libtlmod_bridge.so` no seu carregador; a
-`libtlmod_runtime.so` é a mesma da 10ª versão.
+**Para atualizar o aparelho:** troque as duas `.so` no seu carregador.
 A pasta `tlmod/` que já está no aparelho pode ficar como está.
 
 ## Conteúdo
@@ -62,7 +66,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `caa5235` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `9f07666` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -214,6 +218,7 @@ dependem do jogo real.
 - [ ] Com mais mods do que cabem, arrastar a lista rola e para numa linha inteira
 - [ ] Nos detalhes, o texto não passa por cima de Voltar/Desativar; texto longo rola ao arrastar
 - [ ] Nos detalhes do "Titã de Brasa", o título fica numa linha só, dentro do quadro, terminando em "..."
+- [ ] Com o Titã de Brasa desativado, a linha dele continua com o Olho de Aparência Suspeita
 - [ ] Desativar/Ativar muda o estado para "Será desativado"/"Será ativado" (amarelo); reabrindo o
       jogo, o mod aparece Desativado (cinza), com o Livro no lugar do ícone, e volta ao religar
 - [ ] Um mod com erro (ex.: apague a `.so` de um mod) mostra "Erro" em vermelho, e os detalhes
@@ -277,8 +282,8 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 426552 | `82c379282b5b266f1d2ffb1a5fcdaeb8d8c7d84e330b4702cd80c630b7c9b6aa` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 937248 | `c3a01e8929d4dacc54650414a81ca5842fb41939e1190f27eecd467cf0d16f4c` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 427128 | `e7de3c7a4c91df0a3eb60a68f6d46e89a48acea9dee038f22f8568f59cdcc86b` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 937264 | `8f5ecb056839228b166b21563ce54f41927a737245343a498a7f57e14c23c013` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
 | `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490840 | `931a7f67bec83deb9fa80e256b0ac61fca0194e7e95c75bce815f34d5c9ec8a8` |
