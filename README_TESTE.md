@@ -1,43 +1,55 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**18ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**19ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-**Aba "Mods" nas Configurações do jogo**, para os botões que os mods põem na tela (o "M", a prancheta
-do Boss Checklist e a chave inglesa das Ferramentas):
+**Os botões de mods agora são desenhados pelo próprio Terraria.** Antes eles eram uma camada do
+Android colada por cima do jogo: ficavam na frente da pausa, das Configurações e do inventário, e
+pegavam o toque antes do jogo. Agora:
 
-- Em **Configurações** (no menu principal ou no jogo) aparece uma **9ª aba**, depois das do jogo,
-  com o ícone da **Caixa de Ferramentas**. As linhas são as do próprio jogo:
-  - **Posição dos botões de mods — Editar**: fecha as Configurações e abre o **modo de edição**:
-    o "M" e todos os ícones aparecem (mesmo no menu principal), com um anel tracejado, sobre um fundo
-    escurecido. **Arraste** cada um para onde quiser. A barra no topo tem **Padrão** (volta tudo ao
-    lugar) e **Concluir**;
-  - **Tamanho dos botões de mods**: barra de 50% a 150%;
-  - **Opacidade dos botões de mods**: barra de 30% a 100%.
-  - O botão **Padrão** da tela, com a aba Mods aberta, volta tamanho, opacidade e posições ao normal.
-- Tudo fica salvo no `tlmod_config.json` (parte `buttons`) e vale na hora, sem reiniciar.
-- **Mudou:** fora do modo de edição, o "M" e os ícones **não se arrastam mais**, só respondem ao
-  toque. Para mudar de lugar, use Configurações > Mods > Editar.
-- Um ícone que você não moveu fica na coluna abaixo do "M" e acompanha o "M".
-- Correção: o desenho da chave inglesa tinha um cantinho escuro saindo do círculo.
+- Cada botão é um **botão do jogo** (a mesma moldura quadrada das abas das Configurações) com o ícone
+  de um item:
+  - **Livro**: o Log (o antigo "M");
+  - **Olho de Aparência Suspeita**: o Boss Checklist;
+  - **Chave Inglesa Multicolorida**: as Ferramentas.
+- Eles são desenhados junto dos **controles de toque**. As telas do jogo ficam **por cima** e os
+  botões **somem** com elas, como os controles de toque: pausa e Configurações, Bestiário,
+  Conquistas, mapa em tela cheia.
+- **Com o inventário aberto, os botões não aparecem.** No jogo, um toque vale para todos os botões que
+  estão embaixo do dedo. Se o inventário ficasse por cima de um botão nosso, o toque valeria para os
+  dois.
+- O toque passa pelo jogo (som e animação de botão do jogo). A tela que o botão abre (Log, gaveta,
+  modal) continua igual por enquanto.
+- No **menu principal** aparece só o do Log, e nenhum com as Configurações abertas.
+- **Modo de edição** (Configurações > Mods > Editar): continua igual. Os botões aparecem para arrastar
+  e, ao tocar em **Concluir**, a posição de **todos** fica salva. Os botões do jogo usam exatamente
+  essas posições, e as que você já tinha salvo continuam valendo.
+- **Tamanho** (50% a 150% do botão do jogo) e **Opacidade** continuam na aba Mods.
 
-O que a 16ª (receitas) e a 17ª (novo overlay) trouxeram continua no pacote. A lista do que conferir
-está mais abaixo.
+**Aba Mods:** o ícone agora é a **Chave Inglesa** (o da Caixa de Ferramentas é escuro e sumia no azul).
+As barras se chamam só **Tamanho** e **Opacidade**: o jogo desenha o valor logo depois do título, e o
+título comprido ficava embaixo do "100%".
+
+**Se o jogo não conseguir desenhar os botões** (o log da ponte diz por quê), o overlay volta a
+mostrar os botões antigos, por cima de tudo.
+
+O que a 16ª (receitas), a 17ª (novo overlay) e a 18ª (aba Mods) trouxeram continua no pacote. A lista
+do que conferir está mais abaixo.
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 435888 bytes, `a6557071e12c6d4d…` | 461664 bytes, `3a2898df22160216…` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 959080 bytes, `26dd0947edbe713e…` | 986048 bytes, `eea8ab19b40fb5b5…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 461664 bytes, `3a2898df22160216…` | 470376 bytes, `2abe023313cb4e7b…` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 986048 bytes, `eea8ab19b40fb5b5…` | 995712 bytes, `09602b6327dc6479…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
 Todo o resto é idêntico, byte a byte, ao pacote anterior: as `.so` dos 4 mods, os manifestos,
-as texturas, os marcadores e o `tlmod_config.json` (a parte `buttons` é criada quando você mexe na aba Mods).
+as texturas, os marcadores e o `tlmod_config.json`.
 
 **Para atualizar o aparelho:** troque as duas `.so` no seu carregador (`libtlmod_bridge.so` e
 `libtlmod_runtime.so`). A pasta `tlmod/` pode ficar como está.
@@ -58,8 +70,8 @@ tlmod-teste/
         │   └── give_on_start       marcador: 3 rubis ao entrar num mundo
         ├── example_boss/           Titã de Brasa (boss de mod)
         │   └── spawn_on_start      marcador: invoca o boss ao entrar num mundo
-        ├── boss_checklist/         lista de bosses derrotados (gaveta da prancheta)
-        └── devtools/               Ferramentas (chave inglesa): hora, itens, invocar, curar (só para testes)
+        ├── boss_checklist/         lista de bosses derrotados (gaveta do Olho)
+        └── devtools/               Ferramentas (Chave Inglesa Multicolorida): hora, itens, invocar, curar (só para testes)
 ```
 
 ## Versão do jogo
@@ -77,7 +89,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `021fa57` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `14484eb` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -150,15 +162,15 @@ Acompanhe pelo logcat: `adb logcat -s TLMod TLModBridge`.
      `catálogo de nomes pronto: 5456 itens, 688 NPCs`.
    - `Rubi Fictício registrado com ID ...`, `give_on_start: 3 Rubis Fictícios ao entrar num mundo`,
      `Titã de Brasa registrado com ID ...` e `spawn_on_start: Titã de Brasa ao entrar num mundo`.
-2. **Botão "M" e ícones.** Um botão redondo com **"M"** no canto superior esquerdo, um pouco abaixo
-   do topo. Ele aparece no menu e no mundo (para mudar de lugar: Configurações > Mods > Editar). O toque abre o **Log**: o caminho do
-   `tlmod.log` e as últimas 150 linhas (erros em vermelho, avisos em amarelo), atualizadas a cada
-   segundo e acompanhando o fim, desde o início do jogo (inclui as linhas da ponte, `[ponte]`).
-   Dentro de um mundo, abaixo do "M", ficam dois ícones:
-   - **prancheta**: a gaveta do **Boss Checklist** (desliza da esquerda), com bosses, minibosses e
-     eventos (derrotado ou pendente) e o próximo boss pendente;
-   - **chave inglesa**: o modal **Ferramentas**, com a hora atual do mundo e os botões de hora,
-     jogador, invocar e dar item (veja a seção abaixo).
+2. **Botões de mods.** Um botão do jogo com o ícone de um **Livro**, no canto esquerdo, um pouco
+   abaixo do topo. Ele aparece no menu e no mundo (para mudar de lugar: Configurações > Mods > Editar).
+   O toque abre o **Log**: o caminho do `tlmod.log` e as últimas 150 linhas (erros em vermelho,
+   avisos em amarelo), atualizadas a cada segundo e acompanhando o fim, desde o início do jogo
+   (inclui as linhas da ponte, `[ponte]`). Dentro de um mundo, abaixo dele, ficam mais dois:
+   - **Olho de Aparência Suspeita**: a gaveta do **Boss Checklist** (desliza da esquerda), com
+     bosses, minibosses e eventos (derrotado ou pendente) e o próximo boss pendente;
+   - **Chave Inglesa Multicolorida**: o modal **Ferramentas**, com a hora atual do mundo e os botões
+     de hora, jogador, invocar e dar item (veja a seção abaixo).
    Os mods se ligam e desligam pela **Oficina de Mods** (botão **Mods** do menu principal).
 3. **Os 3 rubis.** No primeiro frame dentro do mundo chegam **3 Rubis Fictícios** ao
    inventário (empilhados num slot). Eles têm o ícone vermelho do mod, o nome "Rubi Fictício" e o
@@ -176,7 +188,7 @@ o mod na Oficina de Mods.
 
 ## Testes rápidos com as Ferramentas
 
-Com o modal Ferramentas (chave inglesa), quase toda a checklist abaixo pode ser feita sem esperar o jogo:
+Com o modal Ferramentas (botão da Chave Inglesa Multicolorida), quase toda a checklist abaixo pode ser feita sem esperar o jogo:
 
 - **Noite para o Titã:** toque em Meia-noite e depois em Congelar hora.
 - **Boss:** em Invocar, toque em Titã de Brasa (ou num dos 16 bosses). Ele nasce perto de você.
@@ -203,13 +215,28 @@ dependem do jogo real.
 - [ ] Todos os hooks aparecem como `instalado`, sem aviso de RVA ou offset divergente
 - [ ] O jogo abre e chega ao menu sem travar nem fechar
 
-**Aba Mods nas Configurações (novo)**
+**Botões de mods desenhados pelo jogo (novo)**
+- [ ] O log da ponte tem `botões de mods: desenhados pelo jogo` e, no primeiro frame,
+      `botões de mods: tela ...; botão do jogo ...` e uma linha `botões de mods: <id> em (x, y) LxA` por
+      botão. Se aparecer `botões pelo overlay`, os botões antigos voltam: **me mande o log**
+- [ ] Os botões têm a moldura quadrada do jogo, com o Livro, o Olho e a Chave Inglesa Multicolorida
+- [ ] Abrir a pausa, as Configurações, o Bestiário, as Conquistas ou o mapa em tela cheia: os botões
+      somem (como os controles de toque) e o toque não chega mais neles
+- [ ] Abrir o inventário: os botões somem; fechar: eles voltam
+- [ ] Tocar num botão toca o som do jogo e abre o Log, a gaveta ou o modal (pode levar até 0,1 s)
+- [ ] Com a tela aberta, o botão dela fica "apertado"
+- [ ] Tamanho e Opacidade (aba Mods) mudam os botões do jogo
+- [ ] Modo de edição: os botões (do overlay) aparecem onde estavam os do jogo; depois de mover e
+      Concluir, os do jogo vão para o mesmo lugar
+- [ ] No menu principal só aparece o do Log, e ele some com as Configurações abertas
+
+**Aba Mods nas Configurações**
 - [ ] O log da ponte tem `Configurações: aba Mods pronta` e, ao abrir as Configurações,
       `Configurações: tela ...; faixa das abas ...; abas: ...` e `aba Mods depois de ...` (ou `antes de`,
       ou `9 abas reespaçadas`). **Me mande essas linhas** se a aba ficar fora do lugar
-- [ ] A 9ª aba aparece junto das outras, com o ícone da Caixa de Ferramentas, e não cobre nada
+- [ ] A 9ª aba aparece junto das outras, com o ícone da Chave Inglesa, e não cobre nada
 - [ ] Tocar nela abre a página com o título "Mods" e três linhas: Posição (botão Editar), Tamanho e
-      Opacidade (barras); nenhuma aba do jogo fica marcada
+      Opacidade (barras, sem o valor por cima do título); nenhuma aba do jogo fica marcada
 - [ ] Tocar numa aba do jogo volta para ela normalmente; o Padrão das abas do jogo continua funcionando
 - [ ] As barras se movem de 10 em 10% e mostram o valor; o tamanho e a opacidade dos botões mudam
       (dá para ver ao fechar as Configurações)
@@ -219,15 +246,13 @@ dependem do jogo real.
 - [ ] Voltar, com a aba Mods aberta, fecha as Configurações
 - [ ] Fora do modo de edição, os botões não se arrastam e o toque abre o Log, a gaveta e o modal
 
-**Ícones, gaveta e modal**
-- [ ] No menu principal só aparece o "M"; ao entrar num mundo, surgem a prancheta e a chave inglesa
-      abaixo dele
-- [ ] O "M" abre só o Log (sem abas)
-- [ ] A prancheta abre a gaveta do Boss Checklist deslizando da esquerda para a direita; tocar no
-      fundo escurecido, no ✕ ou na prancheta de novo fecha (deslizando de volta)
-- [ ] A chave inglesa abre o modal Ferramentas no centro; o fundo escurecido, o ✕ ou a chave fecham
+**Gaveta e modal**
+- [ ] O Livro abre só o Log (sem abas)
+- [ ] O Olho abre a gaveta do Boss Checklist deslizando da esquerda para a direita; tocar no fundo
+      escurecido, no ✕ ou no Olho de novo fecha (deslizando de volta)
+- [ ] A Chave Inglesa Multicolorida abre o modal Ferramentas no centro; o fundo escurecido, o ✕ ou o
+      botão fecham
 - [ ] Abrir um fecha o outro (só uma tela por vez); voltar ao menu fecha o que estiver aberto
-- [ ] Os ícones têm o desenho certo (prancheta com marcas de "feito" e chave inglesa)
 
 **Ferramentas (tlmod.devtools)**
 - [ ] Hora: os 4 botões mudam a hora, e a nota "Agora: ..." acompanha; Congelar segura a hora
@@ -241,7 +266,7 @@ dependem do jogo real.
       (com loot), sem matar NPCs da cidade
 - [ ] A resposta (ex.: "10x Lente entregue (o que não couber cai no chão)") aparece no topo do modal e
       some depois de alguns segundos
-- [ ] Desligar o devtools na Oficina de Mods tira a chave inglesa na abertura seguinte
+- [ ] Desligar o devtools na Oficina de Mods tira o botão das Ferramentas na abertura seguinte
 
 **Receitas de mod**
 - [ ] O `tlmod.log` tem `receitas: ... 2 de mods` e as duas linhas `receita tlmod.example_item: ... na posição N`
@@ -290,7 +315,7 @@ dependem do jogo real.
 - [ ] Se um mod falhar, o erro aparece inteiro nos detalhes da Oficina de Mods e no `tlmod.log`, sem reticências
 
 **Painel**
-- [ ] O botão "M" aparece por cima do jogo (OpenGL ES ou Vulkan)
+- [ ] O painel do Log aparece por cima do jogo (OpenGL ES ou Vulkan)
 - [ ] Toques fora do painel continuam indo para o jogo; toques no painel não vazam
 - [ ] O Log rola, acompanha linhas novas e deixa selecionar e copiar o texto
 - [ ] Os acentos aparecem certos (Titã, Fictício)
@@ -333,8 +358,8 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 461664 | `3a2898df221602166ae70f686c4b14a1c79581f289399298ae46b520892fa8c7` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 986048 | `eea8ab19b40fb5b55aca270b60b17b65ee38b22b84cc360d9eba6b9d9e3b3270` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 470376 | `2abe023313cb4e7bd6a55e6f145200bbe2cd6225356c6399787a9ce6a31df243` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 995712 | `09602b6327dc6479fb27f4e1a9f2d58578e3c5396043b2cb5f8ebe7fec0a223b` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
 | `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490872 | `92fdc9e524e203021e221e3e12d71422a8a75381f134ddfc926b7a64cb9e5d9c` |
