@@ -1665,6 +1665,7 @@ void InitWorkshop() {
         At<float>(part, 0x24) = 50.0f;
         At<Il2CppObject*>(g_wsLayout, off) = part;
     }
+    At<int32_t>(WsPart(0x28), 0x38) = 120;  // Title (StringButton_Layout): TextInset, 160 para o texto
     Il2CppObject* grid = WsPart(0x20);  // WorldGrid: 1ª linha em (0, 0) + âncora, 10 entre as linhas
     At<float>(grid, 0x30) = 0.0f;
     At<float>(grid, 0x34) = 10.0f;

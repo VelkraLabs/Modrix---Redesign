@@ -70,6 +70,7 @@ FIELD_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "panel_layout_off": ("", "Panel_Layout", "instance"),
     "item_grid_layout_off": ("", "ItemGrid_Layout", "instance"),
     "string_layout_off": ("", "String_Layout", "instance"),
+    "string_button_layout_off": ("", "StringButton_Layout", "instance"),
     "gui_crafting_off": ("", "GUICrafting", "instance"),
     "gui_craft_guide_popup_off": ("", "GUICraftGuidePopup", "instance"),
     "recipe_off": ("Terraria", "Recipe", "instance"),

@@ -378,10 +378,19 @@ constexpr size_t AnchorControl = 0x10;          // 2 = GridItem (a região de Co
 constexpr size_t Anchor = 0x14;
 constexpr size_t Location = 0x18;
 constexpr size_t Alignment = 0x24;              // LayoutCalculator.AnchorType (9 = TopLeft)
+constexpr size_t Scale = 0x28;                  // float
+constexpr size_t RenderFont = 0x2C;             // FontType: 0 MouseText, 1 DeathText (como no StringButton_Layout)
 constexpr size_t MultiLineUseAlignment = 0x30;  // bool: quebra em WrapWidth (GUIString.ApplyMultiLineAlignment)
 constexpr size_t WrapWidth = 0x34;              // float
 constexpr size_t MaxLines = 0x38;               // int
 }  // namespace string_layout_off
+// StringButton_Layout: o título da tela (quebra a linha se o texto passar da largura).
+namespace string_button_layout_off {
+constexpr size_t Size = 0x20;        // Vector2
+constexpr size_t TextInset = 0x38;   // int, de cada lado
+constexpr size_t Scale = 0x60;       // float
+constexpr size_t RenderFont = 0xC0;  // FontType
+}  // namespace string_button_layout_off
 
 // Button_Layout (base de TransactionButton_Layout): onde o botão fica na tela.
 namespace button_layout_off {

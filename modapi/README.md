@@ -415,7 +415,9 @@ do próprio jogo montada com as peças da seleção de mundos (`il2cpp_bridge/sr
 - **Detalhes.** Tocar numa linha abre o texto completo do mod (versão, autores, descrição, conteúdo,
   estado e, se falhou, o erro inteiro), com Voltar e o botão "Novo" da tela de mundos virado em
   **Ativar/Desativar**. O texto é quebrado pelo próprio jogo (`GUIString.ApplyMultiLineAlignment`) e
-  desenhado linha a linha na área da lista, com rolagem; nunca passa por cima dos botões. O voltar do
+  desenhado linha a linha na área da lista, com rolagem; nunca passa por cima dos botões. Um nome
+  que não cabe no título (o botão de título do jogo quebraria a linha por cima do painel) é cortado
+  com "..."; o nome inteiro fica na 1ª linha do texto. O voltar do
   Android (Escape) volta uma página.
 - Ligar ou desligar vale na próxima abertura do jogo: uma `.so` carregada não é descarregada.
 

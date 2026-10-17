@@ -244,7 +244,7 @@ struct WsMod {
     bool enabled;
 };
 WsMod g_wsMods[] = {{"Boss Checklist", "v0.1.0", true}, {"Exemplo: Rubi", "v0.1.0", true}, {"Gemas", "v0.2.0", true},
-                    {"Mod 4", "v1.0.0", true},          {"Mod 5", "v1.0.0", true},         {"Mod 6", "v1.0.0", true}};
+                    {"Mod 4", "v1.0.0", true},          {"Mod 5", "v1.0.0", true},         {"Mod 6 de nome comprido", "v1.0.0", true}};
 // Ícones: Lente (original), item de mod com textura, de mod sem textura, nenhum; o resto Lente.
 int32_t DrawItemTexture(Il2CppObject*, int32_t netId);
 const int32_t kWsIcons[] = {kShell, kModItem, kModItem + 1, 0, kShell, kShell};
@@ -308,7 +308,7 @@ int TestWorkshop(void* lib) {
     CHECK(TLMod_WorkshopOpen() && !has(f, "menu"));
     CHECK(has(f, "titulo:Oficina de Mods") && has(f, "botao:voltar:Voltar") && f.find("botao:novo") == std::string::npos);
     CHECK(has(f, "nome:Boss Checklist") && has(f, "nome:Exemplo: Rubi") && has(f, "nome:Gemas") && has(f, "nome:Mod 4"));
-    CHECK(!has(f, "nome:Mod 5") && !has(f, "nome:Mod 6"));
+    CHECK(!has(f, "nome:Mod 5") && !has(f, "nome:Mod 6 de nome comprido"));
     // Estado no modo (Color do jogo: bytes A, B, G, R), versão no tamanho, resumo no tempo.
     CHECK(has(f, "modo:Ativo#82e178ff") && has(f, "modo:Erro#ff6e6eff"));
     CHECK(has(f, "tamanho:v0.2.0") && has(f, "tempo:1 item") && has(f, "tempo:por TLMod"));
@@ -322,8 +322,17 @@ int TestWorkshop(void* lib) {
     frame(300, 180, true);
     frame(300, 180, false);
     f = frame(0, 0, false);
-    CHECK(has(f, "titulo:Oficina de Mods") && has(f, "nome:Mod 6") && has(f, "nome:Gemas") &&
+    CHECK(has(f, "titulo:Oficina de Mods") && has(f, "nome:Mod 6 de nome comprido") && has(f, "nome:Gemas") &&
           !has(f, "nome:Boss Checklist") && !has(f, "nome:Exemplo: Rubi"));
+    // Nome que não cabe no título (o do mock: 160 de largura, 10 por caractere): cortado
+    // com "..."; o texto de detalhes traz o nome inteiro.
+    frame(300, 300, true);
+    frame(300, 300, false);
+    f = frame(0, 0, false);
+    CHECK(has(f, "titulo:Mod 6 de nome...") && has(f, "texto@106:Mod 6 de nome comprido com uma descrição"));
+    frame(0, 0, false, false, 1);
+    f = frame(0, 0, false);
+    CHECK(has(f, "titulo:Oficina de Mods") && has(f, "nome:Mod 6 de nome comprido"));
     // E de volta (puxar para baixo além do topo para no começo).
     frame(300, 120, true);
     frame(300, 360, true);

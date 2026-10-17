@@ -37,6 +37,7 @@ namespace {
 namespace off = terraria;
 namespace ws = terraria::world_select_layout_off;
 namespace sl = terraria::string_layout_off;
+namespace sb = terraria::string_button_layout_off;
 
 struct NullableMatrix {  // Nullable<Matrix>: 16 floats + hasValue
     float m[16];
@@ -162,10 +163,12 @@ std::vector<uint32_t> g_detailLines;
 int32_t g_detailFor = -1;
 uint64_t g_detailRevision = ~0ull;
 float g_lineHeight = 0;
+uint32_t g_detailTitle = 0;  // nome cortado com "..." se não cabe no título (0 = o nome inteiro)
 
 struct Handles {
     uint32_t line = 0;  // String_Layout de uma linha: cópia do nome da linha de mundo, no canto do GridItem
     uint32_t wrap = 0;  // a mesma, com quebra (só para ApplyMultiLineAlignment)
+    uint32_t measure = 0;  // a mesma, com a fonte e a escala do título (só para medir)
     uint32_t title = 0, back = 0, empty = 0, probe1 = 0, probe2 = 0;
 };
 Handles h;
@@ -307,9 +310,15 @@ bool EnsureObjects(Il2CppObject* layout) {
     if (h.line) return true;
     Il2CppObject* line = NewTextLayout(layout, false);
     Il2CppObject* wrap = NewTextLayout(layout, true);
-    if (!line || !wrap) return false;
+    Il2CppObject* measure = NewTextLayout(layout, false);
+    if (!line || !wrap || !measure) return false;
+    if (Il2CppObject* title = Part(layout, ws::Title)) {
+        if (FieldAt<float>(title, sb::Scale) > 0) FieldAt<float>(measure, sl::Scale) = FieldAt<float>(title, sb::Scale);
+        FieldAt<int32_t>(measure, sl::RenderFont) = FieldAt<int32_t>(title, sb::RenderFont);
+    }
     h.line = Pin(line);
     h.wrap = Pin(wrap);
+    h.measure = Pin(measure);
     h.title = PinString("Oficina de Mods");
     h.back = PinString("Voltar");
     h.empty = PinString("Nenhum mod instalado");
@@ -468,12 +477,38 @@ void DrawList(Il2CppObject* layout) {
     }
 }
 
+// O título dos detalhes é o nome do mod. O botão de título do jogo quebra a linha se o
+// texto passa da largura, e a 2ª linha sai por cima do painel: um nome comprido é
+// cortado (por caractere) e ganha "...". Devolve 0 se o nome inteiro cabe.
+uint32_t FitTitle(Il2CppObject* title, uint32_t name) {
+    Il2CppObject* measure = Target(h.measure);
+    Il2CppObject* full = Target(name);
+    if (!title || !measure || !full) return 0;
+    const float limit =
+        FieldAt<float>(title, sb::Size) - 2.0f * static_cast<float>(FieldAt<int32_t>(title, sb::TextInset));
+    auto fits = [&](Il2CppObject* s) {
+        return static_cast<float>(Ptr<StringRegionFn>(r.stringRegion)(measure, s, r.stringRegion).width) <= limit;
+    };
+    if (limit <= 0 || fits(full)) return 0;
+    std::string text = bridge::Utf8String(full);
+    while (!text.empty()) {
+        while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0) == 0x80) text.pop_back();
+        if (!text.empty()) text.pop_back();  // o 1º byte do caractere
+        while (!text.empty() && text.back() == ' ') text.pop_back();
+        Il2CppObject* candidate = api.il2cpp_string_new((text + "...").c_str());
+        if (candidate && fits(candidate)) return Pin(candidate);
+    }
+    return 0;
+}
+
 // Quebra o texto do mod na largura da área (pelo jogo) e guarda uma string por linha.
-void PrepareDetail(const Row& row, float width) {
+void PrepareDetail(Il2CppObject* layout, const Row& row, float width) {
     if (g_detailFor == g_detail && g_detailRevision == g_revision) return;
     g_detailFor = g_detail;
     g_detailRevision = g_revision;
     Retire(g_detailLines);
+    if (g_detailTitle) g_oldHandles.push_back(g_detailTitle);
+    g_detailTitle = FitTitle(Part(layout, ws::Title), row.name);
     Il2CppObject* wrap = Target(h.wrap);
     FieldAt<float>(wrap, sl::WrapWidth) = width;
     int32_t count = 0;
@@ -502,11 +537,11 @@ void DrawDetail(Il2CppObject* layout) {
         return;
     }
     const Row& row = g_rows[static_cast<size_t>(g_detail)];
-    Title(Part(layout, ws::Title), row.name);
     const ListArea a = Area(layout);
     const TLModXnaRectangle area{a.rect.x + kPad, a.rect.y + kPad / 2, std::max(0, a.rect.width - 2 * kPad),
                                  std::max(0, a.rect.height - kPad)};
-    PrepareDetail(row, static_cast<float>(area.width));
+    PrepareDetail(layout, row, static_cast<float>(area.width));
+    Title(Part(layout, ws::Title), g_detailTitle ? g_detailTitle : row.name);
     const int visible = std::max(1, static_cast<int>(static_cast<float>(area.height) / g_lineHeight));
     const int lines = static_cast<int>(g_detailLines.size());
     const float maxScroll = static_cast<float>(std::max(0, lines - visible)) * g_lineHeight;
