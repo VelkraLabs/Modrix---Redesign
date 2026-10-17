@@ -1,37 +1,38 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**10ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**11ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-Oficina de Mods, depois do teste da 9ª versão:
+Oficina de Mods: tocar nas linhas não fazia nada (10ª versão).
 
-- **Toque na linha inteira.** Para abrir os detalhes era preciso tocar num ponto à esquerda do
-  nome. O toque era lido em pixels da tela (1600x720), mas as linhas são posicionadas no espaço da
-  interface do jogo (cerca de 969x454 no seu aparelho). Só a parte da esquerda coincidia. Agora o
-  toque vem do cursor da interface do próprio jogo, no mesmo espaço das linhas.
-- **Ícone do mod.** Cada linha tem a moldura de imagem da linha de mundo, com o ícone do primeiro
-  item que o mod adiciona (a mesma textura do inventário, ex.: o Rubi). Sem item, um item do jogo:
-  o Olho de Aparência Suspeita para mods de NPC e o Livro para os demais, inclusive os desativados
-  ou com erro.
-- Os três primeiros toques na Oficina vão para o `tlmod.log`, numa linha "Oficina: toque em ...",
-  com as duas coordenadas. Se ainda houver toque fora do lugar, ela mostra a causa.
+- **A causa.** O seu log mostrou que os toques nas linhas nem chegavam à Oficina: os únicos
+  registrados foram no botão Voltar. No Terraria Mobile, um toque só vale para a interface se cair
+  numa área que a tela registrou no jogo, e cada botão registra a sua quando é desenhado. A lista
+  da Oficina não registrava a dela. A explicação da 10ª versão (escala da tela) estava errada: o
+  log mostrou as duas coordenadas iguais.
+- **A correção.** A área da lista e a do texto de detalhes agora são registradas a cada quadro,
+  do mesmo jeito que os botões do jogo. Tocar em qualquer ponto de uma linha abre os detalhes, e
+  arrastar rola a lista e o texto.
+- O ícone de cada mod continua como na 10ª versão.
+- Os cinco primeiros toques na Oficina vão para o `tlmod.log` ("Oficina: toque em ..."), agora
+  dizendo se o toque caiu dentro ou fora da área da lista.
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 421984 bytes, `857e4503ac12edbf…` | 424512 bytes, `4ee8fb231f5547c9…` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 936848 bytes, `649d519652e6fa27…` | 937248 bytes, `c3a01e8929d4dacc…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 424512 bytes, `4ee8fb231f5547c9…` | 425176 bytes, `ee066df7de128a88…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
-Todo o resto é idêntico, byte a byte, ao pacote anterior: as `.so` dos 4 mods, os manifestos,
-as texturas, os marcadores e o `tlmod_config.json`.
+Todo o resto é idêntico, byte a byte, ao pacote anterior: o runtime, as `.so` dos 4 mods,
+os manifestos, as texturas, os marcadores e o `tlmod_config.json`.
 
-**Para atualizar o aparelho:** troque as duas `.so` no seu carregador.
+**Para atualizar o aparelho:** troque só a `libtlmod_bridge.so` no seu carregador; a
+`libtlmod_runtime.so` é a mesma da 10ª versão.
 A pasta `tlmod/` que já está no aparelho pode ficar como está.
 
 ## Conteúdo
@@ -69,7 +70,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `704b22f` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `4837ffb` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -225,7 +226,7 @@ dependem do jogo real.
 - [ ] Um mod com erro (ex.: apague a `.so` de um mod) mostra "Erro" em vermelho, e os detalhes
       trazem a mensagem inteira
 - [ ] Voltar (botão e o voltar do Android) volta dos detalhes para a lista e da lista para o menu
-- [ ] O `tlmod.log` tem até três linhas "Oficina: toque em ..." (mande junto se algo falhar)
+- [ ] O `tlmod.log` tem até cinco linhas "Oficina: toque em ..." (mande junto se algo falhar)
 
 **Cópia das bibliotecas e log**
 - [ ] Os 4 mods aparecem como Carregado; o log mostra `biblioteca copiada para .../code_cache/tlmod/...`
@@ -283,7 +284,7 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 424512 | `4ee8fb231f5547c92d27d3e4c75e135b09c6a150c4db3b9e03515b5652d02da6` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 425176 | `ee066df7de128a8871aaaabb45dba209a61f8a91a59dc143acaaa00d040fabe8` |
 | `lib/arm64-v8a/libtlmod_runtime.so` | 937248 | `c3a01e8929d4dacc54650414a81ca5842fb41939e1190f27eecd467cf0d16f4c` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
