@@ -1,18 +1,19 @@
-# Entrega: pacote de teste do TLMod (6ª versão)
+# Entrega: pacote de teste do TLMod (7ª versão)
 
 Branch só para download, sem o código. Pode ser apagada depois.
 
 | arquivo | SHA-256 |
 |---|---|
-| `tlmod-teste.zip` | `efb5117b5e66a4d34cb43fcf59ea22f4f6821642e05b40110973bf84366b9a0c` |
-| `libtlmod_bridge.so` | `a27e45f5f0bdccfdb4cb378e9f3be4699a5623878b07ec32f00f29ae96eb4396` |
-| `libtlmod_runtime.so` | `a3c3b686b34b76d5ba8bd7660bffed4b98b5114a555f141472a47819d9c443f5` |
-| `libdevtools.so` | `931a7f67bec83deb9fa80e256b0ac61fca0194e7e95c75bce815f34d5c9ec8a8` |
-| `README_TESTE.md` | `d09051cbb6682381e792a08555b70822f31192c9b8369bfe7cd666bc9792f512` |
+| `tlmod-teste.zip` | `6e48421367ede195ee1829575424a2cdf41e0e3dc6ec1191e58afab3eb95d5a1` |
+| `libtlmod_bridge.so` | `b94e4a1d86d02c9007e848a3ceb332263dba847286d31af6987029b6ae140223` |
+| `libtlmod_runtime.so` | `9d744d8e2ee50601db8b15cfbb58b457912cae5f263342be62f68f31b95ab644` |
+| `README_TESTE.md` | `e3a4cc855928384e866976c63ca05b3d6fa6dc143f9b055de4205f911bf87cec` |
+| `oficina_preview.png` | `76568a2bcede1490b3fbb62e8b2b641e3fa65f21be37915fce716e0093ad8bf0` |
 
 - `tlmod-teste.zip`: o pacote completo.
-- Soltas, as 3 `.so` que mudaram desde a 5ª versão (o que não couber no inventário cai no chão):
-  - `libtlmod_bridge.so` e `libtlmod_runtime.so`: vão no carregador;
-  - `libdevtools.so`: vai em `tlmod/mods/devtools/lib/android-arm64/`.
+- `libtlmod_bridge.so` e `libtlmod_runtime.so`: as duas que mudaram desde a 6ª versão (Oficina de
+  Mods: botão Mods no menu principal). A pasta `tlmod/` não mudou.
+- `oficina_preview.png`: prévia da Oficina, desenhada no computador a partir do mesmo view-model
+  que o painel recebe (não é uma captura do aparelho).
 
-Gerado a partir do commit `51b5403` da branch `ccr-bbd92bf9-i01buk`.
+Gerado a partir do commit `7870c1b` da branch `ccr-bbd92bf9-i01buk`.

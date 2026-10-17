@@ -1,38 +1,43 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**6ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**7ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-A 5ª versão funcionou no aparelho: o tooltip do Rubi Fictício na Jornada não mostra mais
-"Pesquise mais 25". Esta versão muda a entrega de itens quando o inventário está cheio:
+Esta versão acrescenta a **Oficina de Mods**, como a tela de mods do tModLoader no PC:
 
-- **Antes:** o que não cabia se perdia. O log dizia "só 0 de 1 couberam no inventário", e a aba
-  Ferramentas dizia "no inventário" mesmo assim.
-- **Agora:** o que não couber cai no chão, em cima do personagem, em pilhas do tamanho máximo do
-  item. Ele pega de volta quando abrir espaço. Vale para itens do jogo e de mod (o Rubi cai como
-  Rubi), e para qualquer mod que dê itens, não só para a aba Ferramentas.
-- A resposta da aba passou a ser "10x Lente entregue (o que não couber cai no chão)". O log diz
-  quanto ficou no inventário e quanto foi para o chão.
+- **Botão Mods no menu principal.** É desenhado pelo próprio jogo, com o mesmo visual dos outros
+  botões. Ele fica no lugar do "Comprar o jogo completo", que só aparece na versão de teste do
+  Terraria; na versão completa esse lugar fica vazio. Com Configurações aberta, ele fica
+  desativado, como os outros, e o toque faz o som do menu.
+- **A Oficina** abre por cima do menu:
+  - os mods em seções: **Ativos**, **Desativados** e **Com erro**;
+  - para cada mod: versão, autores, descrição, o que ele adiciona e o interruptor de ligar/desligar;
+  - num mod que falhou, **Ver o erro** mostra a mensagem inteira (dá para selecionar e copiar);
+  - ligar ou desligar vale na próxima vez que o jogo abrir; o aviso aparece no topo.
+- **Fechar** volta ao menu. O botão flutuante "M" some enquanto a Oficina está aberta.
+- O painel flutuante continua igual. A aba Mods ganhou o botão **Abrir a Oficina de Mods**, que
+  também abre a Oficina de dentro de um mundo.
+- Na primeira vez que o menu aparece, o `tlmod.log` registra a posição de cada botão do menu
+  (linha `menu: botões do jogo: ...`). Se o botão Mods ficar em cima de outro ou num lugar ruim,
+  mande essa linha que eu ajusto a posição.
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 394080 bytes, `f6f6f39a335d65a6…` | 394992 bytes, `a27e45f5f0bdccfd…` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 891632 bytes, `fd0b69e26678aaef…` | 892816 bytes, `a3c3b686b34b76d5…` |
-| `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490824 bytes, `03049ce0171c3785…` | 490840 bytes, `931a7f67bec83deb…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 394992 bytes, `a27e45f5f0bdccfd…` | 400248 bytes, `b94e4a1d86d02c90…` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 892816 bytes, `a3c3b686b34b76d5…` | 923152 bytes, `9d744d8e2ee50601…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
-Todo o resto é idêntico, byte a byte, ao pacote anterior: as `.so` dos outros 3 mods, os
-manifestos, as texturas, os marcadores e o `tlmod_config.json`.
+Todo o resto é idêntico, byte a byte, ao pacote anterior: as `.so` dos 4 mods, os manifestos,
+as texturas, os marcadores e o `tlmod_config.json`.
 
-**Para atualizar o aparelho:** troque as duas `.so` no seu carregador e a
-`tlmod/mods/devtools/lib/android-arm64/libdevtools.so` (ou copie a pasta `tlmod/` de novo).
-Se você desligou algum mod no painel, guarde o seu `tlmod_config.json` antes de copiar a pasta.
+**Para atualizar o aparelho:** troque as duas `.so` no seu carregador.
+A pasta `tlmod/` que já está no aparelho pode ficar como está.
 
 ## Conteúdo
 
@@ -69,7 +74,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `51b5403` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `7870c1b` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -210,6 +215,18 @@ dependem do jogo real.
       depois de alguns segundos
 - [ ] Desligar o devtools na aba Mods tira a aba Ferramentas na abertura seguinte
 
+**Oficina de Mods**
+- [ ] O botão **Mods** aparece no menu principal, com o visual dos outros botões, sem cobrir nenhum
+- [ ] Tocar em Mods faz o som do menu e abre a Oficina; Fechar volta ao menu
+- [ ] Com Configurações aberta, o botão Mods não responde (como os outros)
+- [ ] As seções Ativos/Desativados mostram os 4 mods com versão, "por TLMod" e descrição
+- [ ] O interruptor de um mod mostra "Será desativado ao reiniciar o jogo"; reabrindo o jogo, ele
+      aparece em Desativados (e volta ao religar)
+- [ ] Um mod com erro (ex.: apague a `.so` de um mod) aparece em **Com erro**; "Ver o erro" mostra
+      a mensagem inteira
+- [ ] Na aba Mods do painel, "Abrir a Oficina de Mods" abre a mesma tela (também dentro do mundo)
+- [ ] O `tlmod.log` tem a linha `menu: botões do jogo: ...` e `menu: botão Mods em ...`
+
 **Cópia das bibliotecas e log**
 - [ ] Os 4 mods aparecem como Carregado; o log mostra `biblioteca copiada para .../code_cache/tlmod/...`
 - [ ] Na segunda abertura do jogo (sem reinstalar), o log mostra `cópia reaproveitada: ...` para os 4
@@ -266,8 +283,8 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 394992 | `a27e45f5f0bdccfdb4cb378e9f3be4699a5623878b07ec32f00f29ae96eb4396` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 892816 | `a3c3b686b34b76d5ba8bd7660bffed4b98b5114a555f141472a47819d9c443f5` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 400248 | `b94e4a1d86d02c9007e848a3ceb332263dba847286d31af6987029b6ae140223` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 923152 | `9d744d8e2ee50601db8b15cfbb58b457912cae5f263342be62f68f31b95ab644` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
 | `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490840 | `931a7f67bec83deb9fa80e256b0ac61fca0194e7e95c75bce815f34d5c9ec8a8` |
