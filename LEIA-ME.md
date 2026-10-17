@@ -1,17 +1,18 @@
-# Entrega: pacote de teste do TLMod (15ª versão)
+# Entrega: pacote de teste do TLMod (16ª versão)
 
 Branch só para download, sem o código. Pode ser apagada depois.
 
 | arquivo | SHA-256 |
 |---|---|
-| `tlmod-teste.zip` | `5604bcb74a7d00f87321b343829c8ebb1a6888d1f907b240a6940d2cb6df8c66` |
-| `libtlmod_bridge.so` | `fa433de2e89f9bb9369fd517b137e2fad289ac8b4e606d4fa6f9a1bddb82932d` |
-| `libtlmod_runtime.so` | `8f5ecb056839228b166b21563ce54f41927a737245343a498a7f57e14c23c013` |
-| `README_TESTE.md` | `35778327e9cbb4b424cd48e513ea44608dfc385ffbed3f9fa51f99feaec42760` |
+| `tlmod-teste.zip` | `6a8a7914a5592d35407e50fd5b692ec7454509cf7077e7a51161c1b3cca74bb6` |
+| `libtlmod_bridge.so` | `a6557071e12c6d4d8d6a6e3052868bcf588f41c6fa8a7c069d4e1a869b0d89ed` |
+| `libtlmod_runtime.so` | `4451706eb8bd1afc3cec77a8788a2564fa7bba15f38a1567bf20635e5df7fc25` |
+| `libexample_item.so` | `0d04150ed12ee97ea566ca261d30179dfb671c0db89e675a85f21199b393a6de` |
+| `README_TESTE.md` | `16f260c51cddaaa302a31472aa4a27d5d5fd16b8c5abdff1c0f6fb49b3f75a8a` |
 
 - `tlmod-teste.zip`: o pacote completo.
-- `libtlmod_bridge.so`: a única que mudou desde a 14ª versão (a ponte espera o motor do jogo
-  terminar de iniciar; o jogo fechava às vezes na abertura). `libtlmod_runtime.so` e a pasta
-  `tlmod/` não mudaram.
+- `libtlmod_bridge.so`, `libtlmod_runtime.so` e `libexample_item.so` (vai em
+  `tlmod/mods/example_item/lib/android-arm64/`): as três que mudaram desde a 15ª versão
+  (receitas de mod; o mod de exemplo ganhou duas receitas). O resto da pasta `tlmod/` não mudou.
 
-Gerado a partir do commit `38adb8b` da branch `ccr-bbd92bf9-i01buk`.
+Gerado a partir do commit `169f2fc` da branch `ccr-bbd92bf9-i01buk`.

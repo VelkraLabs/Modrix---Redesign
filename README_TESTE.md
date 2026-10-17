@@ -1,31 +1,42 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**15ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**16ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-- **O jogo fechando na abertura.** Duas vezes o jogo fechou logo ao abrir, sempre no mesmo ponto
-  do log (depois de "libil2cpp.so em ..."). Não tem relação com apagar o `tlmod.log`. A ponte
-  esperava um sinal do motor do jogo que aparece no começo da inicialização dele, e começava a
-  usá-lo enquanto ele ainda se montava. Agora ela espera uma marca que o motor grava perto do fim
-  da inicialização. O log ganha a linha "il2cpp_init concluído (N ms depois do corlib)".
+**Receitas de mod.** Os mods agora podem cadastrar receitas, que aparecem na fabricação do jogo e no
+Guia como as outras. O mod de exemplo (Rubi Fictício) ganhou duas, ambas na **Bancada de Trabalho**:
+
+| receita | ingredientes |
+|---|---|
+| 1 Rubi Fictício | 10 Blocos de Pedra + 5 Géis |
+| 1 Rubi (o do jogo) | 5 Rubis Fictícios |
+
+A segunda usa o item de mod como ingrediente. O Rubi Fictício roda "dentro" de uma Lente (a casca),
+mas o jogo não confunde os dois: Lentes não servem no lugar de Rubis Fictícios, e Rubis Fictícios não
+servem nas receitas que pedem Lente. As receitas de mod também não são desfeitas no Shimmer.
+
+O `tlmod.log` ganha uma linha `receitas: N do jogo, 2 de mods (...), sobram K de 3000 posições`,
+seguida de uma linha por receita.
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 428280 bytes, `a87fdb564ff0efab…` | 428744 bytes, `fa433de2e89f9bb9…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 428744 bytes, `fa433de2e89f9bb9…` | 435888 bytes, `a6557071e12c6d4d…` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 937264 bytes, `8f5ecb056839228b…` | 949984 bytes, `4451706eb8bd1afc…` |
+| `tlmod/mods/example_item/lib/android-arm64/libexample_item.so` | 224944 bytes, `e77a6be77d5620e0…` | 226528 bytes, `0d04150ed12ee97e…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
-Todo o resto é idêntico, byte a byte, ao pacote anterior: o runtime, as `.so` dos 4 mods,
-os manifestos, as texturas, os marcadores e o `tlmod_config.json`.
+Todo o resto é idêntico, byte a byte, ao pacote anterior: as `.so` dos outros 3 mods, os
+manifestos, as texturas, os marcadores e o `tlmod_config.json`.
 
-**Para atualizar o aparelho:** troque só a `libtlmod_bridge.so` no seu carregador; a
-`libtlmod_runtime.so` é a mesma da 13ª versão.
-A pasta `tlmod/` que já está no aparelho pode ficar como está.
+**Para atualizar o aparelho:** troque as duas `.so` no seu carregador e a `.so` do mod de exemplo
+(`tlmod/mods/example_item/lib/android-arm64/libexample_item.so`). O resto da pasta `tlmod/` pode ficar
+como está.
 
 ## Conteúdo
 
@@ -62,7 +73,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `38adb8b` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `169f2fc` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -170,6 +181,8 @@ Com a aba, quase toda a checklist abaixo pode ser feita sem esperar o jogo:
 - **Loot e morte:** toque em Matar inimigos, ou em Invencível para lutar sem morrer.
 - **Itens:** busque `rubi` (o item de mod) ou qualquer item do jogo, como `zenite`, `estrela` ou `4956`,
   e toque em +1/+10/+100. Os rubis também aparecem na lista sem busca.
+- **Receitas:** busque `pedra` (+100) e `gel` (+10) e fique perto de uma Bancada de Trabalho (busque
+  `bancada` e coloque uma). O Rubi Fictício aparece na fabricação; faça 5 e o Rubi do jogo aparece também.
 - **Loja:** invoque o Mercador (busque `mercador` ou `17` em Invocar), abra a loja e venda um rubi: rende cerca de 10 de prata (1/5 do valor de 50 de prata; a felicidade do NPC muda um pouco, como
   11 prata 23 cobre).
 
@@ -202,6 +215,17 @@ dependem do jogo real.
 - [ ] A resposta (ex.: "10x Lente entregue (o que não couber cai no chão)") aparece no topo da aba e some
       depois de alguns segundos
 - [ ] Desligar o devtools na aba Mods tira a aba Ferramentas na abertura seguinte
+
+**Receitas de mod**
+- [ ] O `tlmod.log` tem `receitas: ... 2 de mods` e as duas linhas `receita tlmod.example_item: ... na posição N`
+- [ ] Perto de uma Bancada, com 10 Pedras e 5 Géis, o Rubi Fictício aparece na fabricação e sai com a
+      imagem, o nome e a descrição do mod; os 10 Blocos de Pedra e os 5 Géis são gastos
+- [ ] Longe da Bancada, a receita some
+- [ ] Com 5 Rubis Fictícios, a receita do Rubi do jogo aparece; ao fabricar, os 5 Rubis Fictícios são gastos
+- [ ] Só com Lentes (sem Rubis Fictícios), a receita do Rubi **não** aparece; e os Rubis Fictícios não
+      contam como Lentes nas receitas do jogo que pedem Lente (ex.: Óculos de Proteção, 2 Lentes num Altar Demoníaco)
+- [ ] No Guia, colocar Pedra, Gel ou Rubi Fictício mostra as receitas de mod
+- [ ] (Opcional, no Shimmer) Jogar uma Lente no Shimmer não devolve Pedra e Gel
 
 **Abertura do jogo**
 - [ ] O jogo abre normalmente várias vezes seguidas (feche e abra umas 10 vezes); se fechar sozinho,
@@ -285,8 +309,8 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 428744 | `fa433de2e89f9bb9369fd517b137e2fad289ac8b4e606d4fa6f9a1bddb82932d` |
-| `lib/arm64-v8a/libtlmod_runtime.so` | 937264 | `8f5ecb056839228b166b21563ce54f41927a737245343a498a7f57e14c23c013` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 435888 | `a6557071e12c6d4d8d6a6e3052868bcf588f41c6fa8a7c069d4e1a869b0d89ed` |
+| `lib/arm64-v8a/libtlmod_runtime.so` | 949984 | `4451706eb8bd1afc3cec77a8788a2564fa7bba15f38a1567bf20635e5df7fc25` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
 | `tlmod/mods/devtools/lib/android-arm64/libdevtools.so` | 490840 | `931a7f67bec83deb9fa80e256b0ac61fca0194e7e95c75bce815f34d5c9ec8a8` |
@@ -296,7 +320,7 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 | `tlmod/mods/example_boss/spawn_on_start` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
 | `tlmod/mods/example_boss/textures/ember_titan.png` | 5801 | `fa4b43f509b4c8e428027936e478b12121cd43db544fc0c2ed932870b15237f9` |
 | `tlmod/mods/example_item/give_on_start` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
-| `tlmod/mods/example_item/lib/android-arm64/libexample_item.so` | 224944 | `e77a6be77d5620e02053ce6eaad39bbe7d4da16c4bc71eb332be08c226f50612` |
+| `tlmod/mods/example_item/lib/android-arm64/libexample_item.so` | 226528 | `0d04150ed12ee97ea566ca261d30179dfb671c0db89e675a85f21199b393a6de` |
 | `tlmod/mods/example_item/manifest.json` | 614 | `aa787324e10e518b5d3c43848b9fbf1fa349c6f73525ccc51d44eff0ff74375c` |
 | `tlmod/mods/example_item/textures/fictional_ruby.png` | 239 | `99abb2c88f7654e329e8e17812ee93a85a91e4810fa0aa8eb4807385b20a4c2a` |
 | `tlmod/tlmod_config.json` | 32 | `fe7957a8a201d48e5f07a84daeb118524251c51bbf2a5d699b6f7ce8d1c5fe8a` |
