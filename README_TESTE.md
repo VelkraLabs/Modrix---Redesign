@@ -1,31 +1,23 @@
 # TLMod: pacote de teste no aparelho
 
-Pacote de teste do TLMod no Terraria Mobile (**11ª versão**). Ele traz a ponte e o runtime
+Pacote de teste do TLMod no Terraria Mobile (**12ª versão**). Ele traz a ponte e o runtime
 compilados para Android arm64 (release, sem símbolos) e a pasta `tlmod/` pronta, com quatro mods.
 
 Não traz nenhum arquivo do jogo nem do dump.
 
 ## O que mudou desde o pacote anterior
 
-Oficina de Mods: tocar nas linhas não fazia nada (10ª versão).
+Oficina de Mods, depois das capturas da 11ª versão (o toque nas linhas já funciona):
 
-- **A causa.** O seu log mostrou que os toques nas linhas nem chegavam à Oficina: os únicos
-  registrados foram no botão Voltar. No Terraria Mobile, um toque só vale para a interface se cair
-  numa área que a tela registrou no jogo, e cada botão registra a sua quando é desenhado. A lista
-  da Oficina não registrava a dela. A explicação da 10ª versão (escala da tela) estava errada: o
-  log mostrou as duas coordenadas iguais.
-- **A correção.** A área da lista e a do texto de detalhes agora são registradas a cada quadro,
-  do mesmo jeito que os botões do jogo. Tocar em qualquer ponto de uma linha abre os detalhes, e
-  arrastar rola a lista e o texto.
-- O ícone de cada mod continua como na 10ª versão.
-- Os cinco primeiros toques na Oficina vão para o `tlmod.log` ("Oficina: toque em ..."), agora
-  dizendo se o toque caiu dentro ou fora da área da lista.
+- **Título dos detalhes.** Um nome comprido, como "Exemplo: Titã de Brasa (esqueleto de boss)",
+  quebrava em duas linhas e saía por cima do painel. Agora ele é cortado com "..." para caber no
+  quadro do título, como a lista já faz. O nome inteiro continua na primeira linha do texto.
 
 Arquivos do pacote que mudaram:
 
 | arquivo | antes | agora |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 424512 bytes, `4ee8fb231f5547c9…` | 425176 bytes, `ee066df7de128a88…` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 425176 bytes, `ee066df7de128a88…` | 426552 bytes, `82c379282b5b266f…` |
 | `README_TESTE.md`, `SHA256SUMS.txt` | | atualizados |
 
 Todo o resto é idêntico, byte a byte, ao pacote anterior: o runtime, as `.so` dos 4 mods,
@@ -70,7 +62,7 @@ diferença no logcat. Ela resolve tudo pelo nome e pode funcionar, mas sem garan
 Para conferir o seu jogo, extraia esses dois arquivos do APK (`lib/arm64-v8a/libil2cpp.so` e
 `assets/bin/Data/Managed/Metadata/global-metadata.dat`) e rode `sha256sum`.
 
-Build: código do commit `4837ffb` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
+Build: código do commit `caa5235` (branch `ccr-bbd92bf9-i01buk`), NDK r27c, `android-24`,
 `-O3`, `llvm-strip --strip-unneeded`, páginas alinhadas a 16 KB.
 
 ## Instalação
@@ -221,6 +213,7 @@ dependem do jogo real.
       lista não abre nada
 - [ ] Com mais mods do que cabem, arrastar a lista rola e para numa linha inteira
 - [ ] Nos detalhes, o texto não passa por cima de Voltar/Desativar; texto longo rola ao arrastar
+- [ ] Nos detalhes do "Titã de Brasa", o título fica numa linha só, dentro do quadro, terminando em "..."
 - [ ] Desativar/Ativar muda o estado para "Será desativado"/"Será ativado" (amarelo); reabrindo o
       jogo, o mod aparece Desativado (cinza), com o Livro no lugar do ícone, e volta ao religar
 - [ ] Um mod com erro (ex.: apague a `.so` de um mod) mostra "Erro" em vermelho, e os detalhes
@@ -284,7 +277,7 @@ Também em `SHA256SUMS.txt`, que inclui este README:
 
 | arquivo | bytes | SHA-256 |
 |---|---|---|
-| `lib/arm64-v8a/libtlmod_bridge.so` | 425176 | `ee066df7de128a8871aaaabb45dba209a61f8a91a59dc143acaaa00d040fabe8` |
+| `lib/arm64-v8a/libtlmod_bridge.so` | 426552 | `82c379282b5b266f1d2ffb1a5fcdaeb8d8c7d84e330b4702cd80c630b7c9b6aa` |
 | `lib/arm64-v8a/libtlmod_runtime.so` | 937248 | `c3a01e8929d4dacc54650414a81ca5842fb41939e1190f27eecd467cf0d16f4c` |
 | `tlmod/mods/boss_checklist/lib/android-arm64/libboss_checklist.so` | 233520 | `a22ec19635ff1ea53a42c3c5186ecd111815235dacffd7b28696389ea19bd51a` |
 | `tlmod/mods/boss_checklist/manifest.json` | 633 | `ece3d334283bb47e30eab683150c54d512fba0177b71cac4043c3a6bd08c7fb5` |
