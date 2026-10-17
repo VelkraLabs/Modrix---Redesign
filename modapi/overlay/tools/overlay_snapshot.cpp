@@ -2,7 +2,8 @@
 //   overlay_snapshot sample_checklist.json <saída>/ [sample_panel.json]
 // Escreve snapshot_closed.json (o "M" e os ícones), snapshot_checklist.json (gaveta), snapshot_log.json (painel do "M"),
 // snapshot_workshop.json (Oficina) e, com o terceiro argumento,
-// snapshot_tools.json (modal do tlmod.devtools): exatamente o JSON que o
+// snapshot_tools.json (modal do tlmod.devtools), snapshot_edit.json (modo de edição dos botões) e
+// snapshot_moved.json (botões movidos, maiores e mais transparentes): exatamente o JSON que o
 // renderizador Android recebe do PanelController, com um mundo carregado.
 #include <cstdio>
 #include <filesystem>
@@ -115,6 +116,21 @@ int main(int argc, char** argv) {
         panel.Tick(4);
         std::ofstream(out / "snapshot_tools.json") << panel.SnapshotJson();
     }
+    // Botões de mods: o modo de edição (aberto pela aba Mods das Configurações), com o
+    // "M" e o Boss Checklist arrastados, e depois o jogo com eles no lugar novo, maiores
+    // e mais transparentes.
+    panel.Close();
+    config.SetButtonScale(120, &err);
+    panel.RequestLayoutEdit();
+    panel.Tick(5);
+    panel.HandleAction("layout_move", "menu 9300 2600");
+    panel.HandleAction("layout_move", "checklist 9300 6600");
+    panel.Tick(6);
+    std::ofstream(out / "snapshot_edit.json") << panel.SnapshotJson();
+    panel.HandleAction("layout_done", "");
+    config.SetButtonOpacity(60, &err);
+    panel.Tick(7);
+    std::ofstream(out / "snapshot_moved.json") << panel.SnapshotJson();
     fs::remove(out / "preview_config.json");
     std::printf("snapshots em %s\n", out.string().c_str());
     return 0;

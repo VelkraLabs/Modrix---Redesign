@@ -11,6 +11,7 @@
 #include "json.h"
 #include "tlmod/overlay/config_store.h"
 #include "tlmod/overlay/panel.h"
+#include "tlmod/overlay/settings_tab.h"
 #include "tlmod/runtime/log.h"
 #include "tlmod/runtime/mod_loader.h"
 
@@ -501,6 +502,111 @@ static void TestNativeWorkshop(const fs::path& tmp) {
     CHECK(reads >= 0 && !cfg.IsEnabled("d.check"));  // o último SetEnabled (i = 199) desliga
 }
 
+// ---------------------------------------------------------------------------
+// Botões de mods na tela: a configuração (tamanho, opacidade, posições), a aba Mods
+// das Configurações do jogo e o modo de edição do painel.
+static void TestButtonLayout(const fs::path& mods, const fs::path& tmp) {
+    std::printf("\n== botões de mods: configuração, aba Mods e modo de edição\n");
+    using overlay::ButtonLayout;
+    using overlay::ButtonPlacement;
+    using overlay::SettingsRow;
+    fs::path file = tmp / "buttons" / "tlmod_config.json";
+    overlay::ConfigStore cfg(file);
+    std::string err;
+    CHECK(cfg.Load(&err) && cfg.Buttons() == ButtonLayout{});
+    CHECK(cfg.Buttons().scalePct == 100 && cfg.Buttons().opacityPct == 100 && cfg.Buttons().positions.empty());
+    const uint64_t rev = cfg.Revision();
+    CHECK(cfg.SetButtonScale(130, &err) && cfg.SetButtonOpacity(10, &err) && cfg.Revision() > rev);
+    CHECK(cfg.Buttons().scalePct == 130 && cfg.Buttons().opacityPct == 30);  // ajustada ao mínimo
+    CHECK(cfg.SetButtonPosition("menu", {12000, -5}, &err) &&
+          (cfg.Buttons().positions.at("menu") == ButtonPlacement{10000, 0}));
+    CHECK(!cfg.SetButtonPosition("", {1, 1}, &err));
+    const uint64_t same = cfg.Revision();
+    CHECK(cfg.SetButtonScale(130, &err) && cfg.Revision() == same);  // nada mudou: nem grava
+    CHECK(cfg.SetEnabled("a.mod", false, &err));  // a outra parte da configuração continua
+    const std::string text = ReadFile(file);
+    CHECK(text.find(R"("buttons":{"scale":130,"opacity":30,"positions":{"menu":[10000,0]}})") != std::string::npos);
+    CHECK(text.find(R"("disabled_mods":["a.mod"])") != std::string::npos);
+    overlay::ConfigStore reread(file);
+    CHECK(reread.Load(&err) && reread.Buttons() == cfg.Buttons() && !reread.IsEnabled("a.mod"));
+    // Valores fora da faixa ou inválidos: ajustados ou ignorados, sem erro (é só aparência).
+    std::ofstream(file) << R"({"schema":1,"disabled_mods":["x"],"buttons":{"scale":999,"opacity":"muito",
+        "positions":{"menu":[5000,5000],"checklist":[1],"":[1,2],"mod:a":[-3,20000]}}})";
+    overlay::ConfigStore lenient(file);
+    CHECK(lenient.Load(&err) && !lenient.IsEnabled("x"));
+    ButtonLayout b = lenient.Buttons();
+    CHECK(b.scalePct == 150 && b.opacityPct == 100 && b.positions.size() == 2);
+    CHECK((b.positions.at("menu") == ButtonPlacement{5000, 5000}) && (b.positions.at("mod:a") == ButtonPlacement{0, 10000}));
+    std::ofstream(file) << R"({"schema":1,"buttons":7})";
+    CHECK(lenient.Load(&err) && lenient.Buttons() == ButtonLayout{});
+    CHECK(cfg.ResetButtons(&err) && cfg.Buttons() == ButtonLayout{} && !cfg.IsEnabled("a.mod"));
+
+    FakeGame game;
+    game.inWorld = false;  // no menu principal
+    rt::ModLoader loader(&game);
+    loader.DiscoverDirectory(mods);
+    loader.LoadAll();
+    overlay::LoaderDataSource source(loader);
+    PanelController panel(source, cfg);
+    panel.Tick(0);
+
+    // Aba Mods: um botão e duas barras de 10 em 10%.
+    overlay::ModSettingsTab tab(cfg, &panel);
+    std::vector<SettingsRow> rows = tab.Rows();
+    CHECK(rows.size() == 3 && rows[0].kind == SettingsRow::Kind::Button && rows[0].value == "Editar");
+    CHECK(rows[1].kind == SettingsRow::Kind::Slider && rows[1].steps == 10 && rows[1].step == 5 && rows[1].value == "100%");
+    CHECK(rows[2].kind == SettingsRow::Kind::Slider && rows[2].steps == 7 && rows[2].step == 7 && rows[2].value == "100%");
+    tab.SetStep(1, 8);
+    tab.SetStep(2, 0);
+    CHECK(cfg.Buttons().scalePct == 130 && cfg.Buttons().opacityPct == 30);
+    tab.SetStep(1, 99);  // além do fim: o máximo
+    rows = tab.Rows();
+    CHECK(rows[1].step == 10 && rows[1].value == "150%" && rows[2].step == 0 && rows[2].value == "30%");
+    CHECK(!tab.Click(1));  // barra: o toque não faz nada
+    CHECK(panel.Tick(5));  // a configuração mudou por fora: redesenha
+    auto snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    const rt::json::Value* layout = snap ? snap->Get("layout") : nullptr;
+    CHECK(layout && !*layout->Get("editing")->AsBool() && *layout->Get("scale_pct")->AsNumber() == 150 &&
+          *layout->Get("opacity_pct")->AsNumber() == 30 && *layout->Get("placement_max")->AsNumber() == 10000);
+    CHECK(snap && *snap->Get("fab")->Get("id")->AsString() == overlay::kMenuButtonId);
+    CHECK(!panel.LaunchersVisible());  // fora de um mundo
+
+    // "Editar": pede o modo de edição (da thread do jogo) e fecha as Configurações.
+    CHECK(tab.Click(0) && !panel.IsEditingLayout());
+    CHECK(panel.Tick(10) && panel.IsEditingLayout() && panel.LaunchersVisible());  // todos os botões, mesmo no menu
+    snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    CHECK(snap && *snap->Get("layout")->Get("editing")->AsBool() && *snap->Get("launchers_visible")->AsBool());
+    CHECK(snap && snap->Get("launchers")->AsArray()->size() == 1);  // o Boss Checklist
+    // No modo de edição os botões só se movem.
+    CHECK(!panel.HandleAction("toggle_open", "") && !panel.HandleAction("open", "checklist"));
+    CHECK(panel.OpenSurface() == Surface::None);
+    CHECK(panel.HandleAction("layout_move", "menu 1500 2500") &&
+          (cfg.Buttons().positions.at("menu") == ButtonPlacement{1500, 2500}));
+    CHECK(panel.HandleAction("layout_move", "checklist 9000 100"));
+    CHECK(!panel.HandleAction("layout_move", "menu 12") && !panel.HandleAction("layout_move", "menu x 3") &&
+          !panel.HandleAction("layout_move", "menu 1 2 3") && !panel.HandleAction("layout_move", ""));
+    panel.Tick(20);
+    snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    const rt::json::Value* positions = snap ? snap->Get("layout")->Get("positions") : nullptr;
+    CHECK(positions && positions->Get("menu") && *(*positions->Get("menu")->AsArray())[1].AsNumber() == 2500 &&
+          positions->Get("checklist"));
+    CHECK(panel.HandleAction("layout_reset", "") && cfg.Buttons() == ButtonLayout{});
+    CHECK(panel.HandleAction("layout_done", "") && !panel.IsEditingLayout() && !panel.LaunchersVisible());
+    CHECK(panel.HandleAction("toggle_open", "") && panel.OpenSurface() == Surface::Log);  // de volta ao normal
+
+    // Abrir o modo de edição fecha o Log; a Oficina fecha o modo de edição.
+    CHECK(panel.HandleAction("layout_edit", "") && panel.IsEditingLayout() && panel.OpenSurface() == Surface::None);
+    CHECK(panel.HandleAction("workshop_open", "") && panel.IsWorkshopOpen() && !panel.IsEditingLayout());
+    panel.HandleAction("workshop_close", "");
+
+    // "Padrão" da aba e sem overlay.
+    tab.SetStep(1, 0);
+    tab.Reset();
+    CHECK(cfg.Buttons() == ButtonLayout{});
+    overlay::ModSettingsTab noPanel(cfg, nullptr);
+    CHECK(!noPanel.Click(0));
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "uso: %s <build>/dist/mods\n", argv[0]);
@@ -524,6 +630,7 @@ int main(int argc, char** argv) {
     TestModTab(argv[1], tmp);
     TestWorkshop(mods, tmp);
     TestNativeWorkshop(tmp);
+    TestButtonLayout(mods, tmp);
     fs::remove_all(tmp);
     std::printf("\n%d checks, %d falha%s: %s\n", g_checks, g_failures, g_failures == 1 ? "" : "s",
                 g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM");

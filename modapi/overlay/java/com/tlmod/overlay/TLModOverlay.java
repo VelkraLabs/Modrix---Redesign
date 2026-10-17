@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
@@ -37,6 +38,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -78,9 +80,16 @@ public final class TLModOverlay {
     private LinearLayout content;
     private int contentWidthPx;
     private String renderedSurface = "none";
-    // Ícones abaixo do "M".
-    private LinearLayout launcherColumn;
+    // Ícones das gavetas e modais: uma View solta por ícone (cada um tem a sua posição).
+    private final Map<String, LauncherView> launchers = new LinkedHashMap<>();
     private String renderedLaunchers = "";
+    // Tamanho, opacidade e posições salvas dos botões (view-model "layout").
+    private JSONObject buttonLayout = new JSONObject();
+    private boolean editing;
+    private String dragging;  // id do botão sob o dedo: não é reposicionado pelo render
+    // Modo de edição: fundo que segura os toques e a barra com Padrão e Concluir.
+    private FrameLayout editLayer;
+    private TextView editTitle, editHint, editNotice, editReset, editDone;
     // Gaveta do Boss Checklist: fundo escurecido + cartão preso à esquerda.
     private FrameLayout drawerLayer;
     private View drawerScrim;
@@ -99,6 +108,7 @@ public final class TLModOverlay {
     // perder o texto digitado nem o foco (chave: "<mod>/<id da busca>").
     private final Map<String, EditText> searchFields = new HashMap<>();
     private long renderedVersion = -1;
+    private JSONObject lastSnapshot;
     private JSONObject theme;
     // Oficina de Mods: tela grande por cima do jogo (aberta pelo botão "Mods" do menu).
     private FrameLayout workshop;
@@ -132,13 +142,22 @@ public final class TLModOverlay {
         JSONObject snap = snapshot();
         if (snap == null) return;
         theme = snap.optJSONObject("theme");
+        buildEditLayer();
         buildFab();
-        buildLaunchers();
         buildPanel();
         buildDrawer();
         buildModal();
         buildWorkshop();
         render(snap);
+        // As posições salvas são frações da tela: refeitas quando o tamanho real da raiz chega ou muda.
+        root.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) {
+                if (r - l == or - ol && b - t == ob - ot) return;
+                handler.post(new Runnable() {
+                    @Override public void run() { if (lastSnapshot != null) applyButtonLayout(lastSnapshot); }
+                });
+            }
+        });
         handler.postDelayed(ticker, TICK_MS);
     }
 
@@ -186,7 +205,7 @@ public final class TLModOverlay {
     }
 
     // ------------------------------------------------------------------------
-    // Botão flutuante: toque abre/fecha; arrastar move.
+    // Botão flutuante "M": toque abre/fecha o Log; no modo de edição, arrastar move.
     private void buildFab() {
         int size = dp(theme.optInt("fab_size_dp", 44));
         int margin = dp(theme.optInt("margin_dp", 12));
@@ -195,45 +214,87 @@ public final class TLModOverlay {
         fab.setTextColor(color("text"));
         fab.setTypeface(Typeface.DEFAULT_BOLD);
         fab.setTextSize(TypedValue.COMPLEX_UNIT_SP, theme.optInt("title_sp", 16));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(color("fab_bg"));
-        bg.setStroke(dp(2), color("accent"));
-        fab.setBackground(bg);
+        fab.setBackground(fabBackground(false));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size, Gravity.TOP | Gravity.START);
         lp.leftMargin = margin;
         lp.topMargin = margin * 6;
         root.addView(fab, lp);
+        fab.setOnTouchListener(new ButtonTouch("menu", new Runnable() {
+            @Override public void run() { act("toggle_open", ""); }
+        }));
+    }
 
-        fab.setOnTouchListener(new View.OnTouchListener() {
-            float downX, downY, startLeft, startTop;
-            boolean dragging;
-            @Override public boolean onTouch(View v, MotionEvent e) {
-                FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) v.getLayoutParams();
-                switch (e.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        downX = e.getRawX(); downY = e.getRawY();
-                        startLeft = p.leftMargin; startTop = p.topMargin;
-                        dragging = false;
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
-                        if (!dragging && Math.hypot(dx, dy) > dp(8)) dragging = true;
-                        if (dragging) {
-                            p.leftMargin = Math.max(0, (int) (startLeft + dx));
-                            p.topMargin = Math.max(0, (int) (startTop + dy));
-                            v.setLayoutParams(p);
-                            positionPanel();
-                        }
-                        return true;
-                    case MotionEvent.ACTION_UP:
-                        if (!dragging) act("toggle_open", "");
-                        return true;
-                    default:
-                        return true;  // consome tudo que começou no botão
+    private GradientDrawable fabBackground(boolean editing) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(color("fab_bg"));
+        if (editing) bg.setStroke(dp(2), color("text"), dp(5), dp(3));  // tracejado: "dá para arrastar"
+        else bg.setStroke(dp(2), color("accent"));
+        return bg;
+    }
+
+    /**
+     * Toque nos botões da tela. Fora do modo de edição, um toque chama `tap`; no
+     * modo de edição, arrastar move o botão e, ao soltar, a posição (o centro, em
+     * décimos de milésimo da tela) vai para o C++, que grava na configuração.
+     */
+    private final class ButtonTouch implements View.OnTouchListener {
+        private final String id;
+        private final Runnable tap;
+        private float downX, downY;
+        private int startLeft, startTop;
+        private boolean moved;
+
+        ButtonTouch(String id, Runnable tap) {
+            this.id = id;
+            this.tap = tap;
+        }
+
+        @Override public boolean onTouch(View v, MotionEvent e) {
+            FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) v.getLayoutParams();
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = e.getRawX();
+                    downY = e.getRawY();
+                    startLeft = p.leftMargin;
+                    startTop = p.topMargin;
+                    moved = false;
+                    v.setPressed(true);
+                    if (editing) dragging = id;
+                    return true;
+                case MotionEvent.ACTION_MOVE: {
+                    float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
+                    if (!moved && Math.hypot(dx, dy) > dp(8)) moved = true;
+                    if (editing && moved) {
+                        p.leftMargin = clamp(startLeft + (int) dx, 0, screenW() - p.width);
+                        p.topMargin = clamp(startTop + (int) dy, 0, screenH() - p.height);
+                        v.setLayoutParams(p);
+                        if (v == fab) layoutLaunchers();  // os ícones sem posição própria seguem o "M"
+                    }
+                    return true;
                 }
+                case MotionEvent.ACTION_UP:
+                    v.setPressed(false);
+                    dragging = null;
+                    if (editing) {
+                        if (moved) {
+                            int max = buttonLayout.optInt("placement_max", 10000);
+                            long cx = Math.round((p.leftMargin + p.width / 2.0) * max / screenW());
+                            long cy = Math.round((p.topMargin + p.height / 2.0) * max / screenH());
+                            act("layout_move", id + " " + cx + " " + cy);
+                        }
+                    } else if (!moved) {
+                        tap.run();
+                    }
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    v.setPressed(false);
+                    dragging = null;
+                    return true;
+                default:
+                    return true;  // consome tudo que começou no botão
             }
-        });
+        }
     }
 
     private void buildPanel() {
@@ -291,42 +352,193 @@ public final class TLModOverlay {
     }
 
     // ------------------------------------------------------------------------
-    // Ícones abaixo do "M": um por superfície (gaveta do checklist, modal de cada mod).
-    private void buildLaunchers() {
-        int margin = dp(theme.optInt("margin_dp", 12));
-        int fabSize = dp(theme.optInt("fab_size_dp", 44));
-        int size = dp(theme.optInt("launcher_size_dp", 40));
-        launcherColumn = new LinearLayout(activity);
-        launcherColumn.setOrientation(LinearLayout.VERTICAL);
-        launcherColumn.setVisibility(View.GONE);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
-        lp.leftMargin = margin + (fabSize - size) / 2;  // centrados sob a posição inicial do "M"
-        lp.topMargin = margin * 6 + fabSize + dp(14);
-        root.addView(launcherColumn, lp);
-    }
-
+    // Ícones das superfícies (gaveta do checklist, modal de cada mod): por padrão
+    // numa coluna abaixo do "M"; cada um pode ter a sua posição salva.
     private void renderLaunchers(JSONObject s) {
         JSONArray list = s.optJSONArray("launchers");
         boolean visible = s.optBoolean("launchers_visible") && list != null && list.length() > 0;
-        launcherColumn.setVisibility(visible ? View.VISIBLE : View.GONE);
         String key = list != null ? list.toString() : "";
-        if (key.equals(renderedLaunchers)) return;
-        renderedLaunchers = key;
-        launcherColumn.removeAllViews();
-        int size = dp(theme.optInt("launcher_size_dp", 40));
-        for (int i = 0; list != null && i < list.length(); i++) {
-            final JSONObject l = list.optJSONObject(i);
-            if (l == null) continue;
-            LauncherView v = new LauncherView(activity, l.optString("icon"), l.optString("letter"), l.optBoolean("active"));
-            v.setContentDescription(l.optString("label"));
-            v.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View view) { act("open", l.optString("id")); }
-            });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
-            if (i > 0) lp.topMargin = dp(10);
-            launcherColumn.addView(v, lp);
+        if (!key.equals(renderedLaunchers)) {
+            renderedLaunchers = key;
+            for (LauncherView v : launchers.values()) root.removeView(v);
+            launchers.clear();
+            int index = indexOfChild(fab) + 1;  // logo acima do "M": abaixo do painel, da gaveta e do modal
+            for (int i = 0; list != null && i < list.length(); i++) {
+                final JSONObject l = list.optJSONObject(i);
+                if (l == null) continue;
+                final String id = l.optString("id");
+                LauncherView v = new LauncherView(activity, l.optString("icon"), l.optString("letter"), l.optBoolean("active"));
+                v.setContentDescription(l.optString("label"));
+                v.setOnTouchListener(new ButtonTouch(id, new Runnable() {
+                    @Override public void run() { act("open", id); }
+                }));
+                root.addView(v, index++, new FrameLayout.LayoutParams(0, 0, Gravity.TOP | Gravity.START));
+                launchers.put(id, v);
+            }
         }
+        for (LauncherView v : launchers.values()) v.setVisibility(visible ? View.VISIBLE : View.GONE);
+    }
+
+    private int indexOfChild(View v) {
+        for (int i = 0; i < root.getChildCount(); i++)
+            if (root.getChildAt(i) == v) return i;
+        return root.getChildCount() - 1;
+    }
+
+    // ------------------------------------------------------------------------
+    // Tamanho, opacidade e posição dos botões ("layout" do view-model).
+    private float buttonScale() {
+        return buttonLayout.optInt("scale_pct", 100) / 100f;
+    }
+
+    private int fabSize() {
+        return dp(theme.optInt("fab_size_dp", 44) * buttonScale());
+    }
+
+    private int launcherSize() {
+        return dp(theme.optInt("launcher_size_dp", 40) * buttonScale());
+    }
+
+    private int screenW() {
+        int w = root.getWidth();
+        return w > 0 ? w : activity.getResources().getDisplayMetrics().widthPixels;
+    }
+
+    private int screenH() {
+        int h = root.getHeight();
+        return h > 0 ? h : activity.getResources().getDisplayMetrics().heightPixels;
+    }
+
+    private static int clamp(int v, int lo, int hi) {
+        return Math.max(lo, Math.min(v, Math.max(lo, hi)));
+    }
+
+    /** Posição salva do botão `id` (canto superior esquerdo para o tamanho `size`), ou nulo. */
+    private int[] savedPlace(String id, int size) {
+        JSONObject positions = buttonLayout.optJSONObject("positions");
+        JSONArray xy = positions != null ? positions.optJSONArray(id) : null;
+        if (xy == null || xy.length() != 2) return null;
+        float max = buttonLayout.optInt("placement_max", 10000);
+        int cx = Math.round(xy.optInt(0) * screenW() / max), cy = Math.round(xy.optInt(1) * screenH() / max);
+        return new int[] {clamp(cx - size / 2, 0, screenW() - size), clamp(cy - size / 2, 0, screenH() - size)};
+    }
+
+    private void place(View v, int size, int left, int top) {
+        FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) v.getLayoutParams();
+        if (p.width == size && p.height == size && p.leftMargin == left && p.topMargin == top) return;
+        p.width = p.height = size;
+        p.leftMargin = left;
+        p.topMargin = top;
+        v.setLayoutParams(p);
+    }
+
+    /** O "M" e os ícones nas posições salvas (ou padrão), no tamanho e na opacidade da configuração. */
+    private void applyButtonLayout(JSONObject s) {
+        JSONObject l = s.optJSONObject("layout");
+        buttonLayout = l != null ? l : new JSONObject();
+        boolean wasEditing = editing;
+        editing = buttonLayout.optBoolean("editing");
+        float alpha = editing ? 1f : buttonLayout.optInt("opacity_pct", 100) / 100f;
+        if (editing != wasEditing) fab.setBackground(fabBackground(editing));
+        fab.setAlpha(alpha);
+        fab.setTextSize(TypedValue.COMPLEX_UNIT_SP, theme.optInt("title_sp", 16) * buttonScale());
+        if (!"menu".equals(dragging)) {
+            int size = fabSize(), margin = dp(theme.optInt("margin_dp", 12));
+            int[] at = savedPlace("menu", size);
+            if (at == null) at = new int[] {margin, clamp(margin * 6, 0, screenH() - size)};
+            place(fab, size, at[0], at[1]);
+        }
+        for (LauncherView v : launchers.values()) {
+            v.setAlpha(alpha);
+            v.setEditing(editing);
+        }
+        layoutLaunchers();
+        positionPanel();
+    }
+
+    /** Ícones: os que têm posição salva vão para ela; os outros, em coluna abaixo do "M". */
+    private void layoutLaunchers() {
+        FrameLayout.LayoutParams f = (FrameLayout.LayoutParams) fab.getLayoutParams();
+        int size = launcherSize(), gap = dp(10 * buttonScale());
+        int x = f.leftMargin + (f.width - size) / 2, y = f.topMargin + f.height + dp(14 * buttonScale());
+        for (Map.Entry<String, LauncherView> e : launchers.entrySet()) {
+            if (e.getKey().equals(dragging)) continue;
+            int[] at = savedPlace(e.getKey(), size);
+            if (at == null) {
+                at = new int[] {clamp(x, 0, screenW() - size), clamp(y, 0, screenH() - size)};
+                y += size + gap;
+            }
+            place(e.getValue(), size, at[0], at[1]);
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Modo de edição: fundo escurecido (os toques não vão para o jogo) e uma barra
+    // no topo. Fica embaixo dos botões, que continuam por cima para serem arrastados.
+    private void buildEditLayer() {
+        editLayer = new FrameLayout(activity);
+        editLayer.setBackgroundColor(color("scrim"));
+        editLayer.setClickable(true);
+        editLayer.setVisibility(View.GONE);
+        root.addView(editLayer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        LinearLayout bar = new LinearLayout(activity);
+        bar.setOrientation(LinearLayout.VERTICAL);
+        bar.setGravity(Gravity.CENTER_HORIZONTAL);
+        bar.setBackground(rounded(color("panel_bg"), theme.optInt("corner_dp", 12), color("panel_border")));
+        int pad = dp(12);
+        bar.setPadding(pad, pad, pad, pad);
+        editTitle = text("", "title_sp", "accent", true);
+        bar.addView(editTitle);
+        editHint = text("", "small_sp", "text_dim", false);
+        editHint.setGravity(Gravity.CENTER);
+        editHint.setPadding(0, dp(4), 0, 0);
+        bar.addView(editHint);
+        editNotice = text("", "small_sp", "error", true);
+        editNotice.setVisibility(View.GONE);
+        bar.addView(editNotice);
+        LinearLayout buttons = new LinearLayout(activity);
+        buttons.setPadding(0, dp(10), 0, 0);
+        editReset = barButton("tab_active_bg", "text");
+        editReset.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { act("layout_reset", ""); }
+        });
+        buttons.addView(editReset);
+        editDone = barButton("accent", "panel_bg");
+        editDone.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { act("layout_done", ""); }
+        });
+        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        dl.leftMargin = dp(10);
+        buttons.addView(editDone, dl);
+        bar.addView(buttons);
+        int margin = dp(theme.optInt("margin_dp", 12));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        lp.topMargin = margin;
+        editLayer.addView(bar, lp);
+    }
+
+    private TextView barButton(String bgKey, String textKey) {
+        TextView b = text("", "text_sp", textKey, true);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(16), dp(8), dp(16), dp(8));
+        b.setBackground(rounded(color(bgKey), 8, 0));
+        return b;
+    }
+
+    private void renderEditLayer() {
+        editLayer.setVisibility(editing ? View.VISIBLE : View.GONE);
+        if (!editing) return;
+        editTitle.setText(buttonLayout.optString("title"));
+        editHint.setText(buttonLayout.optString("hint"));
+        String notice = buttonLayout.optString("notice");
+        editNotice.setText(notice);
+        editNotice.setVisibility(TextUtils.isEmpty(notice) ? View.GONE : View.VISIBLE);
+        editReset.setText(buttonLayout.optString("reset_label", "Padrão"));
+        editDone.setText(buttonLayout.optString("done_label", "Concluir"));
     }
 
     private String launcherLabel(JSONObject s, String id) {
@@ -342,8 +554,10 @@ public final class TLModOverlay {
     private final class LauncherView extends View {
         private final String icon, letter;
         private final boolean active;
+        private boolean editing;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path path = new Path();
+        private final Path clip = new Path();
 
         LauncherView(Context c, String icon, String letter, boolean active) {
             super(c);
@@ -351,6 +565,12 @@ public final class TLModOverlay {
             this.letter = letter;
             this.active = active;
             setClickable(true);
+        }
+
+        void setEditing(boolean editing) {
+            if (this.editing == editing) return;
+            this.editing = editing;
+            invalidate();
         }
 
         @Override protected void onDraw(Canvas cv) {
@@ -361,10 +581,17 @@ public final class TLModOverlay {
             cv.drawCircle(cx, cy, r, paint);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(2));
-            paint.setColor(color("accent"));
+            paint.setColor(editing ? color("text") : color("accent"));
+            paint.setPathEffect(editing ? new DashPathEffect(new float[] {dp(5), dp(3)}, 0) : null);
             cv.drawCircle(cx, cy, r, paint);
+            paint.setPathEffect(null);
 
             float u = r / 10f;  // unidade do desenho: o círculo tem raio 10
+            // O desenho fica dentro do anel (o recorte da chave inglesa passaria da borda).
+            cv.save();
+            clip.reset();
+            clip.addCircle(cx, cy, r - dp(1), Path.Direction.CW);
+            cv.clipPath(clip);
             paint.setColor(fg);
             paint.setStrokeCap(Paint.Cap.ROUND);
             paint.setStrokeJoin(Paint.Join.ROUND);
@@ -423,6 +650,7 @@ public final class TLModOverlay {
                 Paint.FontMetrics fm = paint.getFontMetrics();
                 cv.drawText(TextUtils.isEmpty(letter) ? "?" : letter, cx, cy - (fm.ascent + fm.descent) / 2f, paint);
             }
+            cv.restore();
         }
     }
 
@@ -572,11 +800,14 @@ public final class TLModOverlay {
         long version = s.optLong("version");
         if (version == renderedVersion) return;
         renderedVersion = version;
+        lastSnapshot = s;
 
         JSONObject fabState = s.optJSONObject("fab");
         fab.setText(fabState != null ? fabState.optString("label", "M") : "M");
         fab.setVisibility(fabState == null || fabState.optBoolean("visible", true) ? View.VISIBLE : View.GONE);
         renderLaunchers(s);
+        applyButtonLayout(s);
+        renderEditLayer();
         JSONObject ws = s.optJSONObject("workshop");
         boolean wsOpen = ws != null && ws.optBoolean("open");
         workshop.setVisibility(wsOpen ? View.VISIBLE : View.GONE);

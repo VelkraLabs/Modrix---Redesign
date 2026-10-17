@@ -8,7 +8,7 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 
 set(BRIDGE_SOURCES src/log.cpp src/il2cpp_api.cpp src/tools.cpp src/bridge.cpp src/npc_hooks.cpp src/world_state.cpp src/save_hooks.cpp
   src/item_hooks.cpp src/item_traits.cpp src/draw_hooks.cpp
-  src/screen_hooks.cpp src/menu_hooks.cpp src/workshop_screen.cpp src/recipe_hooks.cpp)
+  src/screen_hooks.cpp src/menu_hooks.cpp src/workshop_screen.cpp src/recipe_hooks.cpp src/settings_tab.cpp)
 set(BRIDGE_WARNINGS -Wall -Wextra -Werror)
 
 if(ANDROID)

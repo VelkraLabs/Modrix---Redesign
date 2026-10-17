@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 
 #include "json.h"
 #include "json_writer.h"
@@ -431,7 +432,25 @@ bool PanelController::ToggleMod(const std::string& modId, std::string* error) {
 }
 
 bool PanelController::HandleAction(const std::string& action, const std::string& arg) {
-    if (action == "toggle_open") Toggle(Surface::Log);
+    if (action == "layout_edit") SetLayoutEditing(true);
+    else if (action == "layout_done") SetLayoutEditing(false);
+    else if (action == "layout_reset") {
+        std::string err;
+        layoutNotice_ = config_.ResetButtons(&err) ? "" : "Não foi possível salvar: " + err;
+        Bump();
+    } else if (action == "layout_move") {
+        // "<id> <x> <y>": o id não tem espaços (ids de mod são [a-z0-9._-]).
+        const size_t a = arg.find(' '), b = a == std::string::npos ? a : arg.find(' ', a + 1);
+        if (b == std::string::npos) return false;
+        char* end = nullptr;
+        const long x = std::strtol(arg.c_str() + a + 1, &end, 10);
+        if (end != arg.c_str() + b) return false;
+        const long y = std::strtol(arg.c_str() + b + 1, &end, 10);
+        if (*end != '\0') return false;
+        return MoveButton(arg.substr(0, a), static_cast<int32_t>(x), static_cast<int32_t>(y));
+    } else if (editingLayout_ && (action == "toggle_open" || action == "open")) {
+        return false;  // no modo de edição os botões só se movem
+    } else if (action == "toggle_open") Toggle(Surface::Log);
     else if (action == "close") Close();
     else if (action == "open" && arg == "log") Toggle(Surface::Log);
     else if (action == "open" && arg == "checklist") Toggle(Surface::Checklist);
@@ -449,10 +468,31 @@ bool PanelController::HandleAction(const std::string& action, const std::string&
 
 void PanelController::SetWorkshopOpen(bool open) {
     if (open && !modsLoaded_) RebuildMods();
-    if (workshopOpen_ == open && (!open || surface_ == Surface::None)) return;
+    if (workshopOpen_ == open && (!open || (surface_ == Surface::None && !editingLayout_))) return;
     workshopOpen_ = open;
-    if (open) surface_ = Surface::None, activeMod_.clear();  // a Oficina cobre a tela
+    if (open) surface_ = Surface::None, activeMod_.clear(), editingLayout_ = false;  // a Oficina cobre a tela
     Bump();
+}
+
+void PanelController::SetLayoutEditing(bool editing) {
+    if (editing && !modsLoaded_) RebuildMods();
+    if (editingLayout_ == editing) return;
+    editingLayout_ = editing;
+    layoutNotice_.clear();
+    if (editing) surface_ = Surface::None, activeMod_.clear(), workshopOpen_ = false;
+    Bump();
+}
+
+bool PanelController::MoveButton(const std::string& id, int32_t x, int32_t y, std::string* error) {
+    std::string err;
+    if (!config_.SetButtonPosition(id, {x, y}, &err)) {
+        layoutNotice_ = "Não foi possível salvar: " + err;
+        Bump();
+        if (error) *error = err;
+        return false;
+    }
+    if (!layoutNotice_.empty()) layoutNotice_.clear(), Bump();
+    return true;
 }
 
 void PanelController::RebuildMods() {
@@ -583,6 +623,7 @@ bool PanelController::Tick(int64_t nowMs) {
         Bump();
     }
     if (workshopRequested_.exchange(false, std::memory_order_acq_rel)) SetWorkshopOpen(true);
+    if (layoutEditRequested_.exchange(false, std::memory_order_acq_rel)) SetLayoutEditing(true);
     // Fora de um mundo os ícones somem, e a gaveta e o modal fecham.
     const std::optional<bool> world = source_.InWorld();
     if (world.value_or(false) != inWorld_) {
@@ -657,7 +698,25 @@ std::string PanelController::SnapshotJson() const {
     w.Key("small_sp").Int(theme::kSmallSp);
     w.EndObject();
 
-    w.Key("fab").BeginObject().Key("label").String("M").Key("visible").Bool(!workshopOpen_).EndObject();
+    w.Key("fab").BeginObject().Key("id").String(kMenuButtonId).Key("label").String("M")
+        .Key("visible").Bool(!workshopOpen_).EndObject();
+
+    // Botões na tela: tamanho, opacidade, posições salvas e o modo de edição.
+    const ButtonLayout buttons = config_.Buttons();
+    w.Key("layout").BeginObject();
+    w.Key("editing").Bool(editingLayout_);
+    w.Key("scale_pct").Int(buttons.scalePct);
+    w.Key("opacity_pct").Int(buttons.opacityPct);
+    w.Key("placement_max").Int(ButtonLayout::kPlacementMax);
+    w.Key("positions").BeginObject();
+    for (const auto& [id, p] : buttons.positions) w.Key(id).BeginArray().Int(p.x).Int(p.y).EndArray();
+    w.EndObject();
+    w.Key("title").String("Botões de mods");
+    w.Key("hint").String("Arraste os botões para onde quiser. Tamanho e opacidade: Configurações > Mods.");
+    w.Key("notice").String(layoutNotice_);
+    w.Key("done_label").String("Concluir");
+    w.Key("reset_label").String("Padrão");
+    w.EndObject();
 
     // Ícones abaixo do "M": o Boss Checklist (gaveta) e um por mod com canal "panel" (modal).
     w.Key("launchers_visible").Bool(LaunchersVisible());

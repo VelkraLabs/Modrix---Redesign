@@ -500,8 +500,9 @@ devolve `-2`.
 **Ícone próprio na tela.** Um mod que registra provedor **e** comando no canal `panel` ganha um
 ícone na coluna abaixo do botão "M" (só com um mundo carregado); o toque abre um modal no centro da
 tela. O provedor descreve o modal em JSON, e `"icon"` escolhe o desenho do ícone (`checklist`,
-`tools`, `star`, `gem`, `sword`, `book`; sem ele, a inicial do título). O overlay desenha e devolve
-os toques como comandos:
+`tools`, `star`, `gem`, `sword`, `book`; sem ele, a inicial do título). O jogador muda a posição,
+o tamanho e a opacidade dos ícones em **Configurações > Mods** (ver `overlay/README.md`). A posição
+fica salva pelo id `mod:<id do mod>`. O overlay desenha e devolve os toques como comandos:
 
 ```json
 {"title": "Ferramentas", "icon": "tools", "sections": [

@@ -2,7 +2,7 @@
 
 Overlay do TLMod dentro do jogo, com uma superfície aberta por vez:
 
-- **Botão "M"** (flutuante, arrastável): painel com o **Log** (as últimas 150
+- **Botão "M"** (flutuante): painel com o **Log** (as últimas 150
   linhas do log do TLMod, com o caminho do `tlmod.log`).
 - **Ícones abaixo do "M"**, só com um mundo carregado:
   - **Boss Checklist** (prancheta; JSON do mod `tlmod.boss_checklist`): uma
@@ -15,6 +15,25 @@ Overlay do TLMod dentro do jogo, com uma superfície aberta por vez:
   ícones somem e a gaveta ou o modal fecham.
 
 Os ícones são desenhados com `Canvas` (`LauncherView`), sem imagens.
+
+**Posição, tamanho e opacidade dos botões.** Ficam em **Configurações > Mods**,
+uma aba a mais na tela de Configurações do próprio jogo
+(`il2cpp_bridge/src/settings_tab.cpp`), com o ícone da Caixa de Ferramentas.
+As linhas usam as entradas do jogo, e o que elas fazem vem de `ModSettingsTab`
+(`settings_tab.h`):
+
+- **Posição dos botões de mods: Editar** fecha as Configurações e abre o
+  **modo de edição**. O "M" e todos os ícones aparecem, mesmo fora de um
+  mundo, com anel tracejado, sobre um fundo escurecido e com uma barra no
+  topo (**Padrão** e **Concluir**). Arrastar move um botão; ao soltar, o
+  centro dele vai para a configuração.
+- **Tamanho** (50% a 150%) e **Opacidade** (30% a 100%), em barras de 10 em
+  10%. A opacidade vale fora do modo de edição.
+- **Padrão** (o botão da tela, com a aba aberta) volta tudo ao normal.
+
+Fora do modo de edição, os botões só respondem ao toque e não se arrastam.
+Um ícone sem posição salva fica na coluna abaixo do "M" e acompanha o "M"
+quando ele é movido.
 
 **Oficina de Mods (painel).** Tela grande para gerenciar os mods. O botão
 **Mods** do menu principal abre a Oficina nativa, feita com as telas do próprio
@@ -54,9 +73,17 @@ com o C++ é feita por JNI. Não precisa de permissão de sobreposição.
 O `PanelController` entrega um view-model em JSON (`SnapshotJson()`) que já
 traz textos, cores e medidas em dp: `surface` (`none`, `log`, `checklist` ou
 `mod:<id>`), `launchers` (id, rótulo, ícone, estilo `drawer`/`modal`, ativo) e
-`launchers_visible`. O Java só desenha esse JSON e devolve ações
+`launchers_visible` e `layout` (modo de edição, `scale_pct`, `opacity_pct`
+e as posições salvas). O Java só desenha esse JSON e devolve ações
 (`toggle_open`, `open`, `close`, `toggle_mod`, `mod_command`, `workshop_open`,
-`workshop_close`, `workshop_expand`). A prévia lê o mesmo JSON.
+`workshop_close`, `workshop_expand`, `layout_edit`, `layout_move`,
+`layout_reset`, `layout_done`). A prévia lê o mesmo JSON.
+
+- **Modo de edição.** A aba Mods roda na thread do jogo: chama
+  `PanelController::RequestLayoutEdit()` (atômico), e o modo abre no próximo
+  `Tick`. As posições são o centro do botão em décimos de milésimo da largura e
+  da altura da tela (`ButtonPlacement`). Assim, a mesma posição relativa vale
+  em qualquer resolução e são refeitas quando o tamanho da tela muda.
 
 - **Oficina de Mods.** O botão do menu roda na thread do jogo: chama
   `PanelController::RequestWorkshop()` (atômico), e a Oficina abre no próximo
@@ -83,8 +110,13 @@ traz textos, cores e medidas em dp: `surface` (`none`, `log`, `checklist` ou
 A escolha é salva em `tlmod_config.json`, na mesma pasta que contém `mods/`:
 
 ```json
-{"schema":1,"disabled_mods":["tlmod.example_item"]}
+{"schema":1,"disabled_mods":["tlmod.example_item"],
+ "buttons":{"scale":100,"opacity":100,"positions":{"menu":[9300,2600]}}}
 ```
+
+`buttons` guarda o tamanho e a opacidade, em %, e só as posições dos botões
+que foram movidos (`menu`, `checklist` ou `mod:<id>`). Um valor inválido nessa
+parte é ignorado sem erro, porque só afeta a aparência. Essa parte vale na hora.
 
 A gravação é atômica (`.tmp` + `rename`). A mudança vale a partir da próxima
 abertura do jogo: `ModLoader::SetDisabled` é aplicado antes de `LoadAll`, e
@@ -107,4 +139,5 @@ Para gerar a prévia no host:
 build-host/overlay_snapshot modapi/mods/boss_checklist/sample_checklist.json out/ modapi/mods/devtools/sample_panel.json
 python3 modapi/overlay/preview/render_preview.py out/snapshot_closed.json out/snapshot_checklist.json \
     out/snapshot_log.json out/snapshot_tools.json preview.png
+python3 modapi/overlay/preview/render_preview.py out/snapshot_edit.json out/snapshot_moved.json botoes.png
 ```

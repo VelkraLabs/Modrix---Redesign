@@ -19,6 +19,7 @@
 #include "tlmod/runtime/mod_loader.h"
 #include "tlmod/overlay/config_store.h"
 #include "tlmod/overlay/panel.h"
+#include "tlmod/overlay/settings_tab.h"
 #include "overlay_android.h"
 
 namespace {
@@ -84,6 +85,38 @@ TLModWorkshopSource WorkshopSource() {
         else
             tlmod::rt::Log(TLMOD_LOG_ERROR, "oficina", "não foi possível salvar a configuração: " + error);
     };
+    return s;
+}
+
+// Aba "Mods" nas Configurações do jogo (settings_tab.cpp na ponte): as linhas e os
+// toques vêm do ModSettingsTab. Thread do jogo; a configuração é thread-safe e o
+// pedido de edição ao painel é atômico.
+struct NativeSettings {
+    tlmod::overlay::ModSettingsTab* tab = nullptr;
+    std::vector<tlmod::overlay::SettingsRow> rows;  // as strings de row() valem até a próxima chamada
+};
+NativeSettings g_settings;
+
+TLModSettingsTab SettingsSource() {
+    using tlmod::overlay::ModSettingsTab;
+    TLModSettingsTab s{};
+    s.user = &g_settings;
+    s.title = ModSettingsTab::kTitle;
+    s.iconItem = ModSettingsTab::kIconItem;
+    s.count = [](void*) { return static_cast<int32_t>(ModSettingsTab::kRowCount); };
+    s.row = [](void* user, int32_t i, TLModSettingRow* out) {
+        auto* n = static_cast<NativeSettings*>(user);
+        n->rows = n->tab->Rows();
+        if (i < 0 || static_cast<size_t>(i) >= n->rows.size()) return false;
+        const tlmod::overlay::SettingsRow& r = n->rows[static_cast<size_t>(i)];
+        const bool slider = r.kind == tlmod::overlay::SettingsRow::Kind::Slider;
+        *out = {slider ? TLMOD_SETTING_SLIDER : TLMOD_SETTING_BUTTON, r.label.c_str(), r.value.c_str(), r.steps,
+                r.step};
+        return true;
+    };
+    s.click = [](void* user, int32_t i) { return static_cast<NativeSettings*>(user)->tab->Click(i); };
+    s.setStep = [](void* user, int32_t i, int32_t step) { static_cast<NativeSettings*>(user)->tab->SetStep(i, step); };
+    s.reset = [](void* user) { static_cast<NativeSettings*>(user)->tab->Reset(); };
     return s;
 }
 
@@ -181,6 +214,13 @@ void* RuntimeMain(void*) {
     // Oficina de Mods: botão "Mods" desenhado pelo jogo no menu principal.
     g_panel = &panel;
     TLMod_SetMainMenuButton("Mods", &OnMenuModsButton);
+    // Aba Mods nas Configurações: tamanho, opacidade e posição dos botões do overlay.
+    static tlmod::overlay::ModSettingsTab settingsTab(config, &panel);
+    g_settings.tab = &settingsTab;
+    TLModSettingsTab settings = SettingsSource();
+    TLMod_SetSettingsTab(&settings);
+    if (!TLMod_SettingsTabAvailable())
+        tlmod::rt::Log(TLMOD_LOG_WARN, "configurações", "aba Mods indisponível nesta build do jogo (ver o log da ponte)");
     return nullptr;
 }
 

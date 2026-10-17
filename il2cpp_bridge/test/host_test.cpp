@@ -919,6 +919,156 @@ TLModRecipe MakeRecipe(int32_t result, int32_t stack, std::initializer_list<std:
     return r;
 }
 
+// ---------------------------------------------------------------------------
+// Aba Mods nas Configurações: fonte de teste com um botão e duas barras.
+struct TestSettings {
+    int32_t scaleStep = 5, opacityStep = 7;
+    int clicks = 0, resets = 0, steps = 0;
+    std::string scaleText = "100%", opacityText = "100%";
+    bool closeOnClick = true;
+} g_settingsSrc;
+
+int32_t SettingsCount(void*) { return 3; }
+bool SettingsRow(void*, int32_t i, TLModSettingRow* out) {
+    switch (i) {
+        case 0: *out = {TLMOD_SETTING_BUTTON, "Posição dos botões", "Editar", 0, 0}; return true;
+        case 1: *out = {TLMOD_SETTING_SLIDER, "Tamanho", g_settingsSrc.scaleText.c_str(), 10, g_settingsSrc.scaleStep}; return true;
+        case 2: *out = {TLMOD_SETTING_SLIDER, "Opacidade", g_settingsSrc.opacityText.c_str(), 7, g_settingsSrc.opacityStep}; return true;
+        default: return false;
+    }
+}
+bool SettingsClick(void*, int32_t i) {
+    g_settingsSrc.clicks += i == 0;
+    return i == 0 && g_settingsSrc.closeOnClick;
+}
+void SettingsStep(void*, int32_t i, int32_t step) {
+    ++g_settingsSrc.steps;
+    if (i == 1) g_settingsSrc.scaleStep = step, g_settingsSrc.scaleText = std::to_string(50 + 10 * step) + "%";
+    if (i == 2) g_settingsSrc.opacityStep = step, g_settingsSrc.opacityText = std::to_string(30 + 10 * step) + "%";
+}
+void SettingsReset(void*) {
+    ++g_settingsSrc.resets;
+    g_settingsSrc.scaleStep = 5, g_settingsSrc.scaleText = "100%";
+}
+
+int TestSettings(void* lib) {
+    std::printf("\n== aba Mods nas Configurações\n");
+    auto sym = [&](const char* name) { return dlsym(lib, name); };
+    auto open = reinterpret_cast<void (*)(int32_t)>(sym("mock_settings_open"));
+    auto frameFn = reinterpret_cast<size_t (*)(int32_t, int32_t, int32_t, int32_t, float, bool, bool, char*, size_t)>(
+        sym("mock_settings_frame"));
+    auto state = reinterpret_cast<int32_t (*)(int*, int*, int32_t*, int*, int*)>(sym("mock_settings_state"));
+    auto tab = reinterpret_cast<bool (*)(int32_t*, bool*, bool*, bool*, void**, uint64_t*)>(sym("mock_settings_tab"));
+    auto gameTab = reinterpret_cast<void (*)(int, int32_t*)>(sym("mock_settings_game_tab"));
+    auto setBacking = reinterpret_cast<void (*)(int32_t, int32_t, int32_t, int32_t)>(sym("mock_settings_set_backing"));
+    auto entries = reinterpret_cast<size_t (*)()>(sym("mock_settings_entries"));
+    auto setScreen = reinterpret_cast<void (*)(int32_t, int32_t)>(sym("mock_set_screen"));
+    auto sounds = reinterpret_cast<int (*)(int*)>(sym("mock_sounds_played"));
+    CHECK(open && frameFn && state && tab && gameTab && setBacking && entries && setScreen && sounds);
+    setScreen(1600, 1200);
+    setBacking(400, 80, 800, 100);  // faixa larga: cabe uma aba depois da última
+    char buf[4096];
+    auto frame = [&](int32_t x, int32_t y, int32_t click, int32_t drag, float value, bool reset, bool back) {
+        frameFn(x, y, click, drag, value, reset, back, buf, sizeof(buf));
+        return std::string(buf);
+    };
+    int closed = 0, resets = 0, tabsPressed = 0, errors = 0;
+    int32_t openedUI = 0, rect[4] = {};
+    bool pressed = false, drawItem = false, drawIcon = true;
+    void* texture = nullptr;
+    uint64_t colour = 0;
+
+    // Sem fonte: o jogo como sempre, sem a aba.
+    CHECK(!TLMod_SettingsTabAvailable());
+    open(4);  // Toque
+    std::string f = frame(-1, -1, -1, -1, 0, false, false);
+    CHECK(entries() == 2 && f.find("linha:opcao:63|Editar") != std::string::npos && f.find("titulo:4") != std::string::npos);
+    CHECK(!tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour));
+
+    TLModSettingsTab src{nullptr, "Mods", 1923, &SettingsCount, &SettingsRow, &SettingsClick, &SettingsStep, &SettingsReset};
+    TLMod_SetSettingsTab(&src);
+    src.title = "outro";  // a ponte copiou
+    CHECK(TLMod_SettingsTabAvailable());
+    f = frame(-1, -1, -1, -1, 0, false, false);
+    CHECK(tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour));
+    std::printf("    aba Mods em (%d, %d) %dx%d\n", rect[0], rect[1], rect[2], rect[3]);
+    CHECK(rect[0] == 1120 && rect[1] == 100 && rect[2] == 60 && rect[3] == 60);  // depois da última, no mesmo passo
+    CHECK(!pressed && drawItem && !drawIcon && texture != nullptr);  // o ícone é a textura do item 1923
+    CHECK(colour == (0xFFFFFFFFull | (1ull << 32)));
+    CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 4 && tabsPressed == 1 && errors == 0);
+
+    // Toque na aba: SetCategory(20), as nossas entradas, o nosso título.
+    int lastSound = 0;
+    const int soundsBefore = sounds(&lastSound);
+    frame(1150, 130, -1, -1, 0, false, false);
+    CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == terraria::kSettingsModsCategory);
+    CHECK(entries() == 3 && sounds(&lastSound) == soundsBefore + 1 && lastSound == 12);
+    f = frame(-1, -1, -1, -1, 0, false, false);
+    std::printf("%s", f.c_str());
+    CHECK(f.find("linha:Posição dos botões|Editar\n") != std::string::npos);
+    CHECK(f.find("barra:Tamanho=100% 0.50/10\n") != std::string::npos);
+    CHECK(f.find("barra:Opacidade=100% 1.00/7\n") != std::string::npos);
+    CHECK(f.find("titulo-config:Mods\n") != std::string::npos && f.find("titulo:") == std::string::npos);
+    CHECK(tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour) && pressed);
+    CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 20 && tabsPressed == 0);
+
+    // Barra: o jogo quantiza (0,73 -> 0,7) e chama SetValue: passo 7 na fonte.
+    frame(-1, -1, -1, 1, 0.73f, false, false);
+    CHECK(g_settingsSrc.scaleStep == 7 && g_settingsSrc.steps == 1);
+    f = frame(-1, -1, -1, 1, 0.70f, false, false);  // mesmo passo: a fonte não é chamada de novo
+    CHECK(g_settingsSrc.steps == 1 && f.find("barra:Tamanho=120% 0.70/10\n") != std::string::npos);
+
+    // "Padrão": o reset da fonte, não o do jogo.
+    frame(-1, -1, -1, -1, 0, true, false);
+    CHECK(g_settingsSrc.resets == 1 && g_settingsSrc.scaleStep == 5);
+    CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 20 && resets == 0);
+
+    // Botão: o click da fonte; true fecha as Configurações no mesmo frame. O OpenUI do jogo fica de fora.
+    const int closedBefore = closed;
+    frame(-1, -1, 0, -1, 0, false, false);
+    CHECK(g_settingsSrc.clicks == 1);
+    CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 20 && closed == closedBefore + 1 && openedUI == -1);
+    g_settingsSrc.closeOnClick = false;
+    frame(-1, -1, 0, -1, 0, false, false);
+    CHECK(g_settingsSrc.clicks == 2);
+    CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 20 && closed == closedBefore + 1);
+
+    // Voltar com a aba Mods aberta fecha (a categoria 20 está fora das do jogo).
+    frame(-1, -1, -1, -1, 0, false, true);
+    CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 20 && closed == closedBefore + 2);
+
+    // De volta a uma aba do jogo: as entradas, o título e o "Padrão" do jogo.
+    gameTab(1, rect);
+    frame(rect[0] + 5, rect[1] + 5, -1, -1, 0, false, false);
+    CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 4 && entries() == 2);
+    f = frame(-1, -1, 0, 1, 0.25f, true, false);  // botão e barra do jogo, e Padrão
+    CHECK(f.find("titulo:4") != std::string::npos && f.find("barra:barra:54=25% 0.25/100") != std::string::npos);
+    CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 4 && openedUI == 63 && resets == 1);
+    CHECK(g_settingsSrc.clicks == 2 && g_settingsSrc.resets == 1 && g_settingsSrc.steps == 1);
+
+    // Faixa justa: não cabe antes nem depois; as 9 abas reespaçadas na faixa, de 72,5 em 72,5 px.
+    setBacking(470, 80, 640, 100);
+    setScreen(1600, 1202);  // outra tela: a aba é rearrumada
+    frame(-1, -1, -1, -1, 0, false, false);
+    CHECK(tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour));
+    int32_t first[4], last[4];
+    gameTab(0, first);
+    gameTab(7, last);
+    std::printf("    reespaçadas: 1ª em %d, 8ª em %d, Mods em %d\n", first[0], last[0], rect[0]);
+    CHECK(first[0] == 470 && last[0] == 977 && rect[0] == 1050 && rect[0] + rect[2] <= 1110);
+    // De volta à tela larga: as abas do jogo nas posições originais e a Mods depois da última.
+    setBacking(400, 80, 800, 100);
+    setScreen(1600, 1200);
+    frame(-1, -1, -1, -1, 0, false, false);
+    gameTab(0, first);
+    CHECK(tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour) && first[0] == 480 && rect[0] == 1120);
+    state(&closed, &resets, &openedUI, &tabsPressed, &errors);
+    CHECK(errors == 0);
+    TLMod_SetSettingsTab(nullptr);
+    CHECK(!TLMod_SettingsTabAvailable());
+    return 0;
+}
+
 int TestRecipes(void* lib) {
     std::printf("\n== receitas de mod\n");
     auto sym = [&](const char* name) { return dlsym(lib, name); };
@@ -1155,6 +1305,7 @@ int main(int argc, char** argv) {
     if (int rc = TestTraits(lib)) return rc;
     if (int rc = TestSaves(lib)) return rc;
     if (int rc = TestRecipes(lib)) return rc;
+    if (int rc = TestSettings(lib)) return rc;
 
     std::printf("TODOS OS TESTES PASSARAM\n");
     return 0;

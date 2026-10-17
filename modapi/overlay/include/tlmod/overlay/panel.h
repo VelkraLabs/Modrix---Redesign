@@ -7,6 +7,11 @@
 // Os ícones só aparecem com um mundo carregado. A Oficina de Mods (painel) cobre
 // tudo quando a do jogo não está disponível.
 //
+// Modo de edição dos botões (aberto pela aba Mods das Configurações do jogo):
+// o "M" e todos os ícones aparecem, mesmo fora de um mundo, e o renderizador
+// deixa arrastá-los; cada soltura grava a posição na ConfigStore. Tamanho e
+// opacidade também vêm da ConfigStore (ButtonLayout).
+//
 // O controlador guarda o estado, executa as ações (abrir/fechar, comando de mod,
 // ligar/desligar mod), busca os dados (ModLoader e o canal do Boss Checklist) e
 // produz um VIEW-MODEL em JSON. Quem desenha (Views
@@ -166,6 +171,8 @@ struct ModTab {
 constexpr const char* kModPanelChannel = "panel";
 // Ícones que o renderizador sabe desenhar.
 constexpr const char* kLauncherIcons[] = {"checklist", "tools", "star", "gem", "sword", "book"};
+// Id do "M" nas posições salvas (ButtonLayout::positions); os ícones usam o id do lançador.
+constexpr const char* kMenuButtonId = "menu";
 
 // Canal do Boss Checklist que o painel consome.
 constexpr const char* kChecklistMod = "tlmod.boss_checklist";
@@ -195,8 +202,19 @@ public:
     // Ponto de entrada do renderizador: "toggle_open" (o "M": o Log), "close",
     // "open" (arg "log" | "checklist" | "mod:<id>": alterna), "toggle_mod" (arg = id do mod),
     // "mod_command" (arg = comando para o mod do modal aberto), "workshop_open",
-    // "workshop_close", "workshop_expand" (arg = id do mod: mostra/esconde o erro).
+    // "workshop_close", "workshop_expand" (arg = id do mod: mostra/esconde o erro),
+    // "layout_edit", "layout_done", "layout_reset" e "layout_move" (arg = "<id> <x> <y>":
+    // o centro do botão em décimos de milésimo da tela, ver ButtonPlacement).
     bool HandleAction(const std::string& action, const std::string& arg);
+
+    // Modo de edição dos botões. Abrir fecha a superfície aberta e a Oficina.
+    void SetLayoutEditing(bool editing);
+    // Pedido de qualquer thread (a aba Mods das Configurações roda na thread do
+    // jogo): o modo de edição abre no próximo Tick.
+    void RequestLayoutEdit() { layoutEditRequested_.store(true, std::memory_order_release); }
+    bool IsEditingLayout() const { return editingLayout_; }
+    // Grava a posição de um botão ("menu", "checklist" ou "mod:<id>").
+    bool MoveButton(const std::string& id, int32_t x, int32_t y, std::string* error = nullptr);
 
     // Oficina de Mods. Abrir fecha a superfície aberta (a Oficina fica por cima de tudo).
     void SetWorkshopOpen(bool open);
@@ -212,8 +230,8 @@ public:
 
     // --- Estado --------------------------------------------------------------
     Surface OpenSurface() const { return surface_; }
-    // Ícones na tela: só com um mundo carregado e sem a Oficina aberta.
-    bool LaunchersVisible() const { return inWorld_ && !workshopOpen_; }
+    // Ícones na tela: com um mundo carregado e sem a Oficina aberta, ou no modo de edição.
+    bool LaunchersVisible() const { return (inWorld_ && !workshopOpen_) || editingLayout_; }
     uint64_t Version() const { return version_; }
     const std::vector<ModRow>& ModRows() const { return modRows_; }
     const std::string& ModsNotice() const { return modsNotice_; }
@@ -245,6 +263,9 @@ private:
 
     bool workshopOpen_ = false;
     std::atomic<bool> workshopRequested_{false};
+    bool editingLayout_ = false;
+    std::atomic<bool> layoutEditRequested_{false};
+    std::string layoutNotice_;  // erro ao salvar uma posição
     std::set<std::string> expanded_;  // mods com o erro aberto na Oficina
     uint64_t configRevision_ = 0;     // a configuração pode mudar por fora (Oficina nativa)
 

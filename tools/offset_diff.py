@@ -74,6 +74,11 @@ FIELD_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "gui_crafting_off": ("", "GUICrafting", "instance"),
     "gui_craft_guide_popup_off": ("", "GUICraftGuidePopup", "instance"),
     "recipe_off": ("Terraria", "Recipe", "instance"),
+    "settings_overlay_off": ("", "GUISettingsOverlay", "instance"),
+    "setting_entry_off": ("", "GUISettingEntry", "instance"),
+    "settings_overlay_layout_off": ("", "SettingsOverlay_Layout", "instance"),
+    "settings_categories_off": ("", "SettingsOverlayCategories_Layout", "instance"),
+    "transaction_button_layout_off": ("", "TransactionButton_Layout", "instance"),
     "item_snippet_off": ("Terraria.GameContent.UI.Chat", "ItemTagHandler.ItemSnippet", "instance"),
     "item_id_static_off": ("Terraria.ID", "ItemID", "static"),
     "npc_id_static_off": ("Terraria.ID", "NPCID", "static"),
@@ -118,6 +123,16 @@ METHOD_CLASSES: Dict[str, Tuple[str, str]] = {
     "ChatManager": ("Terraria.UI.Chat", "ChatManager"),
     "SoundEngine": ("Terraria.Audio", "SoundEngine"),
     "ItemSnippet": ("Terraria.GameContent.UI.Chat", "ItemTagHandler.ItemSnippet"),
+    "GUISettingsOverlay": ("", "GUISettingsOverlay"),
+    "GUISettingEntry": ("", "GUISettingEntry"),
+    "GUIOpenUIButtonSetting": ("", "GUIOpenUIButtonSetting"),
+    "GUISliderSetting": ("", "GUISliderSetting"),
+}
+
+# Nomes de rva::/argc:: cujo resto não é o nome do método (overloads com o mesmo nome).
+# "_ctor" sempre vira ".ctor".
+METHOD_ALIASES: Dict[str, str] = {
+    "GUITransactionButton_DrawTexture": "Draw",  # o overload com Texture2D (o RVA desempata)
 }
 
 # Constantes do header que espelham uma const do jogo.
@@ -151,6 +166,8 @@ CLASS_NAME_CONSTANTS: Dict[str, str] = {
     "kXnaTexture2DClass": "Microsoft.Xna.Framework.Graphics",
     "kItemIdClass": "Terraria.ID",
     "kGuiInstanceClass": "",
+    "kSettingsOverlayClass": "",
+    "kSettingsOverlayLayoutClass": "",
 }
 
 # content_registry.cpp DefaultRanges: tipo -> const com a contagem original.
@@ -256,7 +273,8 @@ FIELD_LINE = re.compile(
     r"(?P<type>.+?)\s+(?P<name>[\w<>`$.]+)(?:\s*=\s*(?P<const>.+?))?;\s*(?://\s*(?P<offset>0x[0-9A-Fa-f]+))?\s*$"
 )
 RVA_LINE = re.compile(r"^\t// RVA: (?P<rva>-1|0x[0-9A-Fa-f]+)")
-METHOD_LINE = re.compile(r"^\t(?P<head>[^()]*?)\b(?P<name>[\w.<>`|$]+)\((?P<params>.*)\)\s*\{\s*\}\s*$")
+# O nome vem depois de um espaço: ".ctor" e ".cctor" ficam com o ponto.
+METHOD_LINE = re.compile(r"^\t(?P<head>[^()]*?\s)(?P<name>[\w.<>`|$]+)\((?P<params>.*)\)\s*\{\s*\}\s*$")
 
 
 def count_params(params: str) -> int:
@@ -580,6 +598,7 @@ def compare(dump: Dump, header_path: Path, header: List[HeaderConst],
     argcs = by_ns.get("argc", {})
     for key in list(rvas) + [k for k in argcs if k not in rvas]:
         prefix, _, meth = key.partition("_")
+        meth = METHOD_ALIASES.get(key, ".ctor" if meth == "ctor" else meth)
         if prefix not in METHOD_CLASSES or not meth:
             out.append(Finding("métodos", WARN, key, "", "", where(rvas.get(key) or argcs[key]),
                                f"sem regra para o prefixo '{prefix}' (METHOD_CLASSES)"))

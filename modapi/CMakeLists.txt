@@ -29,7 +29,7 @@ target_link_libraries(tlmod_runtime PUBLIC ${CMAKE_DL_LIBS} ZLIB::ZLIB)
 set_target_properties(tlmod_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # --- Overlay: lógica do painel (todas as plataformas) -------------------------
-add_library(tlmod_overlay STATIC overlay/src/config_store.cpp overlay/src/panel.cpp)
+add_library(tlmod_overlay STATIC overlay/src/config_store.cpp overlay/src/panel.cpp overlay/src/settings_tab.cpp)
 target_include_directories(tlmod_overlay PUBLIC overlay/include PRIVATE src overlay/src)
 target_compile_options(tlmod_overlay PRIVATE ${TLMOD_WARNINGS})
 target_link_libraries(tlmod_overlay PUBLIC tlmod_runtime)

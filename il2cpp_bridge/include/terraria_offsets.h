@@ -390,6 +390,63 @@ constexpr size_t TextInset = 0x38;  // int, de cada lado
 constexpr size_t Scale = 0x60;      // float
 }  // namespace string_button_layout_off
 
+// --- Aba Mods nas Configurações (settings_tab.cpp) ---------------------------------
+// GUISettingsOverlay: a tela de Configurações. As abas são desenhadas uma a uma em
+// DrawCategories (8 GUITransactionButton.Draw com os layouts abaixo); a aba aberta
+// é Selected, e SetCategory(c) refaz _categorySettings com as entradas de _allSettings
+// cuja categoria é c (GetCategorySetup pelo id). DrawCategoryOptions desenha
+// _categorySettings (GUIDraggableItemGrid, Draw virtual de cada entrada).
+constexpr const char* kSettingsOverlayClass = "GUISettingsOverlay";  // namespace global
+namespace settings_overlay_off {
+constexpr size_t _categorySettings = 0x18;     // List<GUISettingEntry>
+constexpr size_t Selected = 0x28;              // SettingsOverlayOptionCategories_Layout.Category (0..19)
+constexpr size_t titleScale = 0x68;            // float: animação do título
+constexpr size_t TimeSinceItemChange = 0x94;   // float
+}  // namespace settings_overlay_off
+// A aba Mods é a categoria 20, fora do enum: nenhuma aba do jogo fica marcada,
+// nenhuma entrada do jogo é dessa categoria, DrawTitle e DrawMainButtons conferem
+// o intervalo (o título vira o nosso; Voltar fecha), e Array.IndexOf(TabOrder) dá -1.
+constexpr int32_t kSettingsModsCategory = 20;
+// GUISettingID das nossas entradas: bem acima do último do jogo (0x9D). Os switch
+// das entradas (GetOption, GetMaxValue...) caem no padrão com eles, e os hooks
+// respondem antes. Fica fora de 0x7F..0x94 (barras de cor: HSL).
+constexpr int32_t kSettingsModsIdBase = 0x7100;
+namespace setting_entry_off {
+constexpr size_t _id = 0x10;  // GUISettingID (GUISettingEntry)
+}  // namespace setting_entry_off
+// SettingsOverlay_Layout.Instance: o título e o layout das abas.
+constexpr const char* kSettingsOverlayLayoutClass = "SettingsOverlay_Layout";
+namespace settings_overlay_layout_off {
+constexpr size_t Title = 0x18;       // StringButton_Layout
+constexpr size_t Categories = 0x80;  // SettingsOverlayCategories_Layout
+}  // namespace settings_overlay_layout_off
+// SettingsOverlayCategories_Layout: um TransactionButton_Layout por aba desenhada.
+namespace settings_categories_off {
+constexpr size_t Backing = 0x10;           // Panel_Layout: a faixa das abas
+constexpr size_t General = 0x28;           // TransactionButton_Layout: Geral (General, Links, MoreInfo)
+constexpr size_t Cursor = 0x30;            // TransactionButton_Layout: Toque (Touch...)
+constexpr size_t Video = 0x38;             // TransactionButton_Layout: Vídeo
+constexpr size_t Language = 0x40;          // TransactionButton_Layout: Controle (Controller...)
+constexpr size_t Interface = 0x48;         // TransactionButton_Layout: Interface
+constexpr size_t Sound = 0x60;             // TransactionButton_Layout: Som
+constexpr size_t KeyboardMouse = 0x70;     // TransactionButton_Layout: Teclado e mouse
+constexpr size_t GameplayControls = 0x78;  // TransactionButton_Layout: Controles de jogo
+}  // namespace settings_categories_off
+// TransactionButton_Layout: com DrawItem o botão desenha a textura passada a
+// GUITransactionButton.Draw(layout, Texture2D, ...) no lugar do ícone (DrawIcon).
+namespace transaction_button_layout_off {
+constexpr size_t DrawIcon = 0xA1;            // bool
+constexpr size_t DrawItem = 0xA2;            // bool
+constexpr size_t IconOffset = 0xBC;          // Vector2
+constexpr size_t DisableItemResize = 0x104;  // bool
+constexpr size_t ForceItemScale = 0x105;     // bool
+constexpr size_t ItemOffset = 0x10C;         // Vector2
+constexpr size_t ItemColour = 0x120;         // Color
+constexpr size_t DisabledItemColour = 0x124;
+constexpr size_t PressedItemColour = 0x128;
+constexpr size_t PressedBorderColour = 0x1C8;  // Color: o último campo (a cópia vai até +4)
+}  // namespace transaction_button_layout_off
+
 // Button_Layout (base de TransactionButton_Layout): onde o botão fica na tela.
 namespace button_layout_off {
 constexpr size_t AnchorControl = 0x10;  // ControlAnchor.ControlId (0 = Screen)
@@ -612,6 +669,25 @@ constexpr uintptr_t KeyboardInput_GetKeyUp = 0x71CCD8;  // (KeyCode): Escape (27
 constexpr uintptr_t Main_get_mouseX = 0xC635D0;
 constexpr uintptr_t Main_get_mouseY = 0xC6367C;
 constexpr uintptr_t Main_get_mouseLeft = 0xC639D8;
+// Aba Mods nas Configurações: a tela e as entradas que ela usa.
+constexpr uintptr_t GUISettingsOverlay_SetCategory = 0xA67B94;      // (Category)
+constexpr uintptr_t GUISettingsOverlay_DrawCategories = 0xA68C68;   // as abas
+constexpr uintptr_t GUISettingsOverlay_DrawTitle = 0xA699E4;
+constexpr uintptr_t GUISettingsOverlay_ResetPageSettings = 0xA6B3C8;  // "Padrão"
+constexpr uintptr_t GUISettingsOverlay_Close = 0xA68838;            // fecha (volta à pausa ou ao menu)
+constexpr uintptr_t GUIOpenUIButtonSetting_ctor = 0xA8BBC0;         // (GUISettingID)
+constexpr uintptr_t GUIOpenUIButtonSetting_GetOption = 0xA8BF14;    // o texto da linha
+constexpr uintptr_t GUIOpenUIButtonSetting_GetButtonCaption = 0xA8C2B4;  // o texto do botão
+constexpr uintptr_t GUIOpenUIButtonSetting_OpenUI = 0xA8C434;       // o toque
+constexpr uintptr_t GUISliderSetting_ctor = 0xA92C98;               // (GUISettingID)
+constexpr uintptr_t GUISliderSetting_GetTitle = 0xA93E18;
+constexpr uintptr_t GUISliderSetting_GetValue = 0xA9395C;           // float 0..1
+constexpr uintptr_t GUISliderSetting_GetMaxValue = 0xA94220;        // passos (GUISlider.QuantiseValue)
+constexpr uintptr_t GUISliderSetting_SetValue = 0xA942E8;           // (float 0..1, já em passos)
+constexpr uintptr_t GUISliderSetting_GetStringValue = 0xA948E4;
+// GUITransactionButton.Draw(layout, Texture2D, string, bool, ref float, Color?, bool x4):
+// a aba Mods com a textura do item; Color? vai num registrador (5 bytes).
+constexpr uintptr_t GUITransactionButton_DrawTexture = 0x1223F70;
 // Nome de NPC: o jogo só lê Lang pelo netID (o da casca).
 constexpr uintptr_t NPC_get_TypeName = 0xED9240;   // Lang.GetNPCNameValue(netID): hover, barra, mapa, morte
 constexpr uintptr_t NPC_GetTypeNetName = 0xEDB0BC; // NetworkText.FromKey(...): "X despertou!", "X foi derrotado"
@@ -711,6 +787,21 @@ constexpr int KeyboardInput_GetKeyUp = 1;
 constexpr int Main_get_mouseX = 0;
 constexpr int Main_get_mouseY = 0;
 constexpr int Main_get_mouseLeft = 0;
+constexpr int GUISettingsOverlay_SetCategory = 1;
+constexpr int GUISettingsOverlay_DrawCategories = 0;
+constexpr int GUISettingsOverlay_DrawTitle = 0;
+constexpr int GUISettingsOverlay_ResetPageSettings = 0;
+constexpr int GUISettingsOverlay_Close = 0;
+constexpr int GUISettingEntry_ctor = 1;  // GUIOpenUIButtonSetting e GUISliderSetting
+constexpr int GUIOpenUIButtonSetting_GetOption = 0;
+constexpr int GUIOpenUIButtonSetting_GetButtonCaption = 0;
+constexpr int GUIOpenUIButtonSetting_OpenUI = 0;
+constexpr int GUISliderSetting_GetTitle = 0;
+constexpr int GUISliderSetting_GetValue = 0;
+constexpr int GUISliderSetting_GetMaxValue = 0;
+constexpr int GUISliderSetting_SetValue = 1;
+constexpr int GUISliderSetting_GetStringValue = 0;
+constexpr int GUITransactionButton_DrawTexture = 10;  // há 2 de 10: o do Texture2D no 2º parâmetro
 constexpr int NPC_get_TypeName = 0;
 constexpr int NPC_GetTypeNetName = 0;
 }  // namespace argc

@@ -10,6 +10,7 @@ tema. Serve para ver o resultado antes do aparelho; não é uma captura de tela.
     python3 render_preview.py out/snapshot_closed.json out/snapshot_checklist.json out/snapshot_log.json \
         out/snapshot_tools.json preview.png
     python3 render_preview.py out/snapshot_workshop.json workshop.png     # Oficina de Mods
+    python3 render_preview.py out/snapshot_edit.json out/snapshot_moved.json botoes.png  # botões de mods
 """
 
 import json
@@ -126,15 +127,42 @@ def draw_game_background(img):
     d.text((w - dp(8), h - dp(6)), "cena do jogo (ilustrativa)", font=f, fill=(255, 255, 255, 170), anchor="rd")
 
 
-def draw_launcher(p, x, y, size, launcher):
-    """Java: LauncherView.onDraw (unidade u = raio / 10)."""
+def draw_edit_bar(p, layout, sw, margin):
+    """Java: buildEditLayer/renderEditLayer: cartão no topo, centrado, com Padrão e Concluir."""
+    ft, fh, fb = font(16, True), font(12), font(14, True)
+    title, hint = layout.get("title", ""), layout.get("hint", "")
+    reset, done = layout.get("reset_label", "Padrão"), layout.get("done_label", "Concluir")
+    pad = dp(12)
+    bw = [p.d.textlength(x, font=fb) + dp(32) for x in (reset, done)]
+    inner = max(p.d.textlength(title, font=ft), p.d.textlength(hint, font=fh), bw[0] + dp(10) + bw[1])
+    w = inner + 2 * pad
+    bh = line_h(fb) + dp(16)
+    h = pad + line_h(ft) + dp(4) + line_h(fh) + dp(10) + bh + pad
+    x0, y0 = (sw - w) / 2, margin
+    p.rounded((x0, y0, x0 + w, y0 + h), 12, "panel_bg", "panel_border")
+    cx = sw / 2
+    y = y0 + pad
+    p.d.text((cx, y), title, font=ft, fill=p.color("accent"), anchor="ma")
+    y += line_h(ft) + dp(4)
+    p.d.text((cx, y), hint, font=fh, fill=p.color("text_dim"), anchor="ma")
+    y += line_h(fh) + dp(10)
+    bx = cx - (bw[0] + dp(10) + bw[1]) / 2
+    for label, width, bg, fg in ((reset, bw[0], "tab_active_bg", "text"), (done, bw[1], "accent", "panel_bg")):
+        p.rounded((bx, y, bx + width, y + bh), 8, bg)
+        p.d.text((bx + width / 2, y + bh / 2), label, font=fb, fill=p.color(fg), anchor="mm")
+        bx += width + dp(10)
+
+
+def draw_launcher(p, x, y, size, launcher, editing=False):
+    """Java: LauncherView.onDraw (unidade u = raio / 10). No modo de edição, o anel branco."""
     import math
     r = size / 2 - dp(1)
     cx, cy = x + size / 2, y + size / 2
     active = launcher["active"]
     bg = p.color("accent") if active else p.color("fab_bg")
     fg = p.color("panel_bg") if active else p.color("accent")
-    p.d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=bg, outline=p.color("accent"), width=dp(2))
+    p.d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=bg, outline=p.color("text") if editing else p.color("accent"),
+                width=dp(2))
     u = r / 10
     sw = max(1, int(round(1.4 * u)))
     icon = launcher.get("icon", "")
@@ -150,8 +178,14 @@ def draw_launcher(p, x, y, size, launcher):
         hx, hy = cx + 3 * u, cy - 3 * u
         p.d.ellipse([hx - 3.3 * u, hy - 3.3 * u, hx + 3.3 * u, hy + 3.3 * u], fill=fg)
         p.d.ellipse([hx + 1.6 * u - 1.7 * u, hy - 1.6 * u - 1.7 * u, hx + 1.6 * u + 1.7 * u, hy - 1.6 * u + 1.7 * u], fill=bg)
-        p.d.rectangle([hx + 0.6 * u, hy - 5 * u, hx + 5 * u, hy - 0.6 * u], fill=bg)
-        p.d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=p.color("accent"), width=dp(2))  # o recorte não passa da borda
+        # O recorte da boca, só dentro do anel (Java: clipPath no círculo).
+        cut = Image.new("L", p.img.size, 0)
+        ImageDraw.Draw(cut).rectangle([hx + 0.6 * u, hy - 5 * u, hx + 5 * u, hy - 0.6 * u], fill=255)
+        inside = Image.new("L", p.img.size, 0)
+        ImageDraw.Draw(inside).ellipse([cx - r + dp(1), cy - r + dp(1), cx + r - dp(1), cy + r - dp(1)], fill=255)
+        p.img.paste(Image.new("RGBA", p.img.size, bg), (0, 0), Image.composite(cut, Image.new("L", p.img.size, 0), inside))
+        p.d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=p.color("text") if editing else p.color("accent"),
+                    width=dp(2))
     elif icon in ("star", "gem"):
         n = 5 if icon == "star" else 4
         pts = []
@@ -178,19 +212,46 @@ def render_panel(snap, layer, scroll_to_end=False):
     margin = dp(t["margin_dp"])
     surface = snap["surface"]
 
-    # Botão flutuante (Java: leftMargin = margin, topMargin = margin * 6).
-    fab_size = dp(t["fab_size_dp"])
-    fx, fy = margin, margin * 6
-    p.d.ellipse([fx, fy, fx + fab_size, fy + fab_size], fill=p.color("fab_bg"), outline=p.color("accent"),
-                width=dp(2))
-    p.text((fx + fab_size / 2, fy + fab_size / 2), snap["fab"]["label"], "title_sp", "text", True, "mm")
-    # Ícones (Java: buildLaunchers): centrados sob o "M", 14 dp abaixo, 10 dp entre eles.
+    # Botões (Java: applyButtonLayout): tamanho e opacidade da configuração; posição salva
+    # (centro em décimos de milésimo da tela) ou a padrão: o "M" em (margin, margin * 6) e
+    # os ícones em coluna sob ele, 14 dp abaixo e 10 dp entre eles (na escala).
+    layout = snap.get("layout", {})
+    editing = layout.get("editing", False)
+    scale = layout.get("scale_pct", 100) / 100
+    alpha = 1.0 if editing else layout.get("opacity_pct", 100) / 100
+    positions = layout.get("positions", {})
+    pmax = layout.get("placement_max", 10000)
+
+    def place(bid, size, default):
+        xy = positions.get(bid)
+        if not xy:
+            return default
+        cx, cy = xy[0] * sw / pmax, xy[1] * sh / pmax
+        return (min(max(0, cx - size / 2), sw - size), min(max(0, cy - size / 2), sh - size))
+
+    if editing:  # Java: buildEditLayer: fundo escurecido e a barra no topo
+        p.d.rectangle([0, 0, sw, sh], fill=p.color("scrim"))
+        draw_edit_bar(p, layout, sw, margin)
+    buttons = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+    b = Painter(buttons, t)
+    fab_size = dp(t["fab_size_dp"] * scale)
+    fx, fy = place("menu", fab_size, (margin, margin * 6))
+    ring = b.color("text") if editing else b.color("accent")
+    b.d.ellipse([fx, fy, fx + fab_size, fy + fab_size], fill=b.color("fab_bg"), outline=ring, width=dp(2))
+    b.d.text((fx + fab_size / 2, fy + fab_size / 2), snap["fab"]["label"], font=font(t["title_sp"] * scale, True),
+             fill=b.color("text"), anchor="mm")
     if snap.get("launchers_visible") and snap.get("launchers"):
-        ls = dp(t["launcher_size_dp"])
-        lx, ly = margin + (fab_size - ls) / 2, fy + fab_size + dp(14)
+        ls = dp(t["launcher_size_dp"] * scale)
+        lx, ly = fx + (fab_size - ls) / 2, fy + fab_size + dp(14 * scale)
         for launcher in snap["launchers"]:
-            draw_launcher(p, lx, ly, ls, launcher)
-            ly += ls + dp(10)
+            at = place(launcher["id"], ls, None)
+            if at is None:
+                at = (lx, ly)
+                ly += ls + dp(10 * scale)
+            draw_launcher(b, at[0], at[1], ls, launcher, editing)
+    if alpha < 1:
+        buttons.putalpha(buttons.getchannel("A").point(lambda v: int(v * alpha)))
+    layer.alpha_composite(buttons)
 
     hh = line_h(font(t["title_sp"], True))
     if surface == "log":
@@ -572,6 +633,10 @@ def main():
         elif snap["surface"].startswith("mod:"):
             screens.append(render_screen(snap, "Ícone das Ferramentas: modal no centro"))
             screens.append(render_screen(snap, "Modal das Ferramentas (rolado até o fim)", True))
+        elif snap.get("layout", {}).get("editing"):
+            screens.append(render_screen(snap, "Configurações > Mods > Editar: arrastar os botões"))
+        elif snap.get("layout", {}).get("positions"):
+            screens.append(render_screen(snap, "Botões no lugar novo (tamanho 120%, opacidade 60%)"))
         else:
             screens.append(render_screen(snap, "Dentro do mundo: M e os ícones"))
     gap = dp(10)

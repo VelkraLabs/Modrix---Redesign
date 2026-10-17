@@ -271,6 +271,38 @@ bool TLMod_WorkshopAvailable(void);
 void TLMod_OpenWorkshop(void);
 bool TLMod_WorkshopOpen(void);
 
+// Aba "Mods" nas Configurações do jogo (settings_tab.cpp): uma aba a mais
+// depois das do jogo, com o ícone de um item, e linhas desenhadas pelas
+// entradas do próprio jogo: um botão (como "Editar controles": o texto da
+// linha e o do botão) ou uma barra deslizante (como "Sensibilidade da mira":
+// título, valor em passos e o texto do valor). "Padrão", com a aba aberta,
+// chama reset. Tudo na thread do jogo, dentro do desenho das Configurações.
+enum { TLMOD_SETTING_BUTTON = 0, TLMOD_SETTING_SLIDER = 1 };
+typedef struct TLModSettingRow {
+    int32_t kind;       // TLMOD_SETTING_BUTTON ou TLMOD_SETTING_SLIDER
+    const char* label;  // botão: o texto da linha; barra: o título
+    const char* value;  // botão: o texto do botão ("Editar"); barra: o valor ("100%")
+    int32_t steps;      // barra: o valor vai de 0 a steps
+    int32_t step;       // barra: o passo atual
+} TLModSettingRow;
+typedef struct TLModSettingsTab {
+    void* user;
+    const char* title;  // título da página ("Mods"); copiado
+    int32_t iconItem;   // item cujo ícone vai na aba (1923 = Caixa de Ferramentas)
+    int32_t (*count)(void* user);  // linhas (no máximo TLMOD_SETTINGS_MAX_ROWS)
+    // Strings de `out` valem até a próxima chamada.
+    bool (*row)(void* user, int32_t index, TLModSettingRow* out);
+    // Botão tocado. true = fechar as Configurações (o jogo volta para onde estava).
+    bool (*click)(void* user, int32_t index);
+    void (*setStep)(void* user, int32_t index, int32_t step);  // barra movida
+    void (*reset)(void* user);                                 // "Padrão" com a aba aberta
+} TLModSettingsTab;
+#define TLMOD_SETTINGS_MAX_ROWS 16
+// A fonte é copiada; nulo tira a aba. Qualquer thread.
+void TLMod_SetSettingsTab(const TLModSettingsTab* tab);
+// As peças do jogo resolveram e os hooks entraram (a aba vai aparecer se houver fonte).
+bool TLMod_SettingsTabAvailable(void);
+
 // Só na thread do jogo (ex.: dentro do TLModFrameCallback): 1 = menu,
 // 0 = dentro de um mundo, -1 = indisponível. Lê LocalUserGameState.Instance
 // (ThreadStatic) .gameMenu; em outra thread Instance é nulo e o resultado é -1.
@@ -551,6 +583,19 @@ int32_t TLMod_Hooked_GUITransactionButtonDraw(Il2CppObject* layout, Il2CppObject
 void TLMod_Hooked_GUIReforgePopupDrawItem(Il2CppObject* self, const MethodInfo* method);
 void TLMod_Hooked_GUIMainMenuDraw(Il2CppObject* self, const MethodInfo* method);  // menu_hooks.cpp
 void TLMod_Hooked_RecipeSetupRecipes(const MethodInfo* method);                   // recipe_hooks.cpp
+// Aba Mods nas Configurações (settings_tab.cpp): a tela e as entradas de botão e barra.
+void TLMod_Hooked_SettingsSetCategory(Il2CppObject* self, int32_t category, const MethodInfo* method);
+void TLMod_Hooked_SettingsDrawCategories(Il2CppObject* self, const MethodInfo* method);
+void TLMod_Hooked_SettingsDrawTitle(Il2CppObject* self, const MethodInfo* method);
+void TLMod_Hooked_SettingsResetPageSettings(Il2CppObject* self, const MethodInfo* method);
+Il2CppObject* TLMod_Hooked_OpenUIButtonGetOption(Il2CppObject* self, const MethodInfo* method);
+Il2CppObject* TLMod_Hooked_OpenUIButtonGetButtonCaption(Il2CppObject* self, const MethodInfo* method);
+void TLMod_Hooked_OpenUIButtonOpenUI(Il2CppObject* self, const MethodInfo* method);
+Il2CppObject* TLMod_Hooked_SliderGetTitle(Il2CppObject* self, const MethodInfo* method);
+float TLMod_Hooked_SliderGetValue(Il2CppObject* self, const MethodInfo* method);
+int32_t TLMod_Hooked_SliderGetMaxValue(Il2CppObject* self, const MethodInfo* method);
+void TLMod_Hooked_SliderSetValue(Il2CppObject* self, float value, const MethodInfo* method);
+Il2CppObject* TLMod_Hooked_SliderGetStringValue(Il2CppObject* self, const MethodInfo* method);
 void TLMod_Hooked_GUIResearchDrawResearchItem(Il2CppObject* self, const MethodInfo* method);
 int32_t TLMod_Hooked_GUIResearchCanBeResearched(Il2CppObject* self, Il2CppObject* item, int32_t* percent,
                                                 const MethodInfo* method);

@@ -63,6 +63,8 @@ void InstallMenuHooks();
 // GUIMainMenu.Draw; true se desenhou a Oficina (o menu não é desenhado).
 bool ResolveWorkshop();
 bool DrawWorkshop();
+// Aba Mods nas Configurações (settings_tab.cpp). Opcional; usa drawx::ItemIconTexture.
+void InstallSettingsHooks();
 
 // Receitas de mod (recipe_hooks.cpp). Depois de ResolveItems (usa TLMod_SetItemDefaults).
 // TickRecipes: no frame (Main.DoUpdate), aplica se o SetupRecipes já passou sem elas.

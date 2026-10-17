@@ -5,6 +5,7 @@
 // (statLife @0x704, statDefense @0x6F8 ...). Não tem nada da Unity dentro.
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
@@ -1543,10 +1544,17 @@ int32_t g_screenW = 1600, g_screenH = 1200;
 struct MockRect {
     int32_t x, y, w, h;
 };
+// Com overloadSize (+0x12C), o tamanho é overloadedSize (+0x130) em pixels (as abas das Configurações).
 MockRect MockButtonRegion(Il2CppObject* layout, const MethodInfo*) {
     float x = At<float>(layout, 0x18), y = At<float>(layout, 0x1C);
-    return {g_screenW / 2 + static_cast<int32_t>(x * 2), g_screenH / 2 + static_cast<int32_t>(y * 2), 480, 80};
+    const bool own = At<bool>(layout, 0x12C);
+    return {g_screenW / 2 + static_cast<int32_t>(x * 2), g_screenH / 2 + static_cast<int32_t>(y * 2),
+            own ? static_cast<int32_t>(At<float>(layout, 0x130)) : 480,
+            own ? static_cast<int32_t>(At<float>(layout, 0x134)) : 80};
 }
+// Faixa das abas das Configurações (SettingsOverlayCategories_Layout.Backing): GUIPanel.Region.
+Il2CppObject* g_settingsBacking = nullptr;
+MockRect g_settingsBackingRect{};
 MockRect MockControlRegion(int32_t id, const MethodInfo*) { return id == 0 ? MockRect{0, 0, g_screenW, g_screenH} : MockRect{}; }
 MethodInfo g_mButtonRegion{reinterpret_cast<Il2CppMethodPointer>(&MockButtonRegion), "GetRegion", 1};
 MethodInfo g_mControlRegion{reinterpret_cast<Il2CppMethodPointer>(&MockControlRegion), "GetControlRegion", 1};
@@ -1582,7 +1590,9 @@ Il2CppObject* WsPart(size_t off) { return At<Il2CppObject*>(g_wsLayout, off); }
 Il2CppClass g_panelLayout{"", "Panel_Layout", {}, {}};
 FieldInfo g_fPanelSize{"Size", 0x20, nullptr};
 Il2CppClass g_stringLayout{"", "String_Layout", {}, {}};
+Il2CppObject* g_settingsTitle = nullptr;  // SettingsOverlay_Layout.Title
 const char* PartName(Il2CppObject* layout) {
+    if (layout && layout == g_settingsTitle) return "titulo-config";
     static const std::pair<size_t, const char*> kParts[] = {
         {0x100, "nome"}, {0x118, "tempo"}, {0x128, "modo"}, {0x138, "tamanho"}, {0x28, "titulo"},
         {0x30, "novo"},  {0x38, "voltar"}};
@@ -1598,6 +1608,8 @@ Il2CppClass g_layoutCalculator{"", "LayoutCalculator", {}, {&g_mAnchored}};
 void MockPanelDraw(Il2CppObject*, bool, uint64_t, uint64_t, uint64_t, const MethodInfo*) {}
 void MockPanelDrawAt(Il2CppObject*, MockVec2, MockVec2, bool, const MethodInfo*) {}
 MockRectI MockPanelRegion(Il2CppObject* panel, const MethodInfo*) {
+    if (panel && panel == g_settingsBacking)
+        return {g_settingsBackingRect.x, g_settingsBackingRect.y, g_settingsBackingRect.w, g_settingsBackingRect.h};
     return panel == WsPart(0x40) ? MockRectI{80, 380, 440, 4} : MockRectI{80, 60, 440, 400};
 }
 MethodInfo g_mPanelDraw{reinterpret_cast<Il2CppMethodPointer>(&MockPanelDraw), "Draw", 5};
@@ -1945,8 +1957,287 @@ NpcNameFn g_typeNetNameEntry = &MockNpcTypeNetName;
 MethodInfo g_mTypeName{reinterpret_cast<Il2CppMethodPointer>(&MockNpcTypeName), "get_TypeName", 0};
 MethodInfo g_mTypeNetName{reinterpret_cast<Il2CppMethodPointer>(&MockNpcTypeNetName), "GetTypeNetName", 0};
 
+// ---- Configurações: GUISettingsOverlay, as abas e as entradas ---------------------
+// 8 abas em linha (Location x = -160 + 40 i, y = -250: 80 px entre elas, 60x60 px pela
+// overloadedSize), cada uma com uma categoria do jogo. Entradas do jogo: na Toque (4),
+// um botão (id 63, "Editar controles") e uma barra (id 54); o resto vazio. O "desenho"
+// vira linhas em g_frame: "linha:<texto>|<botão>", "barra:<título>=<valor> <v>/<passos>",
+// "titulo:<categoria>" (o DrawTitle do jogo) e "titulo-config:<texto>" (o nosso).
+constexpr size_t kSettingsList = 0x18, kSettingsSelected = 0x28, kSettingsTitleScale = 0x68,
+                 kSettingsTimeSince = 0x94, kEntryId = 0x10;
+constexpr int32_t kTabCategories[8] = {0, 4, 10, 9, 1, 5, 2, 6};  // a ordem de g_tabNames
+const char* const kTabNames[8] = {"General", "Cursor", "GameplayControls", "KeyboardMouse",
+                                  "Video", "Language", "Interface", "Sound"};
+const size_t kTabOffsets[8] = {0x28, 0x30, 0x78, 0x70, 0x38, 0x40, 0x48, 0x60};
+Il2CppClass g_settingsOverlayClass{"", "GUISettingsOverlay", {}, {}};
+Il2CppClass g_settingsLayoutClass{"", "SettingsOverlay_Layout", {}, {}};
+Il2CppClass g_settingsCategoriesClass{"", "SettingsOverlayCategories_Layout", {}, {}};
+Il2CppClass g_settingEntryClass{"", "GUISettingEntry", {}, {}};
+Il2CppClass g_transactionLayoutClass{"", "TransactionButton_Layout", {}, {}, 0x1D0};
+Il2CppClass g_openUIClass{"", "GUIOpenUIButtonSetting", {}, {}, 0x20};
+Il2CppClass g_sliderClass{"", "GUISliderSetting", {}, {}, 0x38};
+Il2CppClass g_listClass{"System.Collections.Generic", "List`1", {}, {}, 0x20};
+Il2CppObject* g_settings = nullptr;        // a instância da tela
+Il2CppObject* g_settingsLayout = nullptr;  // SettingsOverlay_Layout.Instance
+Il2CppObject* g_settingsTabs[8] = {};
+std::vector<Il2CppObject*> g_categoryList;  // o conteúdo de _categorySettings
+struct VanillaEntry {
+    Il2CppObject* entry;
+    int32_t category;
+};
+std::vector<VanillaEntry> g_allSettings;
+FieldInfo g_fSettingsFields[] = {{"_categorySettings", kSettingsList, nullptr}, {"Selected", kSettingsSelected, nullptr},
+                                 {"titleScale", kSettingsTitleScale, nullptr},
+                                 {"TimeSinceItemChange", kSettingsTimeSince, nullptr}};
+FieldInfo g_fSettingsLayout[] = {{"Instance", 0x0, &g_settingsLayout}, {"Title", 0x18, nullptr},
+                                 {"Categories", 0x80, nullptr}};
+FieldInfo g_fCategories[9] = {};
+FieldInfo g_fEntryId{"_id", kEntryId, nullptr};
+FieldInfo g_fTransactionLayout[] = {
+    {"DrawIcon", 0xA1, nullptr},        {"DrawItem", 0xA2, nullptr},           {"IconOffset", 0xBC, nullptr},
+    {"DisableItemResize", 0x104, nullptr}, {"ForceItemScale", 0x105, nullptr}, {"ItemOffset", 0x10C, nullptr},
+    {"ItemColour", 0x120, nullptr},     {"DisabledItemColour", 0x124, nullptr},
+    {"PressedItemColour", 0x128, nullptr}, {"PressedBorderColour", 0x1C8, nullptr}};
+// Toques do próximo frame.
+MockRect g_settingsTap{-1, -1, 0, 0};       // ponto tocado (x, y) para as abas
+Il2CppObject* g_clickEntry = nullptr;       // botão tocado
+Il2CppObject* g_dragEntry = nullptr;        // barra arrastada até g_dragValue
+float g_dragValue = 0.0f;
+bool g_pressReset = false, g_pressBack = false;
+int g_settingsClosed = 0, g_resetCalls = 0, g_settingsErrors = 0;
+int32_t g_openedUI = -1;
+float g_vanillaSlider = 0.5f;
+// A aba nossa no último frame.
+struct DrawnTab {
+    bool drawn = false, pressed = false, drawItem = false, drawIcon = true;
+    Il2CppObject* texture = nullptr;
+    MockRect rect{};
+    uint64_t colour = 0;
+};
+DrawnTab g_drawnTab;
+int32_t g_tabsPressed = 0;  // abas do jogo desenhadas apertadas no último frame
+
+bool Tapped(const MockRect& q) {
+    return g_settingsTap.x >= q.x && g_settingsTap.x < q.x + q.w && g_settingsTap.y >= q.y && g_settingsTap.y < q.y + q.h;
+}
+// SetCategory: a lista com as entradas do jogo da categoria (o _id não importa aqui).
+void MockSetCategory(Il2CppObject* self, int32_t category, const MethodInfo*) {
+    At<int32_t>(self, kSettingsSelected) = category;
+    g_categoryList.clear();
+    for (const VanillaEntry& e : g_allSettings)
+        if (e.category == category) g_categoryList.push_back(e.entry);
+}
+using SetCategoryFn = decltype(&MockSetCategory);
+SetCategoryFn g_setCategoryEntry = &MockSetCategory;
+MethodInfo g_mSetCategory{reinterpret_cast<Il2CppMethodPointer>(&MockSetCategory), "SetCategory", 1};
+// As 8 abas do jogo: apertada a da categoria aberta; o toque chama SetCategory.
+void MockDrawCategories(Il2CppObject* self, const MethodInfo*) {
+    g_tabsPressed = 0;
+    for (int i = 0; i < 8; ++i) {
+        const bool pressed = At<int32_t>(self, kSettingsSelected) == kTabCategories[i];
+        g_tabsPressed += pressed;
+        if (Tapped(MockButtonRegion(g_settingsTabs[i], nullptr)))
+            g_setCategoryEntry(self, kTabCategories[i], &g_mSetCategory);
+    }
+}
+using SettingsVoidFn = decltype(&MockDrawCategories);
+SettingsVoidFn g_drawCategoriesEntry = &MockDrawCategories;
+MethodInfo g_mDrawCategories{reinterpret_cast<Il2CppMethodPointer>(&MockDrawCategories), "DrawCategories", 0};
+void MockDrawTitle(Il2CppObject* self, const MethodInfo*) {
+    g_frame.push_back("titulo:" + std::to_string(At<int32_t>(self, kSettingsSelected)));
+}
+SettingsVoidFn g_drawTitleEntry = &MockDrawTitle;
+MethodInfo g_mDrawTitle{reinterpret_cast<Il2CppMethodPointer>(&MockDrawTitle), "DrawTitle", 0};
+void MockResetPage(Il2CppObject*, const MethodInfo*) { ++g_resetCalls; }
+SettingsVoidFn g_resetPageEntry = &MockResetPage;
+MethodInfo g_mResetPage{reinterpret_cast<Il2CppMethodPointer>(&MockResetPage), "ResetPageSettings", 0};
+void MockSettingsClose(Il2CppObject*, const MethodInfo*) { ++g_settingsClosed; }
+MethodInfo g_mSettingsClose{reinterpret_cast<Il2CppMethodPointer>(&MockSettingsClose), "Close", 0};
+
+// Entradas: os métodos originais (para os ids do jogo).
+Il2CppObject* MockGetOption(Il2CppObject* self, const MethodInfo*) {
+    return il2cpp_string_new(("opcao:" + std::to_string(At<int32_t>(self, kEntryId))).c_str());
+}
+Il2CppObject* MockGetCaption(Il2CppObject*, const MethodInfo*) { return il2cpp_string_new("Editar"); }
+void MockOpenUI(Il2CppObject* self, const MethodInfo*) { g_openedUI = At<int32_t>(self, kEntryId); }
+Il2CppObject* MockSliderTitle(Il2CppObject* self, const MethodInfo*) {
+    return il2cpp_string_new(("barra:" + std::to_string(At<int32_t>(self, kEntryId))).c_str());
+}
+float MockSliderValue(Il2CppObject*, const MethodInfo*) { return g_vanillaSlider; }
+int32_t MockSliderMax(Il2CppObject*, const MethodInfo*) { return 100; }
+void MockSliderSet(Il2CppObject*, float value, const MethodInfo*) { g_vanillaSlider = value; }
+Il2CppObject* MockSliderString(Il2CppObject*, const MethodInfo*) {
+    return il2cpp_string_new((std::to_string(static_cast<int>(g_vanillaSlider * 100 + 0.5f)) + "%").c_str());
+}
+using EntryStringFn = decltype(&MockGetOption);
+using EntryFloatFn = decltype(&MockSliderValue);
+using EntryIntFn = decltype(&MockSliderMax);
+using EntrySetFn = decltype(&MockSliderSet);
+EntryStringFn g_getOptionEntry = &MockGetOption, g_getCaptionEntry = &MockGetCaption;
+EntryStringFn g_sliderTitleEntry = &MockSliderTitle, g_sliderStringEntry = &MockSliderString;
+SettingsVoidFn g_openUIEntry = &MockOpenUI;
+EntryFloatFn g_sliderValueEntry = &MockSliderValue;
+EntryIntFn g_sliderMaxEntry = &MockSliderMax;
+EntrySetFn g_sliderSetEntry = &MockSliderSet;
+MethodInfo g_mGetOption{reinterpret_cast<Il2CppMethodPointer>(&MockGetOption), "GetOption", 0};
+MethodInfo g_mGetCaption{reinterpret_cast<Il2CppMethodPointer>(&MockGetCaption), "GetButtonCaption", 0};
+MethodInfo g_mOpenUI{reinterpret_cast<Il2CppMethodPointer>(&MockOpenUI), "OpenUI", 0};
+MethodInfo g_mOpenUICtor{nullptr, ".ctor", 1};
+MethodInfo g_mSliderTitle{reinterpret_cast<Il2CppMethodPointer>(&MockSliderTitle), "GetTitle", 0};
+MethodInfo g_mSliderValue{reinterpret_cast<Il2CppMethodPointer>(&MockSliderValue), "GetValue", 0};
+MethodInfo g_mSliderMax{reinterpret_cast<Il2CppMethodPointer>(&MockSliderMax), "GetMaxValue", 0};
+MethodInfo g_mSliderSet{reinterpret_cast<Il2CppMethodPointer>(&MockSliderSet), "SetValue", 1};
+MethodInfo g_mSliderString{reinterpret_cast<Il2CppMethodPointer>(&MockSliderString), "GetStringValue", 0};
+MethodInfo g_mSliderCtor{nullptr, ".ctor", 1};
+MethodInfo g_mListAdd{nullptr, "Add", 1};
+
+// GUITransactionButton.Draw(layout, Texture2D, label, disabled, ref scale, Color?, pressed, ...):
+// só a aba Mods usa. Clicked se o toque cair na região do botão.
+int32_t MockTextureDraw(Il2CppObject* layout, Il2CppObject* texture, Il2CppObject* label, bool disabled, float* scale,
+                        uint64_t colour, bool pressed, bool, bool, bool, const MethodInfo*) {
+    if (!layout || !label || !scale || disabled) ++g_settingsErrors;
+    if (At<bool>(layout, 0xA2) && !texture) ++g_settingsErrors;  // DrawItem sem textura: o jogo quebraria
+    g_drawnTab.drawn = true;
+    g_drawnTab.pressed = pressed;
+    g_drawnTab.drawItem = At<bool>(layout, 0xA2);
+    g_drawnTab.drawIcon = At<bool>(layout, 0xA1);
+    g_drawnTab.texture = texture;
+    g_drawnTab.rect = MockButtonRegion(layout, nullptr);
+    g_drawnTab.colour = colour;
+    return Tapped(g_drawnTab.rect) ? 0 : 3;
+}
+void MockDrawItemHandlerDraw() { std::abort(); }  // o overload errado de 10 parâmetros
+MethodInfo g_mTextureDraw{reinterpret_cast<Il2CppMethodPointer>(&MockTextureDraw), "Draw", 10,
+                          "Microsoft.Xna.Framework.Graphics.Texture2D"};
+MethodInfo g_mHandlerDraw{reinterpret_cast<Il2CppMethodPointer>(&MockDrawItemHandlerDraw), "Draw", 10,
+                          "GUITransactionButton.DrawItemHandler"};
+
+// GUISettingsOverlay.Draw: as entradas (DrawCategoryOptions), as abas, os botões de baixo
+// e o título, nessa ordem, como no jogo.
+void MockDrawEntries() {
+    for (Il2CppObject* e : g_categoryList) {
+        if (static_cast<Il2CppClass*>(e->klass) == &g_openUIClass) {
+            g_frame.push_back("linha:" + Utf8Of(g_getOptionEntry(e, &g_mGetOption)) + "|" +
+                              Utf8Of(g_getCaptionEntry(e, &g_mGetCaption)));
+            if (e == g_clickEntry) g_openUIEntry(e, &g_mOpenUI);
+        } else if (static_cast<Il2CppClass*>(e->klass) == &g_sliderClass) {
+            const int32_t max = g_sliderMaxEntry(e, &g_mSliderMax);
+            if (e == g_dragEntry) {
+                const float q = max >= 1 ? std::round(g_dragValue * static_cast<float>(max)) / static_cast<float>(max)
+                                         : g_dragValue;  // GUISlider.QuantiseValue
+                g_sliderSetEntry(e, q, &g_mSliderSet);
+            }
+            char line[256];
+            std::snprintf(line, sizeof(line), "barra:%s=%s %.2f/%d", Utf8Of(g_sliderTitleEntry(e, &g_mSliderTitle)).c_str(),
+                          Utf8Of(g_sliderStringEntry(e, &g_mSliderString)).c_str(), g_sliderValueEntry(e, &g_mSliderValue),
+                          max);
+            g_frame.push_back(line);
+        } else {
+            ++g_settingsErrors;
+        }
+    }
+}
+void MockSettingsDraw() {
+    MockDrawEntries();
+    g_drawnTab = DrawnTab{};
+    g_drawCategoriesEntry(g_settings, &g_mDrawCategories);
+    if (g_pressReset) g_resetPageEntry(g_settings, &g_mResetPage);
+    if (g_pressBack) {  // DrawMainButtons: Voltar sobe de nível; fora das categorias do jogo, fecha
+        const int32_t c = At<int32_t>(g_settings, kSettingsSelected);
+        if (c - 3 > 16 || c < 3) MockSettingsClose(g_settings, &g_mSettingsClose);
+    }
+    g_drawTitleEntry(g_settings, &g_mDrawTitle);
+}
+
+Il2CppObject* NewEntry(Il2CppClass* k, int32_t id) {
+    Il2CppObject* e = il2cpp_object_new(k);
+    At<int32_t>(e, kEntryId) = id;
+    return e;
+}
+
+void InitSettings() {
+    g_settings = NewObject(0x100);
+    At<Il2CppObject*>(g_settings, kSettingsList) = il2cpp_object_new(&g_listClass);
+    At<int32_t>(g_settings, kSettingsSelected) = 0;
+    g_settingsLayout = NewObject(0x100);
+    g_settingsTitle = NewObject(0x80);
+    At<Il2CppObject*>(g_settingsLayout, 0x18) = g_settingsTitle;
+    Il2CppObject* cats = NewObject(0x100);
+    At<Il2CppObject*>(g_settingsLayout, 0x80) = cats;
+    g_settingsBacking = NewObject(0x40);
+    At<Il2CppObject*>(cats, 0x10) = g_settingsBacking;
+    g_fCategories[0] = FieldInfo{"Backing", 0x10, nullptr};
+    for (int i = 0; i < 8; ++i) {
+        Il2CppObject* tab = il2cpp_object_new(&g_transactionLayoutClass);
+        At<int32_t>(tab, 0x10) = 0;    // AnchorControl: Screen
+        At<int32_t>(tab, 0x14) = 18;   // Anchor: CentreBoth
+        At<float>(tab, 0x18) = -160.0f + 40.0f * static_cast<float>(i);
+        At<float>(tab, 0x1C) = -250.0f;
+        At<bool>(tab, 0xA1) = true;    // DrawIcon
+        At<float>(tab, 0xBC) = 3.0f;   // IconOffset
+        At<bool>(tab, 0x12C) = true;   // overloadSize: 60x60
+        At<float>(tab, 0x130) = At<float>(tab, 0x134) = 60.0f;
+        At<uint32_t>(tab, 0x1C8) = 0xDEADBEEFu;  // o último campo: a cópia tem de levar
+        At<Il2CppObject*>(cats, kTabOffsets[i]) = tab;
+        g_settingsTabs[i] = tab;
+        g_fCategories[i + 1] = FieldInfo{kTabNames[i], kTabOffsets[i], nullptr};
+        g_settingsCategoriesClass.fields.push_back(&g_fCategories[i + 1]);
+    }
+    g_settingsCategoriesClass.fields.push_back(&g_fCategories[0]);
+    // Faixa larga: cabe uma aba depois da última (a 1ª tela do teste).
+    g_settingsBackingRect = {g_screenW / 2 - 400, g_screenH / 2 - 520, 800, 100};
+    g_allSettings = {{NewEntry(&g_openUIClass, 63), 4}, {NewEntry(&g_sliderClass, 54), 4}};
+    g_settingsOverlayClass.fields = {&g_fSettingsFields[0], &g_fSettingsFields[1], &g_fSettingsFields[2],
+                                     &g_fSettingsFields[3]};
+    g_settingsOverlayClass.methods = {&g_mSetCategory, &g_mDrawCategories, &g_mDrawTitle, &g_mResetPage,
+                                      &g_mSettingsClose};
+    g_settingsLayoutClass.fields = {&g_fSettingsLayout[0], &g_fSettingsLayout[1], &g_fSettingsLayout[2]};
+    g_settingEntryClass.fields = {&g_fEntryId};
+    for (FieldInfo& f : g_fTransactionLayout) g_transactionLayoutClass.fields.push_back(&f);
+    g_openUIClass.methods = {&g_mOpenUICtor, &g_mGetOption, &g_mGetCaption, &g_mOpenUI};
+    g_sliderClass.methods = {&g_mSliderCtor, &g_mSliderTitle, &g_mSliderValue, &g_mSliderMax, &g_mSliderSet,
+                             &g_mSliderString};
+    g_listClass.methods = {&g_mListAdd};
+    g_guiTransaction.methods.insert(g_guiTransaction.methods.end(), {&g_mHandlerDraw, &g_mTextureDraw});
+    g_csharp.classes.insert(g_csharp.classes.end(),
+                            {&g_settingsOverlayClass, &g_settingsLayoutClass, &g_settingsCategoriesClass,
+                             &g_settingEntryClass, &g_transactionLayoutClass, &g_openUIClass, &g_sliderClass});
+}
+
+bool InvokeSettings(const MethodInfo* m, void* obj, void** params, Il2CppObject** result) {
+    if (m == &g_mOpenUICtor || m == &g_mSliderCtor) {
+        if ((m == &g_mOpenUICtor) != (static_cast<Il2CppObject*>(obj)->klass == &g_openUIClass)) ++g_settingsErrors;
+        At<int32_t>(obj, kEntryId) = *static_cast<int32_t*>(params[0]);
+        return *result = nullptr, true;
+    }
+    if (m == &g_mListAdd) {
+        if (obj != At<Il2CppObject*>(g_settings, kSettingsList)) ++g_settingsErrors;
+        g_categoryList.push_back(static_cast<Il2CppObject*>(params[0]));
+        return *result = nullptr, true;
+    }
+    return false;
+}
+
+bool PatchSettings(void* target, void* r) {
+    if (target == reinterpret_cast<void*>(&MockSetCategory)) g_setCategoryEntry = reinterpret_cast<SetCategoryFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockDrawCategories)) g_drawCategoriesEntry = reinterpret_cast<SettingsVoidFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockDrawTitle)) g_drawTitleEntry = reinterpret_cast<SettingsVoidFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockResetPage)) g_resetPageEntry = reinterpret_cast<SettingsVoidFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockGetOption)) g_getOptionEntry = reinterpret_cast<EntryStringFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockGetCaption)) g_getCaptionEntry = reinterpret_cast<EntryStringFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockOpenUI)) g_openUIEntry = reinterpret_cast<SettingsVoidFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockSliderTitle)) g_sliderTitleEntry = reinterpret_cast<EntryStringFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockSliderValue)) g_sliderValueEntry = reinterpret_cast<EntryFloatFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockSliderMax)) g_sliderMaxEntry = reinterpret_cast<EntryIntFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockSliderSet)) g_sliderSetEntry = reinterpret_cast<EntrySetFn>(r);
+    else if (target == reinterpret_cast<void*>(&MockSliderString)) g_sliderStringEntry = reinterpret_cast<EntryStringFn>(r);
+    else return false;
+    return true;
+}
+
 // runtime_invoke dos métodos das telas (nullptr = não é um deles).
 bool InvokeScreens(const MethodInfo* m, void* obj, void** params, Il2CppObject** result) {
+    if (InvokeSettings(m, obj, params, result)) return true;
     if (m == &g_mAddRecipe) return MockAddRecipe(m), *result = nullptr, true;
     if (m == &g_mQuickLookups) return MockCreateQuickLookups(m), *result = nullptr, true;
     if (m == &g_mGuiReforgeItem) return *result = g_reforgeItem, true;
@@ -1978,6 +2269,7 @@ bool InvokeScreens(const MethodInfo* m, void* obj, void** params, Il2CppObject**
 }
 
 bool PatchScreens(void* target, void* r) {
+    if (PatchSettings(target, r)) return true;
     if (target == reinterpret_cast<void*>(&MockSetupRecipes)) g_setupRecipesEntry = reinterpret_cast<SetupRecipesFn>(r);
     else if (target == reinterpret_cast<void*>(&MockTransactionDraw)) g_transactionEntry = reinterpret_cast<TransactionFn>(r);
     else if (target == reinterpret_cast<void*>(&MockReforgePopupDrawItem)) g_reforgePopupEntry = reinterpret_cast<InstanceFn>(r);
@@ -2064,6 +2356,7 @@ void InitScreens() {
                              &g_sacrificesCatalog, &g_mainMenuLayout, &g_buttonLayout, &g_guiSettings,
                              &g_guiMainMenu, &g_soundEngine, &g_controlAnchor});
     InitWorkshop();
+    InitSettings();
 }
 
 }  // namespace
@@ -2183,6 +2476,64 @@ __attribute__((visibility("default"))) int mock_workshop_errors(int* begins, int
     return g_workshopErrors;
 }
 __attribute__((visibility("default"))) void mock_set_screen(int32_t w, int32_t h) { g_screenW = w, g_screenH = h; }
+
+// ---- Configurações ----------------------------------------------------------------
+// O jogo abrindo as Configurações numa categoria (GUISettings.Draw -> SetCategory, com hook).
+__attribute__((visibility("default"))) void mock_settings_open(int32_t category) {
+    g_setCategoryEntry(g_settings, category, &g_mSetCategory);
+}
+// Um frame da tela. tapX/tapY: toque nas abas (-1 = nenhum); click: índice da entrada
+// tocada (-1 = nenhuma); drag/dragValue: barra arrastada; reset: "Padrão"; back: Voltar.
+// Devolve as linhas desenhadas separadas por '\n'.
+__attribute__((visibility("default"))) size_t mock_settings_frame(int32_t tapX, int32_t tapY, int32_t click,
+                                                                   int32_t drag, float dragValue, bool reset, bool back,
+                                                                   char* out, size_t size) {
+    g_settingsTap = {tapX, tapY, 0, 0};
+    g_clickEntry = click >= 0 && static_cast<size_t>(click) < g_categoryList.size() ? g_categoryList[click] : nullptr;
+    g_dragEntry = drag >= 0 && static_cast<size_t>(drag) < g_categoryList.size() ? g_categoryList[drag] : nullptr;
+    g_dragValue = dragValue;
+    g_pressReset = reset;
+    g_pressBack = back;
+    g_frame.clear();
+    MockSettingsDraw();
+    g_settingsTap = {-1, -1, 0, 0};
+    g_clickEntry = g_dragEntry = nullptr;
+    g_pressReset = g_pressBack = false;
+    std::string all;
+    for (const std::string& line : g_frame) all += line + "\n";
+    std::snprintf(out, size, "%s", all.c_str());
+    return all.size();
+}
+// Estado: categoria aberta, Close chamado, ResetPageSettings do jogo, OpenUI do jogo (id), erros.
+__attribute__((visibility("default"))) int32_t mock_settings_state(int* closed, int* resets, int32_t* openedUI,
+                                                                    int* tabsPressed, int* errors) {
+    *closed = g_settingsClosed;
+    *resets = g_resetCalls;
+    *openedUI = g_openedUI;
+    *tabsPressed = g_tabsPressed;
+    *errors = g_settingsErrors;
+    return At<int32_t>(g_settings, kSettingsSelected);
+}
+// A aba Mods no último frame: região, apertada, DrawItem/DrawIcon, textura e a cor passada.
+__attribute__((visibility("default"))) bool mock_settings_tab(int32_t* rect, bool* pressed, bool* drawItem,
+                                                               bool* drawIcon, void** texture, uint64_t* colour) {
+    rect[0] = g_drawnTab.rect.x, rect[1] = g_drawnTab.rect.y, rect[2] = g_drawnTab.rect.w, rect[3] = g_drawnTab.rect.h;
+    *pressed = g_drawnTab.pressed;
+    *drawItem = g_drawnTab.drawItem;
+    *drawIcon = g_drawnTab.drawIcon;
+    *texture = g_drawnTab.texture;
+    *colour = g_drawnTab.colour;
+    return g_drawnTab.drawn;
+}
+// Região (em pixels) da aba i do jogo e a faixa das abas.
+__attribute__((visibility("default"))) void mock_settings_game_tab(int i, int32_t* rect) {
+    const MockRect q = MockButtonRegion(g_settingsTabs[i], nullptr);
+    rect[0] = q.x, rect[1] = q.y, rect[2] = q.w, rect[3] = q.h;
+}
+__attribute__((visibility("default"))) void mock_settings_set_backing(int32_t x, int32_t y, int32_t w, int32_t h) {
+    g_settingsBackingRect = {x, y, w, h};
+}
+__attribute__((visibility("default"))) size_t mock_settings_entries() { return g_categoryList.size(); }
 // Location do botão i do MainMenu_Layout (0 = Singleplayer ... 6 = PurchaseFullGame/Mods).
 __attribute__((visibility("default"))) void mock_menu_button_location(int i, float* x, float* y) {
     *x = At<float>(MenuButton(i), 0x18);

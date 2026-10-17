@@ -77,6 +77,20 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
     (`CreateRequiredItemQuickLookups`, `0x12B4148`), com o netID no lugar do type da casca nos ingredientes de
     mod. Se o `SetupRecipes` já passou, o `Main.DoUpdate` aplica no frame seguinte. Ver `modapi/README.md`,
     "Receitas de mod".
+16. Aba **Mods** nas Configurações (`src/settings_tab.cpp`, `TLMod_SetSettingsTab`). As abas da tela
+    (`GUISettingsOverlay.DrawCategories`, `0xA68C68`) são 8 `GUITransactionButton.Draw` fixos. O hook pós
+    desenha uma 9ª: uma cópia do layout da última aba, com a textura de um item (Caixa de Ferramentas, 1923)
+    pelo overload `Draw(layout, Texture2D, ...)` (`0x1223F70`, `DrawItem`). Ela fica depois da última, no
+    mesmo passo; se não couber na faixa, antes da primeira; senão as 9 são reespaçadas na faixa. O log
+    registra a geometria. O toque chama `SetCategory(20)`, uma categoria fora do enum (0..19), que nenhuma
+    aba do jogo marca e nenhuma entrada do jogo tem. O hook pós em `SetCategory` (`0xA67B94`) põe na lista
+    as nossas entradas: `GUIOpenUIButtonSetting` (botão) e `GUISliderSetting` (barra), criadas com
+    `GUISettingID` a partir de `0x7100`. O jogo as desenha e trata o toque como as suas; os hooks nos métodos
+    das entradas devolvem os nossos textos e valores quando o id é nosso: `GetOption`/`GetButtonCaption`/`OpenUI`
+    e `GetTitle`/`GetValue`/`GetMaxValue`/`SetValue`/`GetStringValue`. Com a aba aberta, `DrawTitle` mostra o
+    nosso título e `ResetPageSettings` ("Padrão") chama o reset da fonte. Um botão que pede para fechar
+    marca o pedido, e o mesmo `DrawCategories` chama `GUISettingsOverlay.Close`. Voltar fecha, porque o
+    jogo só sobe de nível nas categorias 3..19.
 
 ## Log
 
