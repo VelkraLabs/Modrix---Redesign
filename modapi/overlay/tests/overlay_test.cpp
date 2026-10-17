@@ -127,13 +127,14 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     CHECK(item && item->title == "Exemplo: Rubi Fictício" && item->subtitle == "v0.1.0 · Carregado" && item->enabled);
     CHECK(boss && boss->state == "disabled" && boss->subtitle == "v0.1.0 · Desativado" && !boss->enabled);
     CHECK(bc && bc->state == "loaded" && boss->pending.empty() && panel.ModsNotice().empty());
-    // Ícone da Oficina nativa: o item registrado pelo mod; sem item (ou desativado), o Livro.
+    // Ícone da Oficina nativa: o item registrado pelo mod; sem conteúdo, o Livro; desativado,
+    // pelo que o manifest declara (o chefe declara um NPC: o Olho de Aparência Suspeita).
     auto icon = [&](const std::string& id) {
         for (const overlay::ModInfo& m : source.Mods())
             if (m.id == id) return m.iconItem;
         return -1;
     };
-    CHECK(icon("tlmod.example_item") == 8192 && icon("tlmod.example_boss") == 149 &&
+    CHECK(icon("tlmod.example_item") == 8192 && icon("tlmod.example_boss") == 43 &&
           icon("tlmod.boss_checklist") == 149);
 
     // Desligar: grava, avisa que vale ao reiniciar, e NÃO descarrega nada.

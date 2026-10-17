@@ -85,14 +85,15 @@ std::string ContentSummary(const rt::ModManifest& m) {
 
 // Ícone do mod na Oficina: o primeiro item que ele registrou; sem itens, um
 // item do jogo que lembre o conteúdo (Olho de Aparência Suspeita para mods de
-// NPC, Livro para o resto, inclusive os que não carregaram).
-int32_t IconItem(const rt::ContentRegistry& registry, const std::string& modId) {
+// NPC, Livro para o resto). Mod desativado ou que falhou não registrou nada:
+// vale o que o manifest declara.
+int32_t IconItem(const rt::ContentRegistry& registry, const rt::ModManifest& manifest) {
     constexpr int32_t kNpcIcon = 43, kDefaultIcon = 149;
     for (const rt::ContentEntry& e : registry.Entries(TLMOD_CONTENT_ITEM))
-        if (e.modId == modId) return e.id;
+        if (e.modId == manifest.id) return e.id;
     for (const rt::ContentEntry& e : registry.Entries(TLMOD_CONTENT_NPC))
-        if (e.modId == modId) return kNpcIcon;
-    return kDefaultIcon;
+        if (e.modId == manifest.id) return kNpcIcon;
+    return manifest.content[TLMOD_CONTENT_NPC].empty() ? kDefaultIcon : kNpcIcon;
 }
 
 // Oficina de Mods (ver panel.h): seções pelo estado desta sessão, em ordem de nome.
@@ -333,7 +334,7 @@ std::vector<ModInfo> LoaderDataSource::Mods() const {
         for (const std::string& a : m.manifest.authors) i.authors += (i.authors.empty() ? "" : ", ") + a;
         i.description = m.manifest.description;
         i.content = ContentSummary(m.manifest);
-        i.iconItem = IconItem(loader_.Registry(), m.manifest.id);
+        i.iconItem = IconItem(loader_.Registry(), m.manifest);
         out.push_back(std::move(i));
     }
     return out;

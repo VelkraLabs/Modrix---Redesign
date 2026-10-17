@@ -378,18 +378,16 @@ constexpr size_t AnchorControl = 0x10;          // 2 = GridItem (a região de Co
 constexpr size_t Anchor = 0x14;
 constexpr size_t Location = 0x18;
 constexpr size_t Alignment = 0x24;              // LayoutCalculator.AnchorType (9 = TopLeft)
-constexpr size_t Scale = 0x28;                  // float
-constexpr size_t RenderFont = 0x2C;             // FontType: 0 MouseText, 1 DeathText (como no StringButton_Layout)
 constexpr size_t MultiLineUseAlignment = 0x30;  // bool: quebra em WrapWidth (GUIString.ApplyMultiLineAlignment)
 constexpr size_t WrapWidth = 0x34;              // float
 constexpr size_t MaxLines = 0x38;               // int
 }  // namespace string_layout_off
-// StringButton_Layout: o título da tela (quebra a linha se o texto passar da largura).
+// StringButton_Layout: o título da tela. GUIStringButton.DrawButton desenha o texto na
+// escala animada (que vai até Scale) e quebra a linha em Size.x * escala - 2 * TextInset.
 namespace string_button_layout_off {
-constexpr size_t Size = 0x20;        // Vector2
-constexpr size_t TextInset = 0x38;   // int, de cada lado
-constexpr size_t Scale = 0x60;       // float
-constexpr size_t RenderFont = 0xC0;  // FontType
+constexpr size_t Size = 0x20;       // Vector2
+constexpr size_t TextInset = 0x38;  // int, de cada lado
+constexpr size_t Scale = 0x60;      // float
 }  // namespace string_button_layout_off
 
 // Button_Layout (base de TransactionButton_Layout): onde o botão fica na tela.
@@ -570,6 +568,9 @@ constexpr uintptr_t GUIString_ApplyMultiLineAlignment = 0x121CA00;
 constexpr uintptr_t LayoutCalculator_GetAnchoredPosition = 0xA28DB0;  // (ControlId, AnchorType, Vector2)
 constexpr uintptr_t LayoutCalculator_DrawCentred = 0xA2993C;  // (SpriteBatch, Vector2, float, Texture2D, Color?)
 constexpr uintptr_t Mouse_GetUICursorPosition = 0xB0F948;     // o toque no espaço da interface
+// O título mede o texto como o GUIStringButton.DrawButton: fonte do layout e ChatManager.
+constexpr uintptr_t StringButtonLayout_GetFont = 0xA0E340;
+constexpr uintptr_t ChatManager_GetStringSize = 0x16654C0;  // (SpriteFont, string, Vector2, float maxWidth)
 // Regiões de toque da interface: o toque só chega à interface sobre uma região registrada.
 constexpr uintptr_t GUIInputRegionManager_RegisterInputRegion = 0x9FAB2C;  // (Rectangle): o cursor está nela
 constexpr uintptr_t GUIInputRegionManager_get_MousePosition = 0x9FAA10;    // cursor da interface
@@ -665,6 +666,8 @@ constexpr int GUIString_ApplyMultiLineAlignment = 3;
 constexpr int LayoutCalculator_GetAnchoredPosition = 3;
 constexpr int LayoutCalculator_DrawCentred = 5;  // o overload de 5: (batch, Vector2, float, Texture2D, Color?)
 constexpr int Mouse_GetUICursorPosition = 0;
+constexpr int StringButtonLayout_GetFont = 0;
+constexpr int ChatManager_GetStringSize = 4;  // o overload (SpriteFont, string, Vector2, float)
 constexpr int GUIInputRegionManager_RegisterInputRegion = 1;  // o overload (Rectangle)
 constexpr int GUIInputRegionManager_get_MousePosition = 0;
 constexpr int SpriteBatch_Begin = 8;

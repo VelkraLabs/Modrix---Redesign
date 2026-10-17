@@ -1631,6 +1631,18 @@ MethodInfo g_mRegisterRegion{reinterpret_cast<Il2CppMethodPointer>(&MockRegister
                              "Microsoft.Xna.Framework.Rectangle"};
 MethodInfo g_mInputMouse{reinterpret_cast<Il2CppMethodPointer>(&MockInputMouse), "get_MousePosition", 0};
 Il2CppClass g_inputManagerClass{"", "GUIInputRegionManager", {&g_fInputManager}, {&g_mRegisterRegion, &g_mInputMouse}};
+// Medida do título: StringButton_Layout.GetFont e ChatManager.GetStringSize (10 por
+// caractere vezes a escala; maxWidth negativo = uma linha só).
+Il2CppObject* g_titleFont = nullptr;
+Il2CppObject* MockGetFont(Il2CppObject*, const MethodInfo*) { return g_titleFont; }
+MockVec2 MockStringSize(Il2CppObject* font, Il2CppObject* text, MockVec2 scale, float maxWidth, const MethodInfo*) {
+    if (font != g_titleFont || maxWidth >= 0) ++g_workshopErrors;
+    return {10.0f * scale.x * static_cast<float>(Utf8Of(text).size()), 20.0f * scale.y};
+}
+MethodInfo g_mGetFont{reinterpret_cast<Il2CppMethodPointer>(&MockGetFont), "GetFont", 0};
+Il2CppClass g_stringButtonLayout{"", "StringButton_Layout", {}, {&g_mGetFont}};
+MethodInfo g_mStringSize{reinterpret_cast<Il2CppMethodPointer>(&MockStringSize), "GetStringSize", 4, "System.String"};
+Il2CppClass g_chatManager{"Terraria.UI.Chat", "ChatManager", {}, {&g_mStringSize}};
 // Ícones da Oficina: LayoutCalculator.DrawCentred(batch, posição, escala, textura, cor).
 std::vector<Il2CppObject*> g_icons;
 void MockDrawCentred(Il2CppObject* batch, MockVec2 pos, float scale, Il2CppObject* texture, uint64_t,
@@ -1665,7 +1677,9 @@ void InitWorkshop() {
         At<float>(part, 0x24) = 50.0f;
         At<Il2CppObject*>(g_wsLayout, off) = part;
     }
-    At<int32_t>(WsPart(0x28), 0x38) = 120;  // Title (StringButton_Layout): TextInset, 160 para o texto
+    // Title (StringButton_Layout): TextInset 120 e Scale 1,25: 400 * 1,25 - 240 = 260 para o texto.
+    At<int32_t>(WsPart(0x28), 0x38) = 120;
+    At<float>(WsPart(0x28), 0x60) = 1.25f;
     Il2CppObject* grid = WsPart(0x20);  // WorldGrid: 1ª linha em (0, 0) + âncora, 10 entre as linhas
     At<float>(grid, 0x30) = 0.0f;
     At<float>(grid, 0x34) = 10.0f;
@@ -1680,10 +1694,11 @@ void InitWorkshop() {
     g_main.methods.insert(g_main.methods.end(), {&g_mMouseX, &g_mMouseY, &g_mMouseLeft});
     g_layoutCalculator.methods.push_back(&g_mDrawCentred);
     g_inputManager = NewObject(0x40);
+    g_titleFont = NewObject(0x40);
     g_csharp.classes.insert(g_csharp.classes.end(),
                             {&g_worldSelectLayout, &g_panelLayout, &g_stringLayout, &g_guiPanel, &g_guiString,
                              &g_guiStringButton, &g_spriteBatchClass, &g_keyboardInput, &g_layoutCalculator,
-                             &g_mouseClass, &g_inputManagerClass});
+                             &g_mouseClass, &g_inputManagerClass, &g_stringButtonLayout, &g_chatManager});
 }
 
 // Reforja: GUIInstance.Active.GUIReforge.get_ReforgeItem().

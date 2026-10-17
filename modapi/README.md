@@ -410,14 +410,17 @@ do próprio jogo montada com as peças da seleção de mundos (`il2cpp_bridge/sr
   ordem: ativos, desativados e com erro, cada grupo por nome.
 - **Ícone.** Na moldura da imagem do mundo vai o ícone do primeiro item que o mod registrou (a textura
   do mod, a mesma do inventário). Sem item: o Olho de Aparência Suspeita (43) para mods de NPC e o
-  Livro (149) para o resto, inclusive mods desativados ou com erro. Itens originais que o jogo ainda
-  não carregou são pedidos com `Main.LoadItem` e aparecem no frame seguinte.
+  Livro (149) para o resto. Mods desativados ou com erro não registram nada: vale o que o manifest
+  declara (NPC: o Olho; item: o Livro, porque a textura do item só existe com o mod carregado).
+  Itens originais que o jogo ainda não carregou são pedidos com `Main.LoadItem` e aparecem no frame
+  seguinte.
 - **Detalhes.** Tocar numa linha abre o texto completo do mod (versão, autores, descrição, conteúdo,
   estado e, se falhou, o erro inteiro), com Voltar e o botão "Novo" da tela de mundos virado em
   **Ativar/Desativar**. O texto é quebrado pelo próprio jogo (`GUIString.ApplyMultiLineAlignment`) e
   desenhado linha a linha na área da lista, com rolagem; nunca passa por cima dos botões. Um nome
   que não cabe no título (o botão de título do jogo quebraria a linha por cima do painel) é cortado
-  com "..."; o nome inteiro fica na 1ª linha do texto. O voltar do
+  com "..."; o nome inteiro fica na 1ª linha do texto. A medida é a do próprio botão: a fonte do
+  layout e `ChatManager.GetStringSize` na escala dele. O voltar do
   Android (Escape) volta uma página.
 - Ligar ou desligar vale na próxima abertura do jogo: uma `.so` carregada não é descarregada.
 

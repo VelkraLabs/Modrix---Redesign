@@ -53,6 +53,7 @@ typedef void (*StringDrawFn)(Il2CppObject* layout, Il2CppObject* value, const Me
 typedef void (*StringDrawColorFn)(Il2CppObject* layout, Il2CppObject* value, uint32_t color, bool multiline,
                                   const MethodInfo*);
 typedef TLModXnaRectangle (*StringRegionFn)(Il2CppObject* layout, Il2CppObject* value, const MethodInfo*);
+typedef Il2CppObject* (*LayoutObjectFn)(Il2CppObject* layout, const MethodInfo*);
 typedef Il2CppObject* (*WrapFn)(Il2CppObject* layout, Il2CppObject* value, int32_t* lineCount, const MethodInfo*);
 typedef bool (*StringButtonFn)(Il2CppObject* layout, Il2CppObject* value, float* scale, bool forcedPressed,
                                bool disabled, const MethodInfo*);
@@ -72,6 +73,8 @@ typedef bool (*StaticBoolFn)(const MethodInfo*);
 typedef TLModXnaVector2 (*StaticVectorFn)(const MethodInfo*);
 typedef TLModXnaVector2 (*InstanceVectorFn)(Il2CppObject* self, const MethodInfo*);
 typedef bool (*RegisterRegionFn)(Il2CppObject* self, TLModXnaRectangle rect, const MethodInfo*);
+typedef TLModXnaVector2 (*StringSizeFn)(Il2CppObject* font, Il2CppObject* text, TLModXnaVector2 baseScale,
+                                        float maxWidth, const MethodInfo*);
 typedef void (*DrawCentredFn)(Il2CppObject* batch, TLModXnaVector2 position, float scale, Il2CppObject* texture,
                               uint64_t color, const MethodInfo*);
 
@@ -121,6 +124,9 @@ struct Resolved {
     FieldInfo* inputManager = nullptr;  // static GUIInputRegionManager.Instance
     const MethodInfo* registerRegion = nullptr;
     const MethodInfo* inputMouse = nullptr;  // get_MousePosition
+    // Medida do título (opcional): StringButton_Layout.GetFont e ChatManager.GetStringSize.
+    const MethodInfo* titleFont = nullptr;
+    const MethodInfo* stringSize = nullptr;
     const MethodInfo* drawCentred = nullptr;  // LayoutCalculator.DrawCentred(batch, Vector2, float, Texture2D, Color?)
 };
 Resolved r;
@@ -168,7 +174,6 @@ uint32_t g_detailTitle = 0;  // nome cortado com "..." se não cabe no título (
 struct Handles {
     uint32_t line = 0;  // String_Layout de uma linha: cópia do nome da linha de mundo, no canto do GridItem
     uint32_t wrap = 0;  // a mesma, com quebra (só para ApplyMultiLineAlignment)
-    uint32_t measure = 0;  // a mesma, com a fonte e a escala do título (só para medir)
     uint32_t title = 0, back = 0, empty = 0, probe1 = 0, probe2 = 0;
 };
 Handles h;
@@ -310,15 +315,9 @@ bool EnsureObjects(Il2CppObject* layout) {
     if (h.line) return true;
     Il2CppObject* line = NewTextLayout(layout, false);
     Il2CppObject* wrap = NewTextLayout(layout, true);
-    Il2CppObject* measure = NewTextLayout(layout, false);
-    if (!line || !wrap || !measure) return false;
-    if (Il2CppObject* title = Part(layout, ws::Title)) {
-        if (FieldAt<float>(title, sb::Scale) > 0) FieldAt<float>(measure, sl::Scale) = FieldAt<float>(title, sb::Scale);
-        FieldAt<int32_t>(measure, sl::RenderFont) = FieldAt<int32_t>(title, sb::RenderFont);
-    }
+    if (!line || !wrap) return false;
     h.line = Pin(line);
     h.wrap = Pin(wrap);
-    h.measure = Pin(measure);
     h.title = PinString("Oficina de Mods");
     h.back = PinString("Voltar");
     h.empty = PinString("Nenhum mod instalado");
@@ -479,24 +478,32 @@ void DrawList(Il2CppObject* layout) {
 
 // O título dos detalhes é o nome do mod. O botão de título do jogo quebra a linha se o
 // texto passa da largura, e a 2ª linha sai por cima do painel: um nome comprido é
-// cortado (por caractere) e ganha "...". Devolve 0 se o nome inteiro cabe.
+// cortado (por caractere) e ganha "...". A medida é a do próprio DrawButton: a fonte
+// do layout, ChatManager.GetStringSize na escala do botão e a largura Size.x * escala
+// - 2 * TextInset. Devolve 0 se o nome inteiro cabe (ou sem como medir).
 uint32_t FitTitle(Il2CppObject* title, uint32_t name) {
-    Il2CppObject* measure = Target(h.measure);
     Il2CppObject* full = Target(name);
-    if (!title || !measure || !full) return 0;
-    const float limit =
-        FieldAt<float>(title, sb::Size) - 2.0f * static_cast<float>(FieldAt<int32_t>(title, sb::TextInset));
-    auto fits = [&](Il2CppObject* s) {
-        return static_cast<float>(Ptr<StringRegionFn>(r.stringRegion)(measure, s, r.stringRegion).width) <= limit;
+    if (!title || !full || !r.titleFont || !r.stringSize) return 0;
+    Il2CppObject* font = Ptr<LayoutObjectFn>(r.titleFont)(title, r.titleFont);
+    if (!font) return 0;
+    const float scale = FieldAt<float>(title, sb::Scale) > 0 ? FieldAt<float>(title, sb::Scale) : 1.0f;
+    const float limit = FieldAt<float>(title, sb::Size) * scale -
+                        2.0f * static_cast<float>(FieldAt<int32_t>(title, sb::TextInset));
+    auto width = [&](Il2CppObject* s) {
+        return Ptr<StringSizeFn>(r.stringSize)(font, s, TLModXnaVector2{scale, scale}, -1.0f, r.stringSize).x;
     };
-    if (limit <= 0 || fits(full)) return 0;
+    const float fullWidth = width(full);
+    if (limit <= 0 || fullWidth <= limit) return 0;
     std::string text = bridge::Utf8String(full);
     while (!text.empty()) {
         while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0) == 0x80) text.pop_back();
         if (!text.empty()) text.pop_back();  // o 1º byte do caractere
         while (!text.empty() && text.back() == ' ') text.pop_back();
         Il2CppObject* candidate = api.il2cpp_string_new((text + "...").c_str());
-        if (candidate && fits(candidate)) return Pin(candidate);
+        if (candidate && width(candidate) <= limit) {
+            LOGI("Oficina: título cortado para \"%s...\" (%.0f de largura; cabem %.0f)", text.c_str(), fullWidth, limit);
+            return Pin(candidate);
+        }
     }
     return 0;
 }
@@ -609,6 +616,9 @@ bool ResolveWorkshop() {
     r.registerRegion = MethodWithParam(inputManager, "RegisterInputRegion", argc::GUIInputRegionManager_RegisterInputRegion,
                                        0, "Microsoft.Xna.Framework.Rectangle");
     r.inputMouse = Method(inputManager, "get_MousePosition", argc::GUIInputRegionManager_get_MousePosition);
+    r.titleFont = Method("", "StringButton_Layout", "GetFont", argc::StringButtonLayout_GetFont);
+    r.stringSize = MethodWithParam(api.il2cpp_class_from_name(img, "Terraria.UI.Chat", "ChatManager"), "GetStringSize",
+                                   argc::ChatManager_GetStringSize, 1, "System.String");
     r.drawCentred = MethodWithParam(api.il2cpp_class_from_name(img, "", "LayoutCalculator"), "DrawCentred",
                                     argc::LayoutCalculator_DrawCentred, 1, "Microsoft.Xna.Framework.Vector2");
 
@@ -624,6 +634,7 @@ bool ResolveWorkshop() {
         return false;
     }
     if (!r.keyUp) LOGW("Oficina nativa: KeyboardInput.GetKeyUp ausente; o voltar do Android não fecha a Oficina");
+    if (!r.titleFont || !r.stringSize) LOGW("Oficina nativa: sem como medir o título; nomes compridos podem quebrar a linha");
     if (!r.drawCentred) LOGW("Oficina nativa: LayoutCalculator.DrawCentred ausente; linhas sem ícone");
     if (!r.uiCursor) LOGW("Oficina nativa: Mouse.GetUICursorPosition ausente; toques por Main.mouseX/Y");
     r.ready = true;

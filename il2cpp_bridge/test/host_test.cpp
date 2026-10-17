@@ -324,12 +324,12 @@ int TestWorkshop(void* lib) {
     f = frame(0, 0, false);
     CHECK(has(f, "titulo:Oficina de Mods") && has(f, "nome:Mod 6 de nome comprido") && has(f, "nome:Gemas") &&
           !has(f, "nome:Boss Checklist") && !has(f, "nome:Exemplo: Rubi"));
-    // Nome que não cabe no título (o do mock: 160 de largura, 10 por caractere): cortado
-    // com "..."; o texto de detalhes traz o nome inteiro.
+    // Nome que não cabe no título (o do mock: 260 de largura, 12,5 por caractere na escala
+    // 1,25 do botão): cortado com "..."; o texto de detalhes traz o nome inteiro.
     frame(300, 300, true);
     frame(300, 300, false);
     f = frame(0, 0, false);
-    CHECK(has(f, "titulo:Mod 6 de nome...") && has(f, "texto@106:Mod 6 de nome comprido com uma descrição"));
+    CHECK(has(f, "titulo:Mod 6 de nome com...") && has(f, "texto@106:Mod 6 de nome comprido com uma descrição"));
     frame(0, 0, false, false, 1);
     f = frame(0, 0, false);
     CHECK(has(f, "titulo:Oficina de Mods") && has(f, "nome:Mod 6 de nome comprido"));
