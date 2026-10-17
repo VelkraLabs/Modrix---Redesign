@@ -1,19 +1,16 @@
-# Entrega: pacote de teste do TLMod (7ª versão)
+# Entrega: pacote de teste do TLMod (8ª versão)
 
 Branch só para download, sem o código. Pode ser apagada depois.
 
 | arquivo | SHA-256 |
 |---|---|
-| `tlmod-teste.zip` | `6e48421367ede195ee1829575424a2cdf41e0e3dc6ec1191e58afab3eb95d5a1` |
-| `libtlmod_bridge.so` | `b94e4a1d86d02c9007e848a3ceb332263dba847286d31af6987029b6ae140223` |
-| `libtlmod_runtime.so` | `9d744d8e2ee50601db8b15cfbb58b457912cae5f263342be62f68f31b95ab644` |
-| `README_TESTE.md` | `e3a4cc855928384e866976c63ca05b3d6fa6dc143f9b055de4205f911bf87cec` |
-| `oficina_preview.png` | `76568a2bcede1490b3fbb62e8b2b641e3fa65f21be37915fce716e0093ad8bf0` |
+| `tlmod-teste.zip` | `73fc78af6775530d6f329a8f52cab24c924948f16a419950c66f33e24f18ad7d` |
+| `libtlmod_bridge.so` | `0fec60f8361b672ecf61521ee16d3caf062df281531cad11be870a2e8080e47f` |
+| `libtlmod_runtime.so` | `f523d0f842cd2e49f01726d3760f57b07273edc4a4afd8807e83a46e109f06b9` |
+| `README_TESTE.md` | `c7f996300c470ba285b18e8b8fe0add1d76d28fdb774d03c600a054ed0649a6a` |
 
 - `tlmod-teste.zip`: o pacote completo.
-- `libtlmod_bridge.so` e `libtlmod_runtime.so`: as duas que mudaram desde a 6ª versão (Oficina de
-  Mods: botão Mods no menu principal). A pasta `tlmod/` não mudou.
-- `oficina_preview.png`: prévia da Oficina, desenhada no computador a partir do mesmo view-model
-  que o painel recebe (não é uma captura do aparelho).
+- `libtlmod_bridge.so` e `libtlmod_runtime.so`: as duas que mudaram desde a 7ª versão (botão Mods
+  cabe na tela; Oficina de Mods com as telas do Terraria). A pasta `tlmod/` não mudou.
 
-Gerado a partir do commit `7870c1b` da branch `ccr-bbd92bf9-i01buk`.
+Gerado a partir do commit `3bea350` da branch `ccr-bbd92bf9-i01buk`.
