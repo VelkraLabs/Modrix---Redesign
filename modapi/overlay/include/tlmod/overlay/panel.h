@@ -1,8 +1,15 @@
-// Lógica do painel de mods (sem desenho).
+// Lógica do overlay de mods (sem desenho).
 //
-// O controlador guarda o estado (aberto/fechado, aba), executa as ações
-// (abrir, trocar de aba, ligar/desligar mod), busca os dados (ModLoader e o
-// canal do Boss Checklist) e produz um VIEW-MODEL em JSON. Quem desenha (Views
+// Superfícies, uma aberta por vez:
+//   - botão "M": painel com o Log do TLMod;
+//   - ícone do Boss Checklist: gaveta que desliza da esquerda para a direita;
+//   - ícone de cada mod com canal "panel" (ex.: Ferramentas): modal no centro.
+// Os ícones só aparecem com um mundo carregado. A Oficina de Mods (painel) cobre
+// tudo quando a do jogo não está disponível.
+//
+// O controlador guarda o estado, executa as ações (abrir/fechar, comando de mod,
+// ligar/desligar mod), busca os dados (ModLoader e o canal do Boss Checklist) e
+// produz um VIEW-MODEL em JSON. Quem desenha (Views
 // Android no jogo, ou o gerador de prévia no host) só lê esse JSON: não
 // decide nada, não formata texto e não conhece o runtime.
 //
@@ -48,6 +55,8 @@ public:
                                              std::string* error) const = 0;
     // Últimas linhas do log (da mais antiga para a mais nova) e o arquivo onde ele é gravado.
     virtual std::vector<rt::LogEntry> LogTail(size_t /*max*/) const { return {}; }
+    // Há um mundo carregado? Qualquer thread. nullopt = ainda não se sabe.
+    virtual std::optional<bool> InWorld() const { return std::nullopt; }
     virtual std::string LogFile() const { return {}; }
     // Mods com aba própria no painel: provedor E canal de comando "panel".
     virtual std::vector<std::string> PanelMods() const { return {}; }
@@ -67,6 +76,7 @@ public:
                                      std::string* error) const override;
     std::vector<rt::LogEntry> LogTail(size_t max) const override { return rt::RecentLog(max); }
     std::string LogFile() const override { return rt::LogFilePath().string(); }
+    std::optional<bool> InWorld() const override { return loader_.InWorld(); }
     std::vector<std::string> PanelMods() const override;
     std::optional<std::string> Command(const std::string& modId, const std::string& channel,
                                        const std::string& command, std::string* error) const override {
@@ -80,7 +90,8 @@ private:
 // ---------------------------------------------------------------------------
 // View-model
 // ---------------------------------------------------------------------------
-enum class Tab { Mods, Checklist, Log, ModTab };
+// O que está aberto por cima do jogo (além da Oficina).
+enum class Surface { None, Log, Checklist, ModTab };
 
 struct ModRow {
     std::string id;
@@ -138,19 +149,23 @@ struct LogView {
     std::vector<LogLine> lines;   // da mais antiga para a mais nova
 };
 
-// Aba de um mod (ex.: tlmod.devtools). O conteúdo é o JSON do canal "panel"
+// Modal de um mod (ex.: tlmod.devtools). O conteúdo é o JSON do canal "panel"
 // do mod, já validado, repassado ao renderizador como está:
-//   {"title": "...", "sections": [{"title", "note", "search": {"id", "placeholder", "query"},
+//   {"title": "...", "icon": "tools", "sections": [{"title", "note", "search": {"id", "placeholder", "query"},
 //     "rows": [{"text", "detail", "buttons": [{"label", "command", "active"}]}]}]}
+// "icon" escolhe o desenho do ícone na tela (kLauncherIcons); sem ele, a inicial do título.
 // Um toque num botão manda o texto de "command" de volta ao mod; o campo de
 // busca manda "search <id> <texto>".
 struct ModTab {
     std::string modId;
     std::string title;    // "title" do JSON do mod; o nome do mod se faltar
+    std::string icon;     // "icon" do JSON do mod, se for um dos kLauncherIcons; senão vazio
     std::string content;  // JSON do canal "panel" (objeto)
     std::string notice;   // "toast" da última resposta, ou erro
 };
 constexpr const char* kModPanelChannel = "panel";
+// Ícones que o renderizador sabe desenhar.
+constexpr const char* kLauncherIcons[] = {"checklist", "tools", "star", "gem", "sword", "book"};
 
 // Canal do Boss Checklist que o painel consome.
 constexpr const char* kChecklistMod = "tlmod.boss_checklist";
@@ -170,18 +185,20 @@ public:
     PanelController(const PanelDataSource& source, ConfigStore& config);
 
     // --- Ações ---------------------------------------------------------------
-    void ToggleOpen() { SetOpen(!open_); }
-    void SetOpen(bool open);
-    void SelectTab(Tab tab);
+    // Abre `s` e fecha a que estava aberta; abrir a mesma de novo fecha (toque no
+    // mesmo ícone). ModTab precisa de `modId`. false = mod sem aba.
+    bool Toggle(Surface s, const std::string& modId = "");
+    bool Show(Surface s, const std::string& modId = "");
+    void Close();
     // Inverte o interruptor do mod e salva. Não carrega nem descarrega nada.
     bool ToggleMod(const std::string& modId, std::string* error = nullptr);
-    // Ponto de entrada do renderizador: "toggle_open", "close",
-    // "tab" (arg "mods" | "checklist" | "log" | "mod:<id>"), "toggle_mod" (arg = id do mod),
-    // "mod_command" (arg = comando para o mod da aba aberta), "workshop_open",
+    // Ponto de entrada do renderizador: "toggle_open" (o "M": o Log), "close",
+    // "open" (arg "log" | "checklist" | "mod:<id>": alterna), "toggle_mod" (arg = id do mod),
+    // "mod_command" (arg = comando para o mod do modal aberto), "workshop_open",
     // "workshop_close", "workshop_expand" (arg = id do mod: mostra/esconde o erro).
     bool HandleAction(const std::string& action, const std::string& arg);
 
-    // Oficina de Mods. Abrir fecha o painel flutuante (a Oficina fica por cima de tudo).
+    // Oficina de Mods. Abrir fecha a superfície aberta (a Oficina fica por cima de tudo).
     void SetWorkshopOpen(bool open);
     // Pedido de qualquer thread (o botão do menu roda na thread do jogo): a
     // Oficina abre no próximo Tick, na thread do renderizador.
@@ -190,21 +207,22 @@ public:
     bool IsExpanded(const std::string& modId) const { return expanded_.count(modId) != 0; }
 
     // Chamado periodicamente pelo renderizador (ex.: a cada 250 ms).
-    // Busca dados só com o painel aberto. Devolve true se o view-model mudou.
+    // Busca dados só da superfície aberta. Devolve true se o view-model mudou.
     bool Tick(int64_t nowMs);
 
     // --- Estado --------------------------------------------------------------
-    bool IsOpen() const { return open_; }
-    Tab ActiveTab() const { return tab_; }
+    Surface OpenSurface() const { return surface_; }
+    // Ícones na tela: só com um mundo carregado e sem a Oficina aberta.
+    bool LaunchersVisible() const { return inWorld_ && !workshopOpen_; }
     uint64_t Version() const { return version_; }
     const std::vector<ModRow>& ModRows() const { return modRows_; }
     const std::string& ModsNotice() const { return modsNotice_; }
     const ChecklistView& Checklist() const { return checklist_; }
     const LogView& LogTab() const { return log_; }
     const std::vector<ModTab>& ModTabs() const { return modTabs_; }
-    const std::string& ActiveModTab() const { return activeMod_; }  // vazio fora de uma aba de mod
-    bool SelectModTab(const std::string& modId);
+    const std::string& ActiveModTab() const { return activeMod_; }  // vazio fora do modal de um mod
     bool ModCommand(const std::string& command);
+    bool ChecklistInstalled() const;
     // Quantas vezes o canal do checklist foi consultado (para testes).
     int ChecklistQueries() const { return checklistQueries_; }
 
@@ -221,8 +239,8 @@ private:
 
     const PanelDataSource& source_;
     ConfigStore& config_;
-    bool open_ = false;
-    Tab tab_ = Tab::Mods;
+    Surface surface_ = Surface::None;
+    bool inWorld_ = false;
     uint64_t version_ = 1;
 
     bool workshopOpen_ = false;

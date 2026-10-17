@@ -17,7 +17,7 @@
 using namespace tlmod;
 using overlay::ChecklistView;
 using overlay::PanelController;
-using overlay::Tab;
+using overlay::Surface;
 namespace fs = std::filesystem;
 
 static int g_failures = 0;
@@ -103,7 +103,7 @@ static void TestLoaderDisabled(const fs::path& mods) {
 
 // ---------------------------------------------------------------------------
 static void TestPanel(const fs::path& mods, const fs::path& tmp) {
-    std::printf("\n== painel: aba Mods\n");
+    std::printf("\n== painel: mods e interruptores\n");
     overlay::ConfigStore cfg(tmp / "panel" / "tlmod_config.json");
     std::string err;
     CHECK(cfg.SetEnabled("tlmod.example_boss", false, &err));  // desligado numa sessão anterior
@@ -117,7 +117,7 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     PanelController panel(source, cfg);
 
     // Fechado: monta a lista uma vez, mas nunca consulta o checklist.
-    CHECK(!panel.IsOpen() && panel.Tick(0));
+    CHECK(panel.OpenSurface() == Surface::None && panel.Tick(0));
     for (int t = 1; t <= 10; ++t) panel.Tick(t * 1000);
     CHECK(panel.ChecklistQueries() == 0);
 
@@ -157,26 +157,30 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     CHECK(Row(panel, "tlmod.example_item")->pending.empty() && panel.ModsNotice().empty());
     CHECK(!panel.ToggleMod("nao.existe", &err) && err.find("desconhecido") != std::string::npos);
 
-    std::printf("\n== painel: aba Boss Checklist\n");
-    CHECK(panel.HandleAction("toggle_open", "") && panel.IsOpen());
-    CHECK(panel.HandleAction("tab", "checklist") && panel.ActiveTab() == Tab::Checklist);
+    std::printf("\n== painel: gaveta do Boss Checklist\n");
+    // Sem mundo (o jogo ainda não rodou um frame): sem ícones; o "M" abre o Log.
+    CHECK(!panel.LaunchersVisible() && panel.ChecklistInstalled());
+    CHECK(panel.HandleAction("toggle_open", "") && panel.OpenSurface() == Surface::Log);
+    // O ícone do checklist abre a gaveta no lugar do Log (uma superfície por vez).
+    CHECK(panel.HandleAction("open", "checklist") && panel.OpenSurface() == Surface::Checklist);
 
     // Antes do primeiro frame do jogo.
     panel.Tick(20000);
     CHECK(panel.ChecklistQueries() == 1 && panel.Checklist().mode == ChecklistView::Mode::Message &&
           panel.Checklist().message == "Aguardando o jogo…");
 
-    // No menu do jogo.
+    // No menu do jogo: os ícones somem e a gaveta fecha (sem consultar mais).
     game.inWorld = false;
-    CHECK(!panel.Tick(20500) && panel.ChecklistQueries() == 1);  // antes do intervalo: não consulta
-    CHECK(panel.Tick(21000) && panel.Checklist().message == "Entre num mundo");
+    CHECK(panel.Tick(20500) && panel.OpenSurface() == Surface::None && !panel.LaunchersVisible());
+    CHECK(!panel.Tick(21000) && panel.ChecklistQueries() == 1);
 
-    // Num mundo, início de jogo.
+    // Num mundo, início de jogo: os ícones voltam, e a gaveta reabre já com os dados.
     game.inWorld = true;
     for (auto& p : game.progress) p = false;
     for (TLModProgress f : {TLMOD_DOWNED_KING_SLIME, TLMOD_DOWNED_EYE_OF_CTHULHU, TLMOD_DOWNED_EVIL_BOSS})
         game.progress[f] = true;
-    CHECK(panel.Tick(22000));
+    CHECK(panel.Tick(21500) && panel.LaunchersVisible() && panel.OpenSurface() == Surface::None);
+    CHECK(panel.HandleAction("open", "checklist") && panel.Tick(22000));
     const ChecklistView& c = panel.Checklist();
     CHECK(c.mode == ChecklistView::Mode::Ready && !c.hardmode);
     CHECK(c.summary.size() == 3 && c.summary[0].label == "Bosses" && c.summary[0].value == "3/17");
@@ -190,7 +194,7 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
 
     // Sem mudança no jogo: consulta, mas não "muda" o view-model.
     uint64_t before = panel.Version();
-    CHECK(!panel.Tick(23000) && panel.Version() == before && panel.ChecklistQueries() == 4);
+    CHECK(!panel.Tick(23000) && panel.Version() == before && panel.ChecklistQueries() == 3);
 
     // Um boss cai: na próxima atualização aparece.
     game.progress[TLMOD_DOWNED_QUEEN_BEE] = true;
@@ -198,15 +202,15 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     CHECK(panel.Tick(24000) && panel.Checklist().next == "Próximo: Skeletron");
     CHECK(Boss(panel.Checklist(), "Deerclops")->statusLabel == "Desconhecido");
 
-    // Fechar para de consultar.
-    panel.HandleAction("close", "");
+    // Tocar no ícone de novo fecha; fechada, para de consultar.
+    CHECK(panel.HandleAction("open", "checklist") && panel.OpenSurface() == Surface::None);
     int queries = panel.ChecklistQueries();
     for (int t = 25; t < 40; ++t) panel.Tick(t * 1000);
-    CHECK(!panel.IsOpen() && panel.ChecklistQueries() == queries);
+    CHECK(panel.ChecklistQueries() == queries);
 
     // Reabrir atualiza na hora, sem esperar o intervalo.
     game.progress[TLMOD_PROGRESS_HARDMODE] = true;
-    panel.SetOpen(true);
+    panel.HandleAction("open", "checklist");
     CHECK(panel.Tick(40001) && panel.Checklist().hardmode && panel.ChecklistQueries() == queries + 1);
 
     std::printf("\n== snapshot (view-model para o renderizador)\n");
@@ -215,9 +219,14 @@ static void TestPanel(const fs::path& mods, const fs::path& tmp) {
     auto doc = rt::json::Parse(snap, &jerr);
     CHECK(doc.has_value());
     CHECK(snap.find("Próximo: Skeletron") != std::string::npos);  // acentos em UTF-8, sem escape
-    CHECK(doc && *doc->Get("tab")->AsString() == "checklist" && *doc->Get("open")->AsBool());
+    CHECK(doc && *doc->Get("surface")->AsString() == "checklist" && *doc->Get("launchers_visible")->AsBool());
     CHECK(doc && doc->Get("theme")->Get("defeated") && *doc->Get("theme")->Get("panel_width_dp")->AsNumber() == 400);
-    CHECK(doc && doc->Get("mods")->Get("rows")->AsArray()->size() == 3);
+    CHECK(doc && *doc->Get("theme")->Get("drawer_width_dp")->AsNumber() == 360);
+    const auto* launchers = doc ? doc->Get("launchers")->AsArray() : nullptr;
+    CHECK(launchers && launchers->size() == 1 && *(*launchers)[0].Get("id")->AsString() == "checklist" &&
+          *(*launchers)[0].Get("style")->AsString() == "drawer" && *(*launchers)[0].Get("icon")->AsString() == "checklist" &&
+          *(*launchers)[0].Get("active")->AsBool());
+    CHECK(doc && !doc->Get("tabs") && !doc->Get("mods"));  // o "M" não tem mais abas
 }
 
 // ---------------------------------------------------------------------------
@@ -234,10 +243,12 @@ static void TestChecklistNotLoaded(const fs::path& mods, const fs::path& tmp) {
     loader.LoadAll();
     overlay::LoaderDataSource source(loader);
     PanelController panel(source, cfg);
-    panel.SetOpen(true);
-    panel.SelectTab(Tab::Checklist);
+    panel.Show(Surface::Checklist);
     panel.Tick(0);
     CHECK(panel.Checklist().message == "O mod Boss Checklist não está carregado.");
+    // Sem o mod, sem o ícone.
+    auto snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    CHECK(!panel.ChecklistInstalled() && snap && snap->Get("launchers")->AsArray()->empty());
     // Mod só de NPC carregado: o ícone é o Olho de Aparência Suspeita.
     for (const overlay::ModInfo& m : source.Mods())
         if (m.id == "tlmod.example_boss") CHECK(m.state == rt::ModState::Loaded && m.iconItem == 43);
@@ -271,15 +282,11 @@ static void TestErrorAndLog(const fs::path& tmp) {
     panel.Tick(0);
     const overlay::ModRow* row = Row(panel, "test.broken");
     CHECK(row && rec && row->detail == rec->error);  // inteiro, sem corte
-    auto snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
-    const rt::json::Value* jrow = snap ? &(*snap->Get("mods")->Get("rows")->AsArray())[0] : nullptr;
-    CHECK(jrow && rec && *jrow->Get("detail")->AsString() == rec->error);
     CHECK(rec && rec->error.find("file too short") != std::string::npos);
 
-    // Aba Log: fechado não busca; aberto na aba, mostra as últimas linhas e o arquivo.
+    // Log (o "M"): fechado não busca; aberto, mostra as últimas linhas e o arquivo.
     CHECK(panel.LogTab().lines.empty());
-    CHECK(panel.HandleAction("toggle_open", "") && panel.HandleAction("tab", "log"));
-    CHECK(panel.ActiveTab() == Tab::Log);
+    CHECK(panel.HandleAction("toggle_open", "") && panel.OpenSurface() == Surface::Log);
     CHECK(panel.Tick(10));
     const overlay::LogView& lv = panel.LogTab();
     CHECK(lv.file == logFile.string() && !lv.lines.empty());
@@ -292,8 +299,8 @@ static void TestErrorAndLog(const fs::path& tmp) {
     CHECK(!panel.Tick(500));
     CHECK(panel.Tick(10 + PanelController::kLogRefreshMs) && panel.LogTab().lines.back().text.find("W [teste] linha nova") != std::string::npos);
     CHECK(!panel.Tick(10 + 2 * PanelController::kLogRefreshMs));  // nada mudou: não redesenha
-    snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
-    CHECK(snap && *snap->Get("tab")->AsString() == "log" && snap->Get("tabs")->AsArray()->size() == 3);
+    auto snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
+    CHECK(snap && *snap->Get("surface")->AsString() == "log" && *snap->Get("panel_title")->AsString() == "TLMod · Log");
     CHECK(snap && *snap->Get("log")->Get("file")->AsString() == logFile.string());
     CHECK(snap && snap->Get("log")->Get("lines")->AsArray()->size() == panel.LogTab().lines.size());
     CHECK(ReadFile(logFile).find("W [teste] linha nova") != std::string::npos);
@@ -323,17 +330,19 @@ static void TestModTab(const fs::path& modsSrc, const fs::path& tmp) {
     panel.Tick(0);
     CHECK(panel.ModTabs().size() == 1 && panel.ModTabs()[0].title == "Ferramentas");
     auto snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
-    const auto& tabs = *snap->Get("tabs")->AsArray();
-    CHECK(tabs.size() == 4 && *tabs[3].Get("id")->AsString() == "mod:tlmod.devtools" &&
-          *tabs[3].Get("label")->AsString() == "Ferramentas");
+    const auto& launchers = *snap->Get("launchers")->AsArray();
+    CHECK(launchers.size() == 1 && *launchers[0].Get("id")->AsString() == "mod:tlmod.devtools" &&
+          *launchers[0].Get("label")->AsString() == "Ferramentas" && *launchers[0].Get("icon")->AsString() == "tools" &&
+          *launchers[0].Get("style")->AsString() == "modal" && *launchers[0].Get("letter")->AsString() == "F");
     CHECK(snap->Get("modtab")->IsNull());
 
-    CHECK(panel.HandleAction("toggle_open", "") && panel.HandleAction("tab", "mod:tlmod.devtools"));
-    CHECK(!panel.HandleAction("tab", "mod:nao.existe"));
-    CHECK(panel.ActiveTab() == Tab::ModTab && panel.ActiveModTab() == "tlmod.devtools");
+    CHECK(panel.HandleAction("open", "mod:tlmod.devtools"));
+    CHECK(!panel.HandleAction("open", "mod:nao.existe"));
+    CHECK(panel.OpenSurface() == Surface::ModTab && panel.ActiveModTab() == "tlmod.devtools");
     panel.Tick(10);
     snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
-    CHECK(snap && *snap->Get("tab")->AsString() == "mod:tlmod.devtools");
+    CHECK(snap && *snap->Get("surface")->AsString() == "mod:tlmod.devtools" &&
+          *snap->Get("modtab")->Get("title")->AsString() == "Ferramentas");
     const rt::json::Value* content = snap->Get("modtab")->Get("content");
     CHECK(content && content->Get("sections")->AsArray()->size() == 4);
     CHECK(*(*content->Get("sections")->AsArray())[3].Get("search")->Get("id")->AsString() == "item");
@@ -357,8 +366,11 @@ static void TestModTab(const fs::path& modsSrc, const fs::path& tmp) {
     game.Frame();
     CHECK(panel.Tick(30 + PanelController::kModNoticeMs + PanelController::kModTabRefreshMs) &&
           panel.SnapshotJson() != before);
-    // Outra aba: comando não vai para lugar nenhum.
-    CHECK(panel.HandleAction("tab", "mods") && panel.ActiveModTab().empty() && !panel.HandleAction("mod_command", "heal"));
+    // Sair do mundo fecha o modal.
+    game.inWorld = false;
+    CHECK(panel.Tick(100000) && panel.OpenSurface() == Surface::None && !panel.LaunchersVisible());
+    // O "M" (Log) aberto: comando não vai para lugar nenhum.
+    CHECK(panel.HandleAction("toggle_open", "") && panel.ActiveModTab().empty() && !panel.HandleAction("mod_command", "heal"));
 }
 
 // ---------------------------------------------------------------------------
@@ -384,12 +396,12 @@ static void TestWorkshop(const fs::path& mods, const fs::path& tmp) {
     overlay::LoaderDataSource source(loader);
     PanelController panel(source, cfg);
     panel.Tick(0);
-    panel.SetOpen(true);
+    panel.Show(Surface::Log);
 
     // Pedido da thread do jogo: só abre no Tick (thread do renderizador), e fecha o painel.
     std::thread([&] { panel.RequestWorkshop(); }).join();
-    CHECK(!panel.IsWorkshopOpen() && panel.IsOpen());
-    CHECK(panel.Tick(1) && panel.IsWorkshopOpen() && !panel.IsOpen());
+    CHECK(!panel.IsWorkshopOpen() && panel.OpenSurface() == Surface::Log);
+    CHECK(panel.Tick(1) && panel.IsWorkshopOpen() && panel.OpenSurface() == Surface::None);
     CHECK(!panel.Tick(2));  // o pedido foi consumido
 
     auto snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
@@ -429,11 +441,10 @@ static void TestWorkshop(const fs::path& mods, const fs::path& tmp) {
           *boss->Get("pending")->AsString() == "Será ativado ao reiniciar o jogo");
     CHECK(*snap->Get("workshop")->Get("notice")->AsString() == "Reinicie o jogo para aplicar as mudanças.");
 
-    // Fechar; a aba Mods do painel também abre a Oficina.
+    // Fechar; a ação workshop_open também abre (Oficina do painel no lugar da do jogo).
     CHECK(panel.HandleAction("workshop_close", "") && !panel.IsWorkshopOpen());
     snap = rt::json::Parse(panel.SnapshotJson(), nullptr);
-    CHECK(*snap->Get("fab")->Get("visible")->AsBool() &&
-          *snap->Get("mods")->Get("workshop_button")->AsString() == "Abrir a Oficina de Mods");
+    CHECK(*snap->Get("fab")->Get("visible")->AsBool());
     CHECK(panel.HandleAction("workshop_open", "") && panel.IsWorkshopOpen());
 
     // Mudança feita por fora (a Oficina nativa, na thread do jogo): o próximo Tick refaz as linhas.

@@ -1,9 +1,9 @@
 // Gera view-models do painel a partir de dados fixos, para a prévia em PNG.
 //   overlay_snapshot sample_checklist.json <saída>/ [sample_panel.json]
-// Escreve snapshot_checklist.json, snapshot_mods.json, snapshot_log.json e
-// snapshot_workshop.json (e,
-// com o terceiro argumento, snapshot_tools.json com a aba do tlmod.devtools):
-// exatamente o JSON que o renderizador Android recebe do PanelController.
+// Escreve snapshot_closed.json (o "M" e os ícones), snapshot_checklist.json (gaveta), snapshot_log.json (painel do "M"),
+// snapshot_workshop.json (Oficina) e, com o terceiro argumento,
+// snapshot_tools.json (modal do tlmod.devtools): exatamente o JSON que o
+// renderizador Android recebe do PanelController, com um mundo carregado.
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -58,6 +58,7 @@ public:
     std::optional<std::string> Query(const std::string& modId, const std::string&, std::string*) const override {
         return modId == "tlmod.devtools" ? panel_ : checklist_;
     }
+    std::optional<bool> InWorld() const override { return true; }
     std::vector<std::string> PanelMods() const override {
         return panel_.empty() ? std::vector<std::string>{} : std::vector<std::string>{"tlmod.devtools"};
     }
@@ -89,16 +90,14 @@ int main(int argc, char** argv) {
     std::string err;
     config.SetEnabled("tlmod.example_item", false, &err);  // mostra o aviso "ao reiniciar"
     overlay::PanelController panel(source, config);
-    panel.SetOpen(true);
-    panel.SelectTab(overlay::Tab::Checklist);
-    panel.Tick(0);
+    panel.Tick(0);  // fechado: o "M" e os ícones
+    std::ofstream(out / "snapshot_closed.json") << panel.SnapshotJson();
+
+    panel.Show(overlay::Surface::Checklist);
+    panel.Tick(1);
     std::ofstream(out / "snapshot_checklist.json") << panel.SnapshotJson();
 
-    panel.SelectTab(overlay::Tab::Mods);
-    panel.Tick(1);
-    std::ofstream(out / "snapshot_mods.json") << panel.SnapshotJson();
-
-    panel.SelectTab(overlay::Tab::Log);
+    panel.Show(overlay::Surface::Log);
     panel.Tick(2);
     std::ofstream(out / "snapshot_log.json") << panel.SnapshotJson();
 
@@ -108,10 +107,9 @@ int main(int argc, char** argv) {
     panel.Tick(3);
     std::ofstream(out / "snapshot_workshop.json") << panel.SnapshotJson();
     panel.HandleAction("workshop_close", "");
-    panel.SetOpen(true);
 
-    if (argc > 3) {  // aba Ferramentas, logo depois de um toque em "+10"
-        panel.SelectModTab("tlmod.devtools");
+    if (argc > 3) {  // modal Ferramentas, logo depois de um toque em "+10"
+        panel.Show(overlay::Surface::ModTab, "tlmod.devtools");
         panel.Tick(3);
         panel.HandleAction("mod_command", "give 75 10");
         panel.Tick(4);

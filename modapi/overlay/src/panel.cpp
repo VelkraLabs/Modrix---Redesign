@@ -33,8 +33,12 @@ constexpr const char* kUnknown = "#FF8A93A3";
 constexpr const char* kError = "#FFFF6B6B";
 constexpr const char* kSwitchOn = "#FF5BD17A";
 constexpr const char* kSwitchOff = "#FF4A5568";
-constexpr int kPanelWidthDp = 400;  // 4 abas (Mods, Boss Checklist, Log, Ferramentas)
+constexpr const char* kScrim = "#8C000000";  // atrás da gaveta e do modal
+constexpr int kPanelWidthDp = 400;   // painel do "M" (Log)
 constexpr int kPanelMaxHeightDp = 440;
+constexpr int kDrawerWidthDp = 360;  // gaveta do Boss Checklist (no máximo 70% da tela)
+constexpr int kModalWidthDp = 460;   // modal de um mod (no máximo a tela menos as margens)
+constexpr int kLauncherSizeDp = 40;  // ícones abaixo do "M"
 constexpr int kFabSizeDp = 44;
 constexpr int kMarginDp = 12;
 constexpr int kCornerDp = 12;
@@ -366,21 +370,44 @@ PanelController::PanelController(const PanelDataSource& source, ConfigStore& con
 
 void PanelController::Bump() { ++version_; }
 
-void PanelController::SetOpen(bool open) {
-    if (open_ == open) return;
-    open_ = open;
-    if (open) checklistDirty_ = logDirty_ = true;  // ao abrir, a próxima Tick busca na hora
+bool PanelController::Show(Surface s, const std::string& modId) {
+    if (!modsLoaded_) RebuildMods();
+    if (s == Surface::ModTab && !FindModTab(modId)) return false;
+    if (s == Surface::None) {
+        Close();
+        return true;
+    }
+    const std::string mod = s == Surface::ModTab ? modId : "";
+    if (surface_ == s && activeMod_ == mod) return true;
+    surface_ = s;
+    activeMod_ = mod;
+    // Ao abrir, a próxima Tick busca na hora.
+    if (s == Surface::Checklist) checklistDirty_ = true;
+    if (s == Surface::Log) logDirty_ = true;
+    if (s == Surface::ModTab) modDirty_ = true;
+    Bump();
+    return true;
+}
+
+bool PanelController::Toggle(Surface s, const std::string& modId) {
+    if (surface_ == s && (s != Surface::ModTab || activeMod_ == modId)) {
+        Close();
+        return true;
+    }
+    return Show(s, modId);
+}
+
+void PanelController::Close() {
+    if (surface_ == Surface::None) return;
+    surface_ = Surface::None;
+    activeMod_.clear();
     Bump();
 }
 
-void PanelController::SelectTab(Tab tab) {
-    if (tab_ == tab && tab != Tab::ModTab) return;
-    if (tab == Tab::ModTab) return;  // abas de mod: SelectModTab
-    activeMod_.clear();
-    tab_ = tab;
-    if (tab == Tab::Checklist) checklistDirty_ = true;
-    if (tab == Tab::Log) logDirty_ = true;
-    Bump();
+bool PanelController::ChecklistInstalled() const {
+    for (const ModInfo& m : mods_)
+        if (m.id == kChecklistMod && m.state == ModState::Loaded) return true;
+    return false;
 }
 
 bool PanelController::ToggleMod(const std::string& modId, std::string* error) {
@@ -404,12 +431,11 @@ bool PanelController::ToggleMod(const std::string& modId, std::string* error) {
 }
 
 bool PanelController::HandleAction(const std::string& action, const std::string& arg) {
-    if (action == "toggle_open") ToggleOpen();
-    else if (action == "close") SetOpen(false);
-    else if (action == "tab" && arg == "mods") SelectTab(Tab::Mods);
-    else if (action == "tab" && arg == "checklist") SelectTab(Tab::Checklist);
-    else if (action == "tab" && arg == "log") SelectTab(Tab::Log);
-    else if (action == "tab" && arg.rfind("mod:", 0) == 0) return SelectModTab(arg.substr(4));
+    if (action == "toggle_open") Toggle(Surface::Log);
+    else if (action == "close") Close();
+    else if (action == "open" && arg == "log") Toggle(Surface::Log);
+    else if (action == "open" && arg == "checklist") Toggle(Surface::Checklist);
+    else if (action == "open" && arg.rfind("mod:", 0) == 0) return Toggle(Surface::ModTab, arg.substr(4));
     else if (action == "mod_command") return ModCommand(arg);
     else if (action == "toggle_mod") return ToggleMod(arg);
     else if (action == "workshop_open") SetWorkshopOpen(true);
@@ -423,9 +449,9 @@ bool PanelController::HandleAction(const std::string& action, const std::string&
 
 void PanelController::SetWorkshopOpen(bool open) {
     if (open && !modsLoaded_) RebuildMods();
-    if (workshopOpen_ == open && (!open || !open_)) return;
+    if (workshopOpen_ == open && (!open || surface_ == Surface::None)) return;
     workshopOpen_ = open;
-    if (open) open_ = false;  // a Oficina cobre a tela; o painel volta pelo botão flutuante
+    if (open) surface_ = Surface::None, activeMod_.clear();  // a Oficina cobre a tela
     Bump();
 }
 
@@ -496,20 +522,8 @@ ModTab* PanelController::FindModTab(const std::string& modId) {
     return nullptr;
 }
 
-bool PanelController::SelectModTab(const std::string& modId) {
-    if (!modsLoaded_) RebuildMods();
-    ModTab* tab = FindModTab(modId);
-    if (!tab) return false;
-    if (tab_ == Tab::ModTab && activeMod_ == modId) return true;
-    tab_ = Tab::ModTab;
-    activeMod_ = modId;
-    modDirty_ = true;
-    Bump();
-    return true;
-}
-
 bool PanelController::ModCommand(const std::string& command) {
-    ModTab* tab = tab_ == Tab::ModTab ? FindModTab(activeMod_) : nullptr;
+    ModTab* tab = surface_ == Surface::ModTab ? FindModTab(activeMod_) : nullptr;
     if (!tab) return false;
     std::string err;
     auto reply = source_.Command(tab->modId, kModPanelChannel, command, &err);
@@ -539,6 +553,10 @@ void PanelController::RefreshModTab(ModTab& tab) {
     auto doc = json::Parse(tab.content, nullptr);
     std::string title = Str(doc ? &*doc : nullptr, "title");
     if (!title.empty()) tab.title = title;
+    const std::string icon = Str(doc ? &*doc : nullptr, "icon");
+    tab.icon.clear();
+    for (const char* known : kLauncherIcons)
+        if (icon == known) tab.icon = icon;
     Bump();
 }
 
@@ -565,7 +583,14 @@ bool PanelController::Tick(int64_t nowMs) {
         Bump();
     }
     if (workshopRequested_.exchange(false, std::memory_order_acq_rel)) SetWorkshopOpen(true);
-    if (open_ && tab_ == Tab::ModTab && (modDirty_ || nowMs - lastModMs_ >= kModTabRefreshMs)) {
+    // Fora de um mundo os ícones somem, e a gaveta e o modal fecham.
+    const std::optional<bool> world = source_.InWorld();
+    if (world.value_or(false) != inWorld_) {
+        inWorld_ = world.value_or(false);
+        Bump();
+    }
+    if (world == std::optional<bool>(false) && (surface_ == Surface::Checklist || surface_ == Surface::ModTab)) Close();
+    if (surface_ == Surface::ModTab && (modDirty_ || nowMs - lastModMs_ >= kModTabRefreshMs)) {
         modDirty_ = false;
         lastModMs_ = nowMs;
         if (ModTab* tab = FindModTab(activeMod_)) RefreshModTab(*tab);
@@ -578,13 +603,12 @@ bool PanelController::Tick(int64_t nowMs) {
         for (ModTab& t : modTabs_)
             if (!t.notice.empty()) t.notice.clear(), Bump();
     }
-    if (open_ && tab_ == Tab::Checklist &&
-        (checklistDirty_ || nowMs - lastChecklistMs_ >= kChecklistRefreshMs)) {
+    if (surface_ == Surface::Checklist && (checklistDirty_ || nowMs - lastChecklistMs_ >= kChecklistRefreshMs)) {
         checklistDirty_ = false;
         lastChecklistMs_ = nowMs;
         RefreshChecklist();
     }
-    if (open_ && tab_ == Tab::Log && (logDirty_ || nowMs - lastLogMs_ >= kLogRefreshMs)) {
+    if (surface_ == Surface::Log && (logDirty_ || nowMs - lastLogMs_ >= kLogRefreshMs)) {
         logDirty_ = false;
         lastLogMs_ = nowMs;
         RefreshLog();
@@ -596,12 +620,12 @@ std::string PanelController::SnapshotJson() const {
     rt::JsonWriter w;
     w.BeginObject();
     w.Key("version").Int(static_cast<int64_t>(version_));
-    w.Key("open").Bool(open_);
-    w.Key("tab").String(tab_ == Tab::Mods        ? "mods"
-                        : tab_ == Tab::Checklist ? "checklist"
-                        : tab_ == Tab::Log       ? "log"
-                                                 : "mod:" + activeMod_);
+    w.Key("surface").String(surface_ == Surface::Log         ? "log"
+                            : surface_ == Surface::Checklist ? "checklist"
+                            : surface_ == Surface::ModTab    ? "mod:" + activeMod_
+                                                             : "none");
     w.Key("title").String("TLMod");
+    w.Key("panel_title").String("TLMod · Log");
 
     w.Key("theme").BeginObject();
     w.Key("panel_bg").String(theme::kPanelBg);
@@ -619,7 +643,11 @@ std::string PanelController::SnapshotJson() const {
     w.Key("error").String(theme::kError);
     w.Key("switch_on").String(theme::kSwitchOn);
     w.Key("switch_off").String(theme::kSwitchOff);
+    w.Key("scrim").String(theme::kScrim);
     w.Key("panel_width_dp").Int(theme::kPanelWidthDp);
+    w.Key("drawer_width_dp").Int(theme::kDrawerWidthDp);
+    w.Key("modal_width_dp").Int(theme::kModalWidthDp);
+    w.Key("launcher_size_dp").Int(theme::kLauncherSizeDp);
     w.Key("panel_max_height_dp").Int(theme::kPanelMaxHeightDp);
     w.Key("fab_size_dp").Int(theme::kFabSizeDp);
     w.Key("margin_dp").Int(theme::kMarginDp);
@@ -631,48 +659,40 @@ std::string PanelController::SnapshotJson() const {
 
     w.Key("fab").BeginObject().Key("label").String("M").Key("visible").Bool(!workshopOpen_).EndObject();
 
-    w.Key("tabs").BeginArray();
-    w.BeginObject().Key("id").String("mods").Key("label").String("Mods").Key("active").Bool(tab_ == Tab::Mods).EndObject();
-    w.BeginObject().Key("id").String("checklist").Key("label").String("Boss Checklist")
-        .Key("active").Bool(tab_ == Tab::Checklist).EndObject();
-    w.BeginObject().Key("id").String("log").Key("label").String("Log").Key("active").Bool(tab_ == Tab::Log).EndObject();
-    for (const ModTab& t : modTabs_)
+    // Ícones abaixo do "M": o Boss Checklist (gaveta) e um por mod com canal "panel" (modal).
+    w.Key("launchers_visible").Bool(LaunchersVisible());
+    w.Key("launchers").BeginArray();
+    if (ChecklistInstalled())
+        w.BeginObject().Key("id").String("checklist").Key("label").String("Boss Checklist")
+            .Key("icon").String("checklist").Key("style").String("drawer")
+            .Key("active").Bool(surface_ == Surface::Checklist).EndObject();
+    for (const ModTab& t : modTabs_) {
+        std::string letter = t.title.empty() ? "?" : t.title.substr(0, 1);
+        if (!letter.empty() && (static_cast<unsigned char>(letter[0]) & 0x80)) {  // UTF-8: o caractere inteiro
+            size_t n = 1;
+            while (n < t.title.size() && (static_cast<unsigned char>(t.title[n]) & 0xC0) == 0x80) ++n;
+            letter = t.title.substr(0, n);
+        }
         w.BeginObject().Key("id").String("mod:" + t.modId).Key("label").String(t.title)
-            .Key("active").Bool(tab_ == Tab::ModTab && activeMod_ == t.modId).EndObject();
+            .Key("icon").String(t.icon).Key("letter").String(letter).Key("style").String("modal")
+            .Key("active").Bool(surface_ == Surface::ModTab && activeMod_ == t.modId).EndObject();
+    }
     w.EndArray();
 
-    // Aba de mod aberta: o JSON do mod vai como está (já validado pelo runtime).
     w.Key("modtab");
     const ModTab* open = nullptr;
     for (const ModTab& t : modTabs_)
-        if (tab_ == Tab::ModTab && t.modId == activeMod_) open = &t;
+        if (surface_ == Surface::ModTab && t.modId == activeMod_) open = &t;
     if (open) {
         w.BeginObject();
         w.Key("id").String(open->modId);
+        w.Key("title").String(open->title);
         w.Key("notice").String(open->notice);
         w.Key("content").Raw(open->content.empty() ? "{}" : open->content);
         w.EndObject();
     } else {
         w.Null();
     }
-
-    w.Key("mods").BeginObject();
-    w.Key("notice").String(modsNotice_);
-    w.Key("workshop_button").String("Abrir a Oficina de Mods");
-    w.Key("rows").BeginArray();
-    for (const ModRow& r : modRows_) {
-        w.BeginObject();
-        w.Key("id").String(r.id);
-        w.Key("title").String(r.title);
-        w.Key("subtitle").String(r.subtitle);
-        w.Key("state").String(r.state);
-        w.Key("detail").String(r.detail);
-        w.Key("enabled").Bool(r.enabled);
-        w.Key("pending").String(r.pending);
-        w.EndObject();
-    }
-    w.EndArray();
-    w.EndObject();
 
     WriteWorkshop(w, workshopOpen_, modRows_, modsNotice_, expanded_);
 

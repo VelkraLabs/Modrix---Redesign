@@ -1,4 +1,4 @@
-// Ferramentas de teste: a aba "Ferramentas" do painel.
+// Ferramentas de teste: o modal "Ferramentas" (ícone de chave inglesa abaixo do "M").
 //
 // O painel mostra o que este mod descreve no canal "panel" (seções, botões,
 // campos de busca) e devolve os toques como comandos de texto no mesmo canal.
@@ -229,7 +229,7 @@ public:
     // O que o painel desenha.
     bool Build(std::string& json) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        std::string s = "{\"title\":\"Ferramentas\",\"sections\":[";
+        std::string s = "{\"title\":\"Ferramentas\",\"icon\":\"tools\",\"sections\":[";
 
         // Hora
         std::string note = !haveTime_ ? "Entre num mundo para mudar a hora."

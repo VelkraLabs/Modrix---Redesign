@@ -1,7 +1,8 @@
 # Ferramentas de teste (`tlmod.devtools`)
 
-Mod para testar outros mods no aparelho, no estilo dos menus de trapaça: põe a aba **Ferramentas** no
-painel do TLMod. Instale só para testar; ele liga e desliga pelo painel como qualquer mod.
+Mod para testar outros mods no aparelho, no estilo dos menus de trapaça: põe o ícone de chave inglesa
+abaixo do botão "M" (dentro de um mundo), que abre o modal **Ferramentas**. Instale só para testar; ele
+liga e desliga pela Oficina de Mods como qualquer mod.
 
 | seção | o que faz |
 |---|---|
@@ -14,7 +15,7 @@ painel do TLMod. Instale só para testar; ele liga e desliga pelo painel como qu
   congelar/mudar a hora mexe nos eventos. Use um mundo de teste.
 - Invocar respeita os 2 s de carência ao entrar num mundo (como o `spawn_on_start`).
 - A busca mostra até 30 resultados: exatos primeiro, depois os que começam com o texto, depois os que contêm.
-- `sample_panel.json` é um exemplo do JSON da aba, usado pela prévia (`overlay_snapshot`).
+- `sample_panel.json` é um exemplo do JSON do modal, usado pela prévia (`overlay_snapshot`).
 
 Comandos (texto, mandados pelo painel): `time dawn|noon|dusk|midnight`, `freeze`, `heal`, `god`, `kill`,
 `give <id> <n>`, `spawn <id> [<id>...]`, `search item|npc <texto>`.

@@ -7,7 +7,7 @@ e lê exatamente o JSON que o PanelController entrega ao Java, inclusive o
 tema. Serve para ver o resultado antes do aparelho; não é uma captura de tela.
 
     overlay_snapshot sample_checklist.json out/ ../../mods/devtools/sample_panel.json
-    python3 render_preview.py out/snapshot_checklist.json out/snapshot_mods.json out/snapshot_log.json \
+    python3 render_preview.py out/snapshot_closed.json out/snapshot_checklist.json out/snapshot_log.json \
         out/snapshot_tools.json preview.png
     python3 render_preview.py out/snapshot_workshop.json workshop.png     # Oficina de Mods
 """
@@ -126,11 +126,57 @@ def draw_game_background(img):
     d.text((w - dp(8), h - dp(6)), "cena do jogo (ilustrativa)", font=f, fill=(255, 255, 255, 170), anchor="rd")
 
 
+def draw_launcher(p, x, y, size, launcher):
+    """Java: LauncherView.onDraw (unidade u = raio / 10)."""
+    import math
+    r = size / 2 - dp(1)
+    cx, cy = x + size / 2, y + size / 2
+    active = launcher["active"]
+    bg = p.color("accent") if active else p.color("fab_bg")
+    fg = p.color("panel_bg") if active else p.color("accent")
+    p.d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=bg, outline=p.color("accent"), width=dp(2))
+    u = r / 10
+    sw = max(1, int(round(1.4 * u)))
+    icon = launcher.get("icon", "")
+    if icon == "checklist":
+        p.d.rounded_rectangle([cx - 4.5 * u, cy - 5 * u, cx + 4.5 * u, cy + 6 * u], radius=u, outline=fg, width=sw)
+        p.d.rounded_rectangle([cx - 2.2 * u, cy - 6.5 * u, cx + 2.2 * u, cy - 4 * u], radius=0.6 * u, fill=fg)
+        for yy in (-1.2, 2.8):
+            p.d.line([(cx - 3 * u, cy + yy * u), (cx - 2 * u, cy + (yy + 1) * u), (cx - 0.4 * u, cy + (yy - 1) * u)],
+                     fill=fg, width=sw, joint="curve")
+            p.d.line([(cx + 0.8 * u, cy + yy * u), (cx + 3 * u, cy + yy * u)], fill=fg, width=sw)
+    elif icon == "tools":
+        p.d.line([(cx - 4.5 * u, cy + 4.5 * u), (cx + 1.2 * u, cy - 1.2 * u)], fill=fg, width=max(1, int(2.2 * u)))
+        hx, hy = cx + 3 * u, cy - 3 * u
+        p.d.ellipse([hx - 3.3 * u, hy - 3.3 * u, hx + 3.3 * u, hy + 3.3 * u], fill=fg)
+        p.d.ellipse([hx + 1.6 * u - 1.7 * u, hy - 1.6 * u - 1.7 * u, hx + 1.6 * u + 1.7 * u, hy - 1.6 * u + 1.7 * u], fill=bg)
+        p.d.rectangle([hx + 0.6 * u, hy - 5 * u, hx + 5 * u, hy - 0.6 * u], fill=bg)
+        p.d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=p.color("accent"), width=dp(2))  # o recorte não passa da borda
+    elif icon in ("star", "gem"):
+        n = 5 if icon == "star" else 4
+        pts = []
+        for k in range(n * 2):
+            a = math.pi / n * k - math.pi / 2
+            rr = (6 if k % 2 == 0 else (2.6 if icon == "star" else 3.6)) * u
+            pts.append((cx + math.cos(a) * rr, cy + math.sin(a) * rr))
+        p.d.polygon(pts, fill=fg)
+    else:
+        p.d.text((cx, cy), launcher.get("letter") or "?", font=font(9 * u / DENSITY, True), fill=fg, anchor="mm")
+
+
+def clip_paste(layer, content, box):
+    mask = Image.new("L", layer.size, 0)
+    ImageDraw.Draw(mask).rectangle(box, fill=255)
+    layer.paste(content, (0, 0), Image.composite(content, Image.new("RGBA", layer.size), mask).getchannel("A"))
+
+
 def render_panel(snap, layer, scroll_to_end=False):
+    """Java: render(). O "M", os ícones abaixo dele e a superfície aberta (Log, gaveta ou modal)."""
     t = snap["theme"]
     p = Painter(layer, t)
     sw, sh = layer.size
     margin = dp(t["margin_dp"])
+    surface = snap["surface"]
 
     # Botão flutuante (Java: leftMargin = margin, topMargin = margin * 6).
     fab_size = dp(t["fab_size_dp"])
@@ -138,107 +184,82 @@ def render_panel(snap, layer, scroll_to_end=False):
     p.d.ellipse([fx, fy, fx + fab_size, fy + fab_size], fill=p.color("fab_bg"), outline=p.color("accent"),
                 width=dp(2))
     p.text((fx + fab_size / 2, fy + fab_size / 2), snap["fab"]["label"], "title_sp", "text", True, "mm")
-    if not snap["open"]:
-        return
+    # Ícones (Java: buildLaunchers): centrados sob o "M", 14 dp abaixo, 10 dp entre eles.
+    if snap.get("launchers_visible") and snap.get("launchers"):
+        ls = dp(t["launcher_size_dp"])
+        lx, ly = margin + (fab_size - ls) / 2, fy + fab_size + dp(14)
+        for launcher in snap["launchers"]:
+            draw_launcher(p, lx, ly, ls, launcher)
+            ly += ls + dp(10)
 
-    # Painel ao lado do botão (Java: positionPanel). Altura = conteúdo, até max_h
-    # (Java: onMeasure com AT_MOST); o topo usa max_h, como no Java.
-    pw = dp(t["panel_width_dp"])
-    max_h = min(dp(t["panel_max_height_dp"]), sh - 2 * margin)
-    px = min(fx + fab_size + margin, max(0, sw - pw - margin))
-    py = max(margin, min(fy, sh - max_h - margin))
-    pad = dp(10)
-    x0, x1 = px + pad, px + pw - pad
     hh = line_h(font(t["title_sp"], True))
-    th = line_h(font(t["text_sp"], True)) + dp(12)
-    content_y = py + pad + hh + dp(4) + dp(8) + th + dp(8)
+    if surface == "log":
+        # Painel ao lado do botão (Java: positionPanel). Altura = conteúdo, até max_h.
+        pw = dp(t["panel_width_dp"])
+        max_h = min(dp(t["panel_max_height_dp"]), sh - 2 * margin)
+        px = min(fx + fab_size + margin, max(0, sw - pw - margin))
+        py = max(margin, min(fy, sh - max_h - margin))
+        pad = dp(10)
+        x0, x1 = px + pad, px + pw - pad
+        top = py + pad + hh + dp(8)
 
-    # Conteúdo rolável desenhado à parte, para medir a altura e recortar.
-    def draw_content(top):
-        layer_ = Image.new("RGBA", layer.size, (0, 0, 0, 0))
-        cp = Painter(layer_, t)
-        if snap["tab"] == "mods":
-            return layer_, draw_mods(cp, snap["mods"], x0, x1, top)
-        if snap["tab"] == "log":
-            return layer_, draw_log(cp, snap["log"], x0, x1, top)
-        if snap["tab"].startswith("mod:"):
-            return layer_, draw_modtab(cp, snap["modtab"], x0, x1, top)
-        return layer_, draw_checklist(cp, snap["checklist"], x0, x1, top)
+        def draw(yy):
+            c = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+            return c, draw_log(Painter(c, t), snap["log"], x0, x1, yy)
 
-    content, end_y = draw_content(content_y)
-    ph = min(max_h, end_y - py + pad)
-    overflow = end_y - (py + ph - pad)
-    if scroll_to_end and overflow > 0:
-        content, _ = draw_content(content_y - overflow)
+        content, end_y = draw(top)
+        ph = min(max_h, end_y - py + pad)
+        if scroll_to_end and end_y > py + ph - pad:
+            content, _ = draw(top - (end_y - (py + ph - pad)))
+        p.rounded((px, py, px + pw, py + ph), t["corner_dp"], "panel_bg", "panel_border")
+        p.text((x0, py + pad), snap.get("panel_title", "TLMod"), "title_sp", "accent", True)
+        p.text((x1 - dp(4), py + pad + dp(2)), "✕", "title_sp", "text_dim", False, "ra")
+        clip_paste(layer, content, (px, top, px + pw, py + ph - pad))
+    elif surface == "checklist":
+        # Gaveta (Java: buildDrawer): presa à esquerda, altura toda, cantos arredondados à direita.
+        p.d.rectangle([0, 0, sw, sh], fill=p.color("scrim"))
+        dw = min(dp(t["drawer_width_dp"]), int(sw * 0.7))
+        p.d.rounded_rectangle([-dp(20), 0, dw, sh], radius=dp(t["corner_dp"]), fill=p.color("panel_bg"),
+                              outline=p.color("panel_border"), width=dp(1))
+        pad = dp(12)
+        x0, x1 = pad, dw - pad
+        title = next((l["label"] for l in snap["launchers"] if l["id"] == "checklist"), "")
+        p.text((x0, pad), title, "title_sp", "accent", True)
+        p.text((x1 - dp(4), pad + dp(2)), "✕", "title_sp", "text_dim", False, "ra")
+        top = pad + hh + dp(8)
 
-    p.rounded((px, py, px + pw, py + ph), t["corner_dp"], "panel_bg", "panel_border")
-    y = py + pad
+        def draw(yy):
+            c = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+            return c, draw_checklist(Painter(c, t), snap["checklist"], x0, x1, yy)
 
-    # Cabeçalho: título + fechar.
-    p.text((x0, y), snap["title"], "title_sp", "accent", True)
-    p.text((x1 - dp(4), y + dp(2)), "✕", "title_sp", "text_dim", False, "ra")
-    y += hh + dp(4)
+        content, end_y = draw(top)
+        if scroll_to_end and end_y > sh - pad:
+            content, _ = draw(top - (end_y - (sh - pad)))
+        clip_paste(layer, content, (0, top, dw, sh - pad))
+    elif surface.startswith("mod:"):
+        # Modal (Java: buildModal): cartão no centro, altura do conteúdo até a tela menos as margens.
+        p.d.rectangle([0, 0, sw, sh], fill=p.color("scrim"))
+        mw = min(dp(t["modal_width_dp"]), sw - 2 * margin)
+        max_h = sh - 2 * margin
+        pad = dp(12)
+        mx = (sw - mw) / 2
+        x0, x1 = mx + pad, mx + mw - pad
 
-    # Abas (Java: largura do texto + parte igual da sobra, padding 10/6, ativa com fundo arredondado).
-    y += dp(8)
-    tabs = snap["tabs"]
-    natural = [p.text_w(tab["label"], "text_sp", tab["active"]) + dp(20) for tab in tabs]
-    extra = max(0, (x1 - x0) - sum(natural)) / len(tabs)
-    bx = x0
-    for tab, nw in zip(tabs, natural):
-        tw = nw + extra
-        if tab["active"]:
-            p.rounded((bx, y, bx + tw, y + th), 8, "tab_active_bg")
-        p.text((bx + tw / 2, y + th / 2), tab["label"], "text_sp", "text" if tab["active"] else "text_dim",
-               tab["active"], "mm")
-        bx += tw
-    y += th + dp(8)
+        def draw(yy):
+            c = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+            return c, draw_modtab(Painter(c, t), snap["modtab"], x0, x1, yy)
 
-    assert y == content_y
-    clip = (px, y, px + pw, py + ph - pad)
-    mask = Image.new("L", layer.size, 0)
-    ImageDraw.Draw(mask).rectangle(clip, fill=255)
-    layer.paste(content, (0, 0), Image.composite(content, Image.new("RGBA", layer.size), mask).getchannel("A"))
-
-
-def draw_mods(p, mods, x0, x1, y):
-    t = p.t
-    if mods.get("workshop_button"):  # Java: botão de largura toda, padding 10/8, fundo accent
-        bh = line_h(font(t["text_sp"], True)) + dp(16)
-        p.rounded((x0, y, x1, y + bh), 8, "accent")
-        p.text(((x0 + x1) / 2, y + bh / 2), mods["workshop_button"], "text_sp", "panel_bg", True, "mm")
-        y += bh + dp(8)
-    if mods.get("notice"):
-        h = p.text((x0 + dp(4), y), mods["notice"], "small_sp", "accent")
-        y += h + dp(8)
-    for r in mods["rows"]:
-        max_w = (x1 - dp(10) - dp(48)) - (x0 + dp(10))
-        lines = [(ellipsize(p, r["title"], "text_sp", True, max_w), "text_sp", "text", True)]
-        state = r["state"]
-        lines.append((ellipsize(p, r["subtitle"], "small_sp", False, max_w), "small_sp", "text_dim" if state == "loaded"
-                      else ("unknown" if state == "disabled" else "error"), False))
-        if r.get("detail"):  # Java: erro inteiro, quebra linha (padding 2 dp em cima e embaixo)
-            wrapped = p.wrap(r["detail"], "small_sp", max_w)
-            lines.append(("", None, None, None))
-            lines += [(s, "small_sp", "error", False) for s in wrapped]
-            lines.append(("", None, None, None))
-        if r.get("pending"):
-            lines.append((ellipsize(p, r["pending"], "small_sp", False, max_w), "small_sp", "accent", False))
-        text_h = sum(line_h(font(t[s], b)) if s else dp(2) for _, s, _, b in lines)
-        row_h = max(text_h, dp(22)) + dp(16)
-        p.rounded((x0, y, x1, y + row_h), 8, "row_bg")
-        ty = y + dp(8)
-        for s, size, color, bold in lines:
-            ty += p.text((x0 + dp(10), ty), s, size, color, bold) if size else dp(2)
-        # Interruptor: trilho 40x22 dp, botão de 18 dp.
-        tx1 = x1 - dp(10)
-        cy = y + row_h / 2
-        on = r["enabled"]
-        p.rounded((tx1 - dp(40), cy - dp(11), tx1, cy + dp(11)), 11, "switch_on" if on else "switch_off")
-        kx = tx1 - dp(20) if on else tx1 - dp(38)
-        p.d.ellipse([kx, cy - dp(9), kx + dp(18), cy + dp(9)], fill=p.color("text"))
-        y += row_h + dp(6)
-    return y - dp(6)
+        _, probe_end = draw(0)
+        mh = min(max_h, pad + hh + dp(8) + probe_end + pad)
+        my = (sh - mh) / 2
+        top = my + pad + hh + dp(8)
+        content, end_y = draw(top)
+        if scroll_to_end and end_y > my + mh - pad:
+            content, _ = draw(top - (end_y - (my + mh - pad)))
+        p.rounded((mx, my, mx + mw, my + mh), t["corner_dp"], "panel_bg", "panel_border")
+        p.text((x0, my + pad), snap["modtab"]["title"], "title_sp", "accent", True)
+        p.text((x1 - dp(4), my + pad + dp(2)), "✕", "title_sp", "text_dim", False, "ra")
+        clip_paste(layer, content, (mx, top, mx + mw, my + mh - pad))
 
 
 def draw_log(p, log, x0, x1, y):
@@ -543,16 +564,16 @@ def main():
         if snap.get("workshop", {}).get("open"):
             screens.append(render_screen(snap, "Oficina de Mods (botão Mods do menu)"))
             screens.append(render_screen(snap, "Oficina de Mods (rolada até o fim, erro aberto)", True))
-        elif snap["tab"] == "checklist":
-            screens.append(render_screen(snap, "Aba Boss Checklist"))
-            screens.append(render_screen(snap, "Aba Boss Checklist (rolada até o fim)", True))
-        elif snap["tab"] == "log":
-            screens.append(render_screen(snap, "Aba Log (acompanha o fim)", True))
-        elif snap["tab"].startswith("mod:"):
-            screens.append(render_screen(snap, "Aba Ferramentas (tlmod.devtools)"))
-            screens.append(render_screen(snap, "Aba Ferramentas (rolada até o fim)", True))
+        elif snap["surface"] == "checklist":
+            screens.append(render_screen(snap, "Ícone do Boss Checklist: gaveta pela esquerda"))
+            screens.append(render_screen(snap, "Gaveta do Boss Checklist (rolada até o fim)", True))
+        elif snap["surface"] == "log":
+            screens.append(render_screen(snap, "Botão M: só o Log (acompanha o fim)", True))
+        elif snap["surface"].startswith("mod:"):
+            screens.append(render_screen(snap, "Ícone das Ferramentas: modal no centro"))
+            screens.append(render_screen(snap, "Modal das Ferramentas (rolado até o fim)", True))
         else:
-            screens.append(render_screen(snap, "Aba Mods"))
+            screens.append(render_screen(snap, "Dentro do mundo: M e os ícones"))
     gap = dp(10)
     total = Image.new("RGBA", (screens[0].width, sum(s.height for s in screens) + gap * (len(screens) - 1)),
                       (24, 24, 28, 255))

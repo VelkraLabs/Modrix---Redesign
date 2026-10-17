@@ -2,8 +2,11 @@ package com.tlmod.overlay;
 
 import android.app.Activity;
 import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
@@ -23,6 +26,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -36,8 +40,13 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Renderizador do painel do TLMod: Views Android presas à janela da Activity
+ * Renderizador do overlay do TLMod: Views Android presas à janela da Activity
  * do jogo (sem permissão de sobreposição).
+ *
+ * Superfícies, uma aberta por vez (o C++ decide qual): o painel do botão "M"
+ * (Log), a gaveta do Boss Checklist (desliza da esquerda) e o modal de um mod
+ * (ex.: Ferramentas, no centro). Os ícones da gaveta e dos modais ficam numa
+ * coluna abaixo do "M" e só aparecem com um mundo carregado.
  *
  * Não decide nada: lê o view-model (JSON) que o PanelController em C++ produz
  * e devolve os toques como ações. Todo texto, cor e medida vem do JSON.
@@ -60,12 +69,32 @@ public final class TLModOverlay {
 
     private FrameLayout root;
     private TextView fab;
-    private LinearLayout panel;
+    private LinearLayout panel;  // o "M": Log
     private int panelMaxH;  // altura máxima; o painel encolhe para caber no conteúdo
+    private TextView panelTitle;
     private ScrollView scroll;
+    private LinearLayout panelContent;
+    // Para onde os render*() desenham, e a largura útil (quebra dos botões dos mods).
     private LinearLayout content;
-    private LinearLayout tabsRow;
-    private String renderedTab = "";
+    private int contentWidthPx;
+    private String renderedSurface = "none";
+    // Ícones abaixo do "M".
+    private LinearLayout launcherColumn;
+    private String renderedLaunchers = "";
+    // Gaveta do Boss Checklist: fundo escurecido + cartão preso à esquerda.
+    private FrameLayout drawerLayer;
+    private View drawerScrim;
+    private LinearLayout drawer;
+    private TextView drawerTitle;
+    private LinearLayout drawerContent;
+    private boolean drawerShown;
+    // Modal de um mod: fundo escurecido + cartão no centro.
+    private FrameLayout modalLayer;
+    private LinearLayout modalCard;
+    private int modalMaxH;
+    private TextView modalTitle;
+    private LinearLayout modalContent;
+    private boolean modalShown;
     // Campos de busca das abas de mod, reaproveitados entre desenhos para não
     // perder o texto digitado nem o foco (chave: "<mod>/<id da busca>").
     private final Map<String, EditText> searchFields = new HashMap<>();
@@ -104,7 +133,10 @@ public final class TLModOverlay {
         if (snap == null) return;
         theme = snap.optJSONObject("theme");
         buildFab();
+        buildLaunchers();
         buildPanel();
+        buildDrawer();
+        buildModal();
         buildWorkshop();
         render(snap);
         handler.postDelayed(ticker, TICK_MS);
@@ -219,8 +251,8 @@ public final class TLModOverlay {
 
         LinearLayout header = new LinearLayout(activity);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("TLMod", "title_sp", "accent", true);
-        header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        panelTitle = text("TLMod", "title_sp", "accent", true);
+        header.addView(panelTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView close = text("✕", "title_sp", "text_dim", false);
         close.setPadding(dp(10), dp(2), dp(4), dp(2));
         close.setOnClickListener(new View.OnClickListener() {
@@ -229,15 +261,13 @@ public final class TLModOverlay {
         header.addView(close);
         panel.addView(header);
 
-        tabsRow = new LinearLayout(activity);
-        tabsRow.setPadding(0, dp(8), 0, dp(8));
-        panel.addView(tabsRow);
-
         scroll = new ScrollView(activity);
-        content = new LinearLayout(activity);
-        content.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(content);
-        panel.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        panelContent = new LinearLayout(activity);
+        panelContent.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(panelContent);
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        sl.topMargin = dp(8);
+        panel.addView(scroll, sl);
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 dp(theme.optInt("panel_width_dp", 340)), ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -261,6 +291,283 @@ public final class TLModOverlay {
     }
 
     // ------------------------------------------------------------------------
+    // Ícones abaixo do "M": um por superfície (gaveta do checklist, modal de cada mod).
+    private void buildLaunchers() {
+        int margin = dp(theme.optInt("margin_dp", 12));
+        int fabSize = dp(theme.optInt("fab_size_dp", 44));
+        int size = dp(theme.optInt("launcher_size_dp", 40));
+        launcherColumn = new LinearLayout(activity);
+        launcherColumn.setOrientation(LinearLayout.VERTICAL);
+        launcherColumn.setVisibility(View.GONE);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
+        lp.leftMargin = margin + (fabSize - size) / 2;  // centrados sob a posição inicial do "M"
+        lp.topMargin = margin * 6 + fabSize + dp(14);
+        root.addView(launcherColumn, lp);
+    }
+
+    private void renderLaunchers(JSONObject s) {
+        JSONArray list = s.optJSONArray("launchers");
+        boolean visible = s.optBoolean("launchers_visible") && list != null && list.length() > 0;
+        launcherColumn.setVisibility(visible ? View.VISIBLE : View.GONE);
+        String key = list != null ? list.toString() : "";
+        if (key.equals(renderedLaunchers)) return;
+        renderedLaunchers = key;
+        launcherColumn.removeAllViews();
+        int size = dp(theme.optInt("launcher_size_dp", 40));
+        for (int i = 0; list != null && i < list.length(); i++) {
+            final JSONObject l = list.optJSONObject(i);
+            if (l == null) continue;
+            LauncherView v = new LauncherView(activity, l.optString("icon"), l.optString("letter"), l.optBoolean("active"));
+            v.setContentDescription(l.optString("label"));
+            v.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) { act("open", l.optString("id")); }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
+            if (i > 0) lp.topMargin = dp(10);
+            launcherColumn.addView(v, lp);
+        }
+    }
+
+    private String launcherLabel(JSONObject s, String id) {
+        JSONArray list = s.optJSONArray("launchers");
+        for (int i = 0; list != null && i < list.length(); i++) {
+            JSONObject l = list.optJSONObject(i);
+            if (l != null && id.equals(l.optString("id"))) return l.optString("label");
+        }
+        return "";
+    }
+
+    /** Ícone redondo desenhado à mão (Canvas): cor de destaque quando a superfície dele está aberta. */
+    private final class LauncherView extends View {
+        private final String icon, letter;
+        private final boolean active;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
+
+        LauncherView(Context c, String icon, String letter, boolean active) {
+            super(c);
+            this.icon = icon;
+            this.letter = letter;
+            this.active = active;
+            setClickable(true);
+        }
+
+        @Override protected void onDraw(Canvas cv) {
+            float w = getWidth(), h = getHeight(), cx = w / 2f, cy = h / 2f, r = Math.min(w, h) / 2f - dp(1);
+            int fg = active ? color("panel_bg") : color("accent");
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(active ? color("accent") : color("fab_bg"));
+            cv.drawCircle(cx, cy, r, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(2));
+            paint.setColor(color("accent"));
+            cv.drawCircle(cx, cy, r, paint);
+
+            float u = r / 10f;  // unidade do desenho: o círculo tem raio 10
+            paint.setColor(fg);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+            paint.setStrokeWidth(1.4f * u);
+            path.reset();
+            if ("checklist".equals(icon)) {
+                // Prancheta com duas marcas de "feito".
+                paint.setStyle(Paint.Style.STROKE);
+                cv.drawRoundRect(new RectF(cx - 4.5f * u, cy - 5f * u, cx + 4.5f * u, cy + 6f * u), u, u, paint);
+                paint.setStyle(Paint.Style.FILL);
+                cv.drawRoundRect(new RectF(cx - 2.2f * u, cy - 6.5f * u, cx + 2.2f * u, cy - 4f * u), u * 0.6f, u * 0.6f, paint);
+                paint.setStyle(Paint.Style.STROKE);
+                for (float y : new float[] {-1.2f, 2.8f}) {
+                    path.moveTo(cx - 3f * u, cy + y * u);
+                    path.lineTo(cx - 2f * u, cy + (y + 1f) * u);
+                    path.lineTo(cx - 0.4f * u, cy + (y - 1f) * u);
+                    path.moveTo(cx + 0.8f * u, cy + y * u);
+                    path.lineTo(cx + 3f * u, cy + y * u);
+                }
+                cv.drawPath(path, paint);
+            } else if ("tools".equals(icon)) {
+                // Chave inglesa na diagonal: cabo e cabeça com a boca aberta para cima à direita.
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(2.2f * u);
+                cv.drawLine(cx - 4.5f * u, cy + 4.5f * u, cx + 1.2f * u, cy - 1.2f * u, paint);
+                float hx = cx + 3f * u, hy = cy - 3f * u;
+                paint.setStyle(Paint.Style.FILL);
+                cv.drawCircle(hx, hy, 3.3f * u, paint);
+                paint.setColor(active ? color("accent") : color("fab_bg"));  // a boca: um recorte na cor do fundo
+                cv.drawCircle(hx + 1.6f * u, hy - 1.6f * u, 1.7f * u, paint);
+                cv.drawRect(hx + 0.6f * u, hy - 5f * u, hx + 5f * u, hy - 0.6f * u, paint);
+            } else if ("star".equals(icon) || "gem".equals(icon)) {
+                paint.setStyle(Paint.Style.FILL);
+                int points = "star".equals(icon) ? 5 : 4;
+                for (int k = 0; k < points * 2; k++) {
+                    double a = Math.PI / points * k - Math.PI / 2;
+                    float rr = (k % 2 == 0 ? 6f : ("star".equals(icon) ? 2.6f : 3.6f)) * u;
+                    float px = cx + (float) Math.cos(a) * rr, py = cy + (float) Math.sin(a) * rr;
+                    if (k == 0) path.moveTo(px, py); else path.lineTo(px, py);
+                }
+                path.close();
+                cv.drawPath(path, paint);
+            } else if ("sword".equals(icon)) {
+                paint.setStyle(Paint.Style.STROKE);
+                cv.drawLine(cx - 4f * u, cy + 4f * u, cx + 5f * u, cy - 5f * u, paint);
+                cv.drawLine(cx - 4.5f * u, cy + 0.5f * u, cx - 0.5f * u, cy + 4.5f * u, paint);
+            } else if ("book".equals(icon)) {
+                paint.setStyle(Paint.Style.STROKE);
+                cv.drawRoundRect(new RectF(cx - 4.5f * u, cy - 5.5f * u, cx + 4.5f * u, cy + 5.5f * u), u, u, paint);
+                cv.drawLine(cx - 2.5f * u, cy - 5.5f * u, cx - 2.5f * u, cy + 5.5f * u, paint);
+            } else {
+                paint.setStyle(Paint.Style.FILL);
+                paint.setTextAlign(Paint.Align.CENTER);
+                paint.setTypeface(Typeface.DEFAULT_BOLD);
+                paint.setTextSize(9f * u);
+                Paint.FontMetrics fm = paint.getFontMetrics();
+                cv.drawText(TextUtils.isEmpty(letter) ? "?" : letter, cx, cy - (fm.ascent + fm.descent) / 2f, paint);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Gaveta do Boss Checklist: entra da esquerda; toque no fundo ou no X fecha.
+    private void buildDrawer() {
+        drawerLayer = new FrameLayout(activity);
+        drawerLayer.setVisibility(View.GONE);
+        root.addView(drawerLayer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        drawerScrim = new View(activity);
+        drawerScrim.setBackgroundColor(color("scrim"));
+        drawerScrim.setClickable(true);
+        drawerScrim.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { act("close", ""); }
+        });
+        drawerLayer.addView(drawerScrim, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        drawer = new LinearLayout(activity);
+        drawer.setOrientation(LinearLayout.VERTICAL);
+        drawer.setClickable(true);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(color("panel_bg"));
+        float rad = dp(theme.optInt("corner_dp", 12));
+        bg.setCornerRadii(new float[] {0, 0, rad, rad, rad, rad, 0, 0});  // cantos arredondados só à direita
+        bg.setStroke(dp(1), color("panel_border"));
+        drawer.setBackground(bg);
+        int pad = dp(12);
+        drawer.setPadding(pad, pad, pad, pad);
+        LinearLayout header = new LinearLayout(activity);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        drawerTitle = text("", "title_sp", "accent", true);
+        header.addView(drawerTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        header.addView(closeButton());
+        drawer.addView(header);
+        ScrollView ds = new ScrollView(activity);
+        drawerContent = new LinearLayout(activity);
+        drawerContent.setOrientation(LinearLayout.VERTICAL);
+        ds.addView(drawerContent);
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        sl.topMargin = dp(8);
+        drawer.addView(ds, sl);
+        drawerLayer.addView(drawer, new FrameLayout.LayoutParams(drawerWidth(), ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.TOP | Gravity.START));
+    }
+
+    private int drawerWidth() {
+        int screenW = activity.getResources().getDisplayMetrics().widthPixels;
+        return Math.min(dp(theme.optInt("drawer_width_dp", 360)), (int) (screenW * 0.7f));
+    }
+
+    private void showDrawer(boolean show) {
+        if (show == drawerShown) return;
+        drawerShown = show;
+        drawer.animate().cancel();
+        drawerScrim.animate().cancel();
+        float w = drawer.getLayoutParams().width;
+        if (show) {
+            drawerLayer.setVisibility(View.VISIBLE);
+            drawer.setTranslationX(-w);
+            drawerScrim.setAlpha(0f);
+            drawer.animate().translationX(0f).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();
+            drawerScrim.animate().alpha(1f).setDuration(220).start();
+        } else {
+            drawerScrim.animate().alpha(0f).setDuration(180).start();
+            drawer.animate().translationX(-w).setDuration(180).setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(new Runnable() {
+                        @Override public void run() { if (!drawerShown) drawerLayer.setVisibility(View.GONE); }
+                    }).start();
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Modal de um mod: cartão no centro, por cima de um fundo escurecido.
+    private void buildModal() {
+        modalLayer = new FrameLayout(activity);
+        modalLayer.setVisibility(View.GONE);
+        modalLayer.setBackgroundColor(color("scrim"));
+        modalLayer.setClickable(true);  // toque fora do cartão fecha (e não vai para o jogo)
+        modalLayer.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { act("close", ""); }
+        });
+        root.addView(modalLayer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        modalCard = new LinearLayout(activity) {
+            @Override protected void onMeasure(int widthSpec, int heightSpec) {
+                super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(modalMaxH, MeasureSpec.AT_MOST));
+            }
+        };
+        modalCard.setOrientation(LinearLayout.VERTICAL);
+        modalCard.setClickable(true);
+        modalCard.setBackground(rounded(color("panel_bg"), theme.optInt("corner_dp", 12), color("panel_border")));
+        int pad = dp(12);
+        modalCard.setPadding(pad, pad, pad, pad);
+        LinearLayout header = new LinearLayout(activity);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        modalTitle = text("", "title_sp", "accent", true);
+        header.addView(modalTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        header.addView(closeButton());
+        modalCard.addView(header);
+        ScrollView ms = new ScrollView(activity);
+        modalContent = new LinearLayout(activity);
+        modalContent.setOrientation(LinearLayout.VERTICAL);
+        ms.addView(modalContent);
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        sl.topMargin = dp(8);
+        modalCard.addView(ms, sl);
+        int margin = dp(theme.optInt("margin_dp", 12));
+        int screenW = activity.getResources().getDisplayMetrics().widthPixels;
+        int screenH = activity.getResources().getDisplayMetrics().heightPixels;
+        modalMaxH = screenH - 2 * margin;
+        modalLayer.addView(modalCard, new FrameLayout.LayoutParams(
+                Math.min(dp(theme.optInt("modal_width_dp", 460)), screenW - 2 * margin),
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+    }
+
+    private void showModal(boolean show) {
+        if (show == modalShown) return;
+        modalShown = show;
+        modalLayer.animate().cancel();
+        if (show) {
+            modalLayer.setVisibility(View.VISIBLE);
+            modalLayer.setAlpha(0f);
+            modalCard.setScaleX(0.96f);
+            modalCard.setScaleY(0.96f);
+            modalLayer.animate().alpha(1f).setDuration(150).start();
+            modalCard.animate().scaleX(1f).scaleY(1f).setDuration(150).start();
+        } else {
+            modalLayer.animate().alpha(0f).setDuration(120).withEndAction(new Runnable() {
+                @Override public void run() { if (!modalShown) modalLayer.setVisibility(View.GONE); }
+            }).start();
+        }
+    }
+
+    private TextView closeButton() {
+        TextView close = text("✕", "title_sp", "text_dim", false);
+        close.setPadding(dp(10), dp(2), dp(4), dp(2));
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { act("close", ""); }
+        });
+        return close;
+    }
+
+    // ------------------------------------------------------------------------
     private void render(JSONObject s) {
         long version = s.optLong("version");
         if (version == renderedVersion) return;
@@ -269,106 +576,58 @@ public final class TLModOverlay {
         JSONObject fabState = s.optJSONObject("fab");
         fab.setText(fabState != null ? fabState.optString("label", "M") : "M");
         fab.setVisibility(fabState == null || fabState.optBoolean("visible", true) ? View.VISIBLE : View.GONE);
+        renderLaunchers(s);
         JSONObject ws = s.optJSONObject("workshop");
         boolean wsOpen = ws != null && ws.optBoolean("open");
         workshop.setVisibility(wsOpen ? View.VISIBLE : View.GONE);
         if (wsOpen) renderWorkshop(ws);
 
-        boolean open = s.optBoolean("open");
-        panel.setVisibility(open ? View.VISIBLE : View.GONE);
-        if (!open) return;
+        String surface = s.optString("surface", "none");
+        boolean entered = !surface.equals(renderedSurface);
+        renderedSurface = surface;
 
-        tabsRow.removeAllViews();
-        JSONArray tabs = s.optJSONArray("tabs");
-        for (int i = 0; tabs != null && i < tabs.length(); i++) {
-            final JSONObject t = tabs.optJSONObject(i);
-            boolean active = t.optBoolean("active");
-            TextView tab = text(t.optString("label"), "text_sp", active ? "text" : "text_dim", active);
-            tab.setGravity(Gravity.CENTER);
-            tab.setPadding(dp(10), dp(6), dp(10), dp(6));
-            if (active) tab.setBackground(rounded(color("tab_active_bg"), 8, 0));
-            tab.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { act("tab", t.optString("id")); }
-            });
-            tab.setSingleLine(true);
-            // Largura do texto + parte igual da sobra: "Boss Checklist" não quebra ao lado de "Log".
-            tabsRow.addView(tab, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        // "M": o Log. Acompanha o fim (linhas novas) se já estava no fim ou se acabou de abrir.
+        boolean logOpen = "log".equals(surface);
+        panel.setVisibility(logOpen ? View.VISIBLE : View.GONE);
+        if (logOpen) {
+            panelTitle.setText(s.optString("panel_title", "TLMod"));
+            boolean follow = entered || atBottom();
+            content = panelContent;
+            contentWidthPx = dp(theme.optInt("panel_width_dp", 400)) - dp(20);
+            content.removeAllViews();
+            renderLog(s.optJSONObject("log"));
+            if (follow) {
+                scroll.post(new Runnable() {
+                    @Override public void run() { scroll.fullScroll(View.FOCUS_DOWN); }
+                });
+            }
         }
 
-        // Na aba Log, acompanha o fim (linhas novas) se já estava no fim ou se acabou de entrar nela.
-        String tabId = s.optString("tab");
-        boolean follow = "log".equals(tabId) && (!tabId.equals(renderedTab) || atBottom());
-        renderedTab = tabId;
-        content.removeAllViews();
-        if ("mods".equals(tabId)) renderMods(s.optJSONObject("mods"));
-        else if ("log".equals(tabId)) renderLog(s.optJSONObject("log"));
-        else if (tabId.startsWith("mod:")) renderModTab(s.optJSONObject("modtab"));
-        else renderChecklist(s.optJSONObject("checklist"));
-        if (follow) {
-            scroll.post(new Runnable() {
-                @Override public void run() { scroll.fullScroll(View.FOCUS_DOWN); }
-            });
+        boolean checklistOpen = "checklist".equals(surface);
+        showDrawer(checklistOpen);
+        if (checklistOpen) {
+            drawerTitle.setText(launcherLabel(s, "checklist"));
+            content = drawerContent;
+            contentWidthPx = drawer.getLayoutParams().width - dp(24);
+            content.removeAllViews();
+            renderChecklist(s.optJSONObject("checklist"));
+        }
+
+        boolean modOpen = surface.startsWith("mod:");
+        showModal(modOpen);
+        if (modOpen) {
+            JSONObject tab = s.optJSONObject("modtab");
+            modalTitle.setText(tab != null ? tab.optString("title") : "");
+            content = modalContent;
+            contentWidthPx = modalCard.getLayoutParams().width - dp(24);
+            content.removeAllViews();
+            renderModTab(tab);
         }
     }
 
     private boolean atBottom() {
         View child = scroll.getChildAt(0);
         return child == null || child.getBottom() - (scroll.getHeight() + scroll.getScrollY()) <= dp(24);
-    }
-
-    private void renderMods(JSONObject mods) {
-        if (mods == null) return;
-        String wsButton = mods.optString("workshop_button");
-        if (!TextUtils.isEmpty(wsButton)) {
-            TextView b = text(wsButton, "text_sp", "panel_bg", true);
-            b.setGravity(Gravity.CENTER);
-            b.setPadding(dp(10), dp(8), dp(10), dp(8));
-            b.setBackground(rounded(color("accent"), 8, 0));
-            b.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { act("workshop_open", ""); }
-            });
-            addRow(b, 8);
-        }
-        String notice = mods.optString("notice");
-        if (!TextUtils.isEmpty(notice)) {
-            TextView n = text(notice, "small_sp", "accent", false);
-            n.setPadding(dp(4), 0, dp(4), dp(8));
-            content.addView(n);
-        }
-        JSONArray rows = mods.optJSONArray("rows");
-        for (int i = 0; rows != null && i < rows.length(); i++) {
-            final JSONObject r = rows.optJSONObject(i);
-            LinearLayout row = new LinearLayout(activity);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(10), dp(8), dp(10), dp(8));
-            row.setBackground(rounded(color("row_bg"), 8, 0));
-
-            LinearLayout texts = new LinearLayout(activity);
-            texts.setOrientation(LinearLayout.VERTICAL);
-            texts.addView(line(r.optString("title"), "text_sp", "text", true));
-            String state = r.optString("state");
-            String stateColor = "loaded".equals(state) ? "text_dim" : ("disabled".equals(state) ? "unknown" : "error");
-            texts.addView(line(r.optString("subtitle"), "small_sp", stateColor, false));
-            if (!TextUtils.isEmpty(r.optString("detail"))) {
-                // Erro inteiro: quebra linha, nunca reticências (a causa costuma estar no fim do
-                // dlerror). Selecionável para copiar.
-                TextView detail = text(r.optString("detail"), "small_sp", "error", false);
-                detail.setTextIsSelectable(true);
-                detail.setPadding(0, dp(2), 0, dp(2));
-                texts.addView(detail);
-            }
-            if (!TextUtils.isEmpty(r.optString("pending")))
-                texts.addView(line(r.optString("pending"), "small_sp", "accent", false));
-            row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-            View sw = toggle(r.optBoolean("enabled"));
-            sw.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { act("toggle_mod", r.optString("id")); }
-            });
-            row.addView(sw);
-            addRow(row, 6);
-        }
     }
 
     // ------------------------------------------------------------------------
@@ -580,7 +839,7 @@ public final class TLModOverlay {
         }
         box.setOrientation(LinearLayout.VERTICAL);  // muitos botões: quebram em linhas
         if (hasText) box.addView(texts);
-        int avail = dp(theme.optInt("panel_width_dp", 400)) - dp(10) * 2 - dp(18);
+        int avail = contentWidthPx - dp(10) * 2 - dp(18);
         LinearLayout lineView = null;
         int used = 0;
         Paint paint = new Paint();

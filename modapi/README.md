@@ -467,7 +467,7 @@ chega à interface (`Main.mouseLeft` e a posição) se cair numa região registr
 Oficina registra a área da lista (ou do texto de detalhes) a cada frame, senão só o Voltar
 responderia. Os dados vêm do runtime (`TLModWorkshopSource`, montado com `BuildWorkshopEntries`);
 a configuração é thread-safe e o painel vê as mudanças pela revisão dela. Se alguma peça do jogo não
-resolver, o botão Mods abre a Oficina do painel (Views Android), que também abre pela aba Mods.
+resolver, o botão Mods abre a Oficina do painel (Views Android).
 
 **O botão** é desenhado pelo próprio jogo (`il2cpp_bridge/src/menu_hooks.cpp`): depois do
 `GUIMainMenu.Draw`, o mesmo `GUITransactionButton.Draw` dos outros botões, com o layout de "Comprar o
@@ -479,7 +479,7 @@ igual, com o topo no lugar, se os 7 botões couberem sem se sobrepor; ao lado do
 Refaz quando o tamanho da tela muda, e o log registra a decisão e a região de cada botão. Com
 Configurações aberta, o botão fica desativado, como os outros.
 
-## Ferramentas e abas no painel
+## Ferramentas e ícones na tela
 
 API acrescentada ao fim da `TLModHostApi` (o `tlmod.hpp` confere o `struct_size`):
 
@@ -497,11 +497,14 @@ Os nomes vêm de um catálogo que o runtime monta nos primeiros frames (256 IDs 
 `Lang` e pelo `ItemID/NPCID.Search` do jogo); até ficar pronto, `content_name` de um ID original
 devolve `-2`.
 
-**Aba própria no painel.** Um mod que registra provedor **e** comando no canal `panel` ganha uma aba.
-O provedor descreve a aba em JSON; o painel desenha e devolve os toques como comandos:
+**Ícone próprio na tela.** Um mod que registra provedor **e** comando no canal `panel` ganha um
+ícone na coluna abaixo do botão "M" (só com um mundo carregado); o toque abre um modal no centro da
+tela. O provedor descreve o modal em JSON, e `"icon"` escolhe o desenho do ícone (`checklist`,
+`tools`, `star`, `gem`, `sword`, `book`; sem ele, a inicial do título). O overlay desenha e devolve
+os toques como comandos:
 
 ```json
-{"title": "Ferramentas", "sections": [
+{"title": "Ferramentas", "icon": "tools", "sections": [
   {"title": "Hora do dia", "note": "Agora: 12:00 (dia)",
    "rows": [{"buttons": [{"label": "Meio-dia", "command": "time noon"},
                          {"label": "Congelar hora", "command": "freeze", "active": true}]}]},
@@ -641,7 +644,7 @@ O runtime grava `tlmod/tlmod.log` (ao lado de `mods/`), com as linhas do runtime
 ponte (a ponte repassa as suas por `TLMod_SetLogCallback`; as emitidas antes de o runtime subir são
 reenviadas com a hora original). Cada abertura do jogo começa com uma linha
 `===== TLMod: sessão iniciada ...`. Passando de 1 MiB, o arquivo vira `tlmod.log.1`. As últimas 500
-linhas ficam em memória para a aba **Log** do painel. Tudo continua indo também para o logcat
+linhas ficam em memória para o **Log** do painel (o botão "M"). Tudo continua indo também para o logcat
 (tags `TLMod` e `TLModBridge`).
 
 ## Ainda não implementado

@@ -73,6 +73,8 @@ public:
     const std::vector<std::string>& LoadOrder() const { return order_; }
     ContentRegistry& Registry() { return registry_; }
     const ContentRegistry& Registry() const { return registry_; }
+    // Há um mundo carregado? Qualquer thread (fotografia do adaptador); nullopt = desconhecido.
+    std::optional<bool> InWorld() const { return game_->InWorld(); }
     const TLModHostApi& HostApi() const;
 
     // NPC de mod que ocupa o slot de Main.npc (TLMOD_INVALID_ID = original).

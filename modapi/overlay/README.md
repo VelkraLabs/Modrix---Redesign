@@ -1,13 +1,22 @@
 # Overlay do TLMod (Fase 5)
 
-Painel de mods dentro do jogo: botão flutuante "M", aba **Mods** (estado,
-erro de carga inteiro e liga/desliga), aba **Boss Checklist** (JSON do mod
-`tlmod.boss_checklist`) e aba **Log** (as últimas 150 linhas do log do TLMod,
-com o caminho do `tlmod.log`). Mods que registram o canal `panel` (provedor e
-comando) ganham uma aba própria, como **Ferramentas** do `tlmod.devtools`.
+Overlay do TLMod dentro do jogo, com uma superfície aberta por vez:
 
-**Oficina de Mods (painel).** Tela grande para gerenciar os mods, aberta pelo
-botão "Abrir a Oficina de Mods" da aba Mods (também dentro de um mundo). O botão
+- **Botão "M"** (flutuante, arrastável): painel com o **Log** (as últimas 150
+  linhas do log do TLMod, com o caminho do `tlmod.log`).
+- **Ícones abaixo do "M"**, só com um mundo carregado:
+  - **Boss Checklist** (prancheta; JSON do mod `tlmod.boss_checklist`): uma
+    **gaveta** que desliza da esquerda para a direita, na altura toda da tela;
+  - um por mod que registra o canal `panel` (provedor e comando), como as
+    **Ferramentas** do `tlmod.devtools` (chave inglesa): um **modal** no centro.
+  O ícone de um mod vem do campo `"icon"` do JSON dele (`checklist`, `tools`,
+  `star`, `gem`, `sword`, `book`); sem ele, a inicial do título. Tocar no
+  ícone de novo, no X ou no fundo escurecido fecha. Ao sair do mundo, os
+  ícones somem e a gaveta ou o modal fecham.
+
+Os ícones são desenhados com `Canvas` (`LauncherView`), sem imagens.
+
+**Oficina de Mods (painel).** Tela grande para gerenciar os mods. O botão
 **Mods** do menu principal abre a Oficina nativa, feita com as telas do próprio
 jogo (`il2cpp_bridge/src/workshop_screen.cpp`); esta só substitui aquela se
 alguma peça do jogo não resolver. Mostra os mods em seções pelo estado desta
@@ -43,9 +52,11 @@ com o C++ é feita por JNI. Não precisa de permissão de sobreposição.
 | Prévia em PNG | `preview/render_preview.py` | gera imagem |
 
 O `PanelController` entrega um view-model em JSON (`SnapshotJson()`) que já
-traz textos, cores e medidas em dp. O Java só desenha esse JSON e devolve
-ações (`toggle_open`, `close`, `tab`, `toggle_mod`, `mod_command`,
-`workshop_open`, `workshop_close`, `workshop_expand`). A prévia lê o mesmo JSON.
+traz textos, cores e medidas em dp: `surface` (`none`, `log`, `checklist` ou
+`mod:<id>`), `launchers` (id, rótulo, ícone, estilo `drawer`/`modal`, ativo) e
+`launchers_visible`. O Java só desenha esse JSON e devolve ações
+(`toggle_open`, `open`, `close`, `toggle_mod`, `mod_command`, `workshop_open`,
+`workshop_close`, `workshop_expand`). A prévia lê o mesmo JSON.
 
 - **Oficina de Mods.** O botão do menu roda na thread do jogo: chama
   `PanelController::RequestWorkshop()` (atômico), e a Oficina abre no próximo
@@ -56,14 +67,14 @@ ações (`toggle_open`, `close`, `tab`, `toggle_mod`, `mod_command`,
 - **Erro de carga.** O `detail` de um mod que falhou é a mensagem inteira (com
   o `dlerror()` completo). O Java quebra a linha em vez de pôr reticências, e o
   texto é selecionável para copiar.
-- **Aba de mod.** O conteúdo é o JSON do canal `panel` do mod, repassado como
+- **Modal de mod.** O conteúdo é o JSON do canal `panel` do mod, repassado como
   está (seções com título, nota, campo de busca e linhas de botões; ver
-  `panel.h`). Atualiza a cada 0,5 s com a aba aberta e logo depois de cada
+  `panel.h`). Atualiza a cada 0,5 s com o modal aberto e logo depois de cada
   toque. Botões quebram em linhas conforme a largura. O campo de busca é o
   mesmo `EditText` entre desenhos, e a aba não é redesenhada enquanto ele
   tem foco, para não perder o texto nem fechar o teclado. A resposta do mod
   (`toast`) aparece no topo por 4 s.
-- **Aba Log.** Atualiza a cada 1 s com o painel aberto nela. As linhas vão
+- **Log (o "M").** Atualiza a cada 1 s com o painel aberto. As linhas vão
   num `TextView` só (monoespaçado, vermelho para erro, amarelo para aviso,
   selecionável) e a rolagem acompanha o fim enquanto ela estiver no fim.
 
@@ -93,7 +104,7 @@ cmake -S modapi -B build-android -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android
 Para gerar a prévia no host:
 
 ```sh
-build-host/overlay_snapshot modapi/mods/boss_checklist/sample_checklist.json out/
-python3 modapi/overlay/preview/render_preview.py out/snapshot_checklist.json out/snapshot_mods.json \
-    out/snapshot_log.json preview.png
+build-host/overlay_snapshot modapi/mods/boss_checklist/sample_checklist.json out/ modapi/mods/devtools/sample_panel.json
+python3 modapi/overlay/preview/render_preview.py out/snapshot_closed.json out/snapshot_checklist.json \
+    out/snapshot_log.json out/snapshot_tools.json preview.png
 ```
