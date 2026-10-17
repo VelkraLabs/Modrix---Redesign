@@ -64,7 +64,19 @@ int GemsInit(const TLModHostApi* api, TLModContext* ctx) {
     n.texture = "ember_titan.png";  // a folha do boss de exemplo: 4 quadros de 64x64
     n.frame_count = 4;
     n.frame_ticks = 10;
-    return api->register_npc(ctx, &n) == TLMOD_INVALID_ID ? 1 : 0;
+    if (api->register_npc(ctx, &n) == TLMOD_INVALID_ID) return 1;
+    // Topázio = 2 rubis + 1 gel, na bancada.
+    const TLModRecipeIngredient items[] = {{api->find_content(ctx, TLMOD_CONTENT_ITEM, "test.gems:ruby"), 2}, {23, 1}};
+    const int32_t stations[] = {18};
+    TLModRecipeDef r{};
+    r.struct_size = sizeof(r);
+    r.result = api->find_content(ctx, TLMOD_CONTENT_ITEM, "test.gems:topaz");
+    r.result_stack = 1;
+    r.ingredients = items;
+    r.ingredient_count = 2;
+    r.stations = stations;
+    r.station_count = 1;
+    return api->register_recipe(ctx, &r) ? 0 : 1;
 }
 
 std::u16string U16(const std::string& ascii) { return std::u16string(ascii.begin(), ascii.end()); }
@@ -283,6 +295,22 @@ int main(int argc, char** argv) {
     CHECK(npc_name && npc_net_name && npc_name(boss, buf, sizeof(buf)) && std::string(buf) == "golem");
     CHECK(npc_net_name(boss, buf, sizeof(buf)) && std::string(buf) == "literal:golem");
     CHECK(npc_name(eye, buf, sizeof(buf)) && std::string(buf) == "npc:4");
+
+    // ---- Receitas: do register_recipe até Main.recipe -------------------------------
+    // O SetupRecipes rodou antes do hook (ponte atrasada): o frame seguinte aplica.
+    auto setup_unhooked = reinterpret_cast<void (*)()>(sym("mock_game_setup_recipes_unhooked"));
+    auto recipe = reinterpret_cast<int (*)(int32_t, int32_t*, int32_t*, int32_t*, bool*)>(sym("mock_recipe"));
+    CHECK(setup_unhooked && recipe && TLMod_ModRecipesAdded() == -1);  // os frames acima: sem receitas do jogo ainda
+    setup_unhooked();
+    CHECK(TLMod_ModRecipesAdded() == -1);
+    frame();
+    CHECK(TLMod_ModRecipesAdded() == 1);
+    int32_t result[3], quick[30], tiles[15];
+    bool flags[4];
+    CHECK(recipe && recipe(8, result, quick, tiles, flags) == 2);
+    CHECK(result[0] == topaz && result[1] == kShell && result[2] == 1);
+    CHECK(quick[0] == ruby && quick[1] == 2 && quick[2] == 23 && quick[3] == 1);  // o rubi pelo netID
+    CHECK(tiles[0] == 18 && flags[3]);
 
     fs::remove_all(dir);
     std::printf("\n%s (%d falha%s)\n", g_failures ? "FALHOU" : "TODOS OS TESTES PASSARAM", g_failures,

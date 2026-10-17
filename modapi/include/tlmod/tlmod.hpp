@@ -46,6 +46,14 @@ struct NpcDef {
     int32_t frameTicks = 8;    // ticks por quadro (animação automática)
 };
 
+struct RecipeDef {
+    TLModId result = TLMOD_INVALID_ID;
+    int32_t resultStack = 1;
+    std::vector<TLModRecipeIngredient> ingredients;  // {item, stack}
+    std::vector<int32_t> stations;                   // TileID; vazio = à mão
+    bool needWater = false, needLava = false, needHoney = false;
+};
+
 // Comportamento de um NPC de mod. Uma instância por TIPO (não por NPC): o
 // estado de cada NPC vive em TLModNpcState (ai[] / local[]).
 class NpcBehavior {
@@ -201,6 +209,23 @@ public:
     bool HealPlayer() const { return HasToolsApi() && api_->heal_player(ctx_); }
     int32_t KillHostileNpcs(float radius) const { return HasToolsApi() ? api_->kill_hostile_npcs(ctx_, radius) : -1; }
 
+    // Só no init. false = runtime antigo (sem receitas) ou definição inválida (log).
+    bool RegisterRecipe(const RecipeDef& def) const {
+        if (!HasRecipeApi()) return false;
+        TLModRecipeDef c{};
+        c.struct_size = sizeof(c);
+        c.result = def.result;
+        c.result_stack = def.resultStack;
+        c.ingredients = def.ingredients.data();
+        c.ingredient_count = static_cast<int32_t>(def.ingredients.size());
+        c.stations = def.stations.data();
+        c.station_count = static_cast<int32_t>(def.stations.size());
+        c.need_water = def.needWater;
+        c.need_lava = def.needLava;
+        c.need_honey = def.needHoney;
+        return api_->register_recipe(ctx_, &c);
+    }
+
     bool OnPlayerHurt(TLModPlayerHurtFn fn, void* user = nullptr) const {
         return api_->subscribe_player_hurt(ctx_, fn, user);
     }
@@ -223,6 +248,9 @@ private:
     }
     bool HasToolsApi() const {
         return api_->struct_size >= offsetof(TLModHostApi, kill_hostile_npcs) + sizeof(api_->kill_hostile_npcs);
+    }
+    bool HasRecipeApi() const {
+        return api_->struct_size >= offsetof(TLModHostApi, register_recipe) + sizeof(api_->register_recipe);
     }
     static void FrameTrampoline(void* user) { static_cast<FrameListener*>(user)->OnFrame(); }
     static bool CommandTrampoline(void* user, const char* command, TLModBuffer* out) {

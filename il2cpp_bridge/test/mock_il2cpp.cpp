@@ -2072,6 +2072,8 @@ void InitScreens() {
 extern "C" {
 // Receitas: o Main.Initialize chamando Recipe.SetupRecipes (com hook, se houver).
 __attribute__((visibility("default"))) void mock_game_setup_recipes() { g_setupRecipesEntry(&g_mSetupRecipes); }
+// O SetupRecipes que rodou antes de a ponte instalar o hook (ela chegou tarde).
+__attribute__((visibility("default"))) void mock_game_setup_recipes_unhooked() { MockSetupRecipes(&g_mSetupRecipes); }
 __attribute__((visibility("default"))) int32_t mock_num_recipes() { return g_numRecipes; }
 __attribute__((visibility("default"))) int mock_recipe_calls(int* errors) {
     *errors = g_recipeErrors;

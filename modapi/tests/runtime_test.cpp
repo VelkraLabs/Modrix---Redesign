@@ -283,6 +283,16 @@ static void TestLoader(const fs::path& modsDir) {
         const ContentEntry* e = loader.Registry().Get(TLMOD_CONTENT_ITEM, *rubyId);
         CHECK(e && e->Item() && e->Item()->displayName == "Rubi Fictício" && e->Item()->maxStack == 999);
     }
+    // As receitas do mod de exemplo (.so real): o rubi de pedra e gel, e o Rubi do jogo com 5 dele.
+    CHECK(game.recipeDeliveries == 1 && game.recipes.size() == 2);
+    if (game.recipes.size() == 2 && rubyId) {
+        const auto& make = game.recipes[0];
+        const auto& trade = game.recipes[1];
+        CHECK(make.result == *rubyId && make.ingredients.size() == 2 && make.ingredients[0] == std::make_pair(3, 10) &&
+              make.ingredients[1] == std::make_pair(23, 5) && make.stations == std::vector<int32_t>{18});
+        CHECK(trade.result == 178 && trade.ingredients.size() == 1 && trade.ingredients[0] == std::make_pair(*rubyId, 5));
+        CHECK(make.label == "tlmod.example_item: \"Rubi Fictício\"");
+    }
     // O item do mod que falhou foi desfeito.
     CHECK(!loader.Registry().Find(TLMOD_CONTENT_ITEM, "test.bad:declared_item"));
     CHECK(loader.Registry().Entries(TLMOD_CONTENT_ITEM).size() == 1);
@@ -1727,6 +1737,87 @@ static size_t Leftovers(const fs::path& dir) {
     return n;
 }
 
+// ---------------------------------------------------------------------------
+// Receitas: register_recipe valida, descarta as de um init que falhou e entrega ao jogo.
+namespace recipes {
+
+TLModContext* g_ctx = nullptr;
+const TLModHostApi* g_api = nullptr;
+bool g_results[8] = {};
+TLModId g_gem = TLMOD_INVALID_ID;
+
+bool Add(TLModId result, int32_t stack, std::vector<TLModRecipeIngredient> items, std::vector<int32_t> stations,
+         bool water = false) {
+    TLModRecipeDef d{};
+    d.struct_size = sizeof(d);
+    d.result = result;
+    d.result_stack = stack;
+    d.ingredients = items.data();
+    d.ingredient_count = static_cast<int32_t>(items.size());
+    d.stations = stations.data();
+    d.station_count = static_cast<int32_t>(stations.size());
+    d.need_water = water;
+    return g_api->register_recipe(g_ctx, &d);
+}
+int Init(const TLModHostApi* api, TLModContext* ctx) {
+    g_api = api;
+    g_ctx = ctx;
+    g_gem = shells::Reg(api, ctx, "gem", 38, 0, 999);
+    g_results[0] = Add(g_gem, 2, {{23, 5}, {9, 1}}, {18, 16}, true);  // gema de gel e madeira
+    g_results[1] = Add(22, 1, {{g_gem, 3}}, {});                      // barra com gemas, à mão
+    g_results[2] = Add(999999, 1, {{23, 1}}, {});                     // resultado desconhecido
+    g_results[3] = Add(g_gem, 1, {{23, 1}, {23, 2}}, {});             // ingrediente repetido
+    g_results[4] = Add(g_gem, 1, {}, {});                             // sem ingredientes
+    g_results[5] = Add(g_gem, 1, {{23, 0}}, {});                      // pilha 0
+    g_results[6] = Add(g_gem, 1, {{23, 1}}, {-1});                    // estação inválida
+    g_results[7] = Add(g_gem, 1, {{23, 1}}, {18, 18});                // estação repetida
+    return 0;
+}
+int FailingInit(const TLModHostApi* api, TLModContext* ctx) {
+    g_api = api;
+    g_ctx = ctx;
+    Add(9, 1, {{23, 1}}, {});  // válida, mas o init falha: descartada
+    return 3;
+}
+
+}  // namespace recipes
+
+static void TestRecipes() {
+    using namespace recipes;
+    std::printf("\n== receitas de mod: register_recipe\n");
+    shells::g_logs.clear();
+    SetLogSink(&shells::CaptureSink);
+    FakeGame game;
+    {
+        ModLoader loader(&game);
+        loader.AddBuiltin(Builtin("aaa.failing"), &FailingInit);
+        loader.AddBuiltin(Builtin("test.recipes", {"gem"}), &Init);
+        CHECK(loader.LoadAll() == 1 && g_gem != TLMOD_INVALID_ID);
+        CHECK(g_results[0] && g_results[1]);
+        CHECK(!g_results[2] && !g_results[3] && !g_results[4] && !g_results[5] && !g_results[6] && !g_results[7]);
+        CHECK(shells::Count("register_recipe: resultado 999999 desconhecido") == 1);
+        CHECK(shells::Count("\"gem\" repetido") == 0 && shells::Count("item 23 repetido nos ingredientes") == 1);
+        CHECK(shells::Count("de 1 a 15 ingredientes") == 1 && shells::Count("a pilha de item 23 precisa ser >= 1") == 1);
+        CHECK(shells::Count("estação -1 não é um bloco do jogo") == 1 && shells::Count("estação 18 repetida") == 1);
+        // Uma entrega, só com as válidas do mod que carregou.
+        CHECK(game.recipeDeliveries == 1 && game.recipes.size() == 2);
+        if (game.recipes.size() == 2) {
+            const auto& a = game.recipes[0];
+            CHECK(a.modId == "test.recipes" && a.result == g_gem && a.resultStack == 2 && a.needWater);
+            CHECK(a.ingredients.size() == 2 && a.ingredients[0] == std::make_pair(23, 5) &&
+                  a.ingredients[1] == std::make_pair(9, 1));
+            CHECK(a.stations == std::vector<int32_t>({18, 16}) && a.label == "test.recipes: \"gem\"");
+            const auto& b = game.recipes[1];
+            CHECK(b.result == 22 && b.ingredients.size() == 1 && b.ingredients[0].first == g_gem && b.stations.empty());
+            CHECK(b.label == "test.recipes: item 22");
+        }
+        // Fora do init: recusada, e nada muda no que foi entregue.
+        CHECK(!Add(9, 1, {{23, 1}}, {}) && shells::Count("register_recipe: só pode ser chamado durante") == 1);
+        CHECK(game.recipeDeliveries == 1);
+    }
+    SetLogSink(std::getenv("TLMOD_VERBOSE") ? nullptr : &QuietSink);
+}
+
 static void TestSha256() {
     std::printf("\n== SHA-256\n");
     CHECK(Sha256Hex("", 0) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
@@ -2157,6 +2248,7 @@ int main(int argc, char** argv) {
     TestPng(argv[1]);
     TestTextures(argv[1]);
     TestShells(argv[1]);
+    TestRecipes();
     TestSha256();
     TestLibraryCache(argv[1]);
     TestLogFile();

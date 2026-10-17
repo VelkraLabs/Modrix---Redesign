@@ -160,7 +160,7 @@ imagem do mod (`textures/fictional_ruby.png`) e nome, tooltip, valor (50 de prat
 (999) do mod.
 
 O que ainda não está aqui:
-- receitas e loja;
+- loja (receitas: ver [Receitas de mod](#receitas-de-mod));
 - sincronizar a tabela de IDs em multiplayer;
 - telas que leem o nome direto de `Lang` por `type` em vez de `Item.Name` mostrariam o nome da casca.
 
@@ -252,6 +252,39 @@ As propriedades só podem ser lidas na thread do jogo, e os mods carregam numa t
 do primeiro frame. Por isso, no aparelho os avisos saem no primeiro frame (`Main.DoUpdate`), com o
 mesmo texto. Como a avaliação usa os valores reais do jogo, ela também confere as recomendações
 acima no aparelho: uma casca recomendada que avise alguma coisa indica uma diferença da build.
+
+## Receitas de mod
+
+`register_recipe(ctx, def)` (no init; em C++, `host.RegisterRecipe`): o resultado, de 1 a 15
+ingredientes `{item, pilha}` e de 0 a 15 estações (`TileID`: 18 bancada, 16 bigorna, 17 fornalha, 13
+garrafa...), mais `need_water/need_lava/need_honey`. Itens originais ou de mod, inclusive de outro mod
+(pelo `find_content`). O runtime recusa, com o motivo no log, item desconhecido, pilha < 1, ingrediente
+ou estação repetidos; se o init do mod falhar, as receitas dele são descartadas. No fim do `LoadAll` a
+lista vai para o jogo (`GameAdapter::SetRecipes`).
+
+**No jogo** (`il2cpp_bridge/src/recipe_hooks.cpp`). O `Recipe.SetupRecipes` monta as receitas originais
+em `Main.recipe` (3000 posições, `Recipe.maxRecipes`). Logo depois dele, a ponte acrescenta as de mod como
+o próprio jogo faz: preenche `Recipe.currentRecipe` (resultado e ingredientes com `SetDefaults`, que passa
+pelo hook de item; `requiredTile`) e chama `Recipe.AddRecipe`. Por isso aparecem na fabricação e no Guia
+como as outras.
+
+A casca não confunde as receitas:
+
+| etapa | o que o jogo compara | item de mod |
+|---|---|---|
+| contar o inventário (`Recipe.CollectItems`) | `netID` | conta como ele mesmo, não como a casca |
+| consulta rápida (`RequiredItemEntry`) | `type` | a ponte troca o `type` da casca pelo `netID` nas receitas de mod |
+| gastar os ingredientes (`Recipe.Create`) | `Item.IsTheSameAs` (`netID` e `type`) | uma Lente não paga um Rubi, nem o contrário |
+| entregar o resultado (`createItem.Clone`) | copia o `netID` | sai o item de mod |
+| Guia (`CollectGuideRecipes`) | `IsTheSameAs` | ok |
+
+As receitas de mod ficam fora do que o jogo indexa pelo `type`: `notDecraftable` (o Shimmer desfaria a
+casca nos ingredientes do item de mod) e sem `UpdateWhichItemsAreCrafted`/`ShimmerTransforms.UpdateRecipeSets`.
+O jogo ignora receitas além da posição 3000: as que não cabem são recusadas no log, que mostra as posições
+que sobram. Se a ponte chegou depois do `SetupRecipes`, elas entram no frame seguinte.
+
+**Mod de exemplo**: na Bancada, 10 Blocos de Pedra + 5 Géis fazem 1 Rubi Fictício, e 5 Rubis Fictícios
+fazem 1 Rubi (o do jogo); Lentes não servem para a segunda.
 
 ## Texturas de mod
 
@@ -613,7 +646,8 @@ linhas ficam em memória para a aba **Log** do painel. Tudo continua indo també
 
 ## Ainda não implementado
 
-- **Receitas e loja**, e textura própria nas telas listadas em [Texturas de mod](#texturas-de-mod).
+- **Loja** (receitas: [Receitas de mod](#receitas-de-mod)), e textura própria nas telas listadas em
+  [Texturas de mod](#texturas-de-mod).
 - **Multiplayer.** O servidor precisa enviar a tabela chave → ID aos clientes.
 - **Outros tipos.** NPC, projectile, tile, wall e buff já têm faixa de ID, mas ainda não têm
   `register_*` na API.

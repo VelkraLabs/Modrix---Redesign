@@ -82,6 +82,8 @@ struct ModLoader::Impl {
         std::unique_ptr<std::mutex> mutex;  // serializa comandos ao mesmo canal
     };
     std::vector<CommandChannel> commands;
+    // Receitas registradas no init (só o loader mexe), entregues ao jogo no fim do LoadAll.
+    std::vector<GameAdapter::RecipeSpec> recipes;
 
     // Catálogo de nomes de itens e NPCs originais, montado aos poucos no frame
     // handler (o jogo só responde na thread dele) e lido de qualquer thread.
@@ -721,6 +723,61 @@ void Api_BufferAppend(TLModBuffer* out, const char* data, size_t len) {
     if (out && data) out->data.append(data, len);
 }
 
+bool Api_RegisterRecipe(TLModContext* ctx, const TLModRecipeDef* def) {
+    if (!ctx) return false;
+    Impl* impl = ImplOf(ctx);
+    const std::string modId = impl->ModId(ctx);
+    auto err = [&](const std::string& msg) {
+        Log(TLMOD_LOG_ERROR, modId, "register_recipe: " + msg);
+        return false;
+    };
+    if (!ctx->initializing) return err("só pode ser chamado durante tlmod_mod_init");
+    if (!def || def->struct_size < sizeof(TLModRecipeDef)) return err("TLModRecipeDef nulo ou struct_size inválido");
+    const ContentRegistry& reg = impl->self->Registry();
+    const int32_t vanillaItems = reg.VanillaCount(TLMOD_CONTENT_ITEM).value_or(0);
+    auto knownItem = [&](TLModId id) { return reg.Get(TLMOD_CONTENT_ITEM, id) || (id > 0 && id < vanillaItems); };
+    auto itemName = [&](TLModId id) {
+        const ItemDefinition* d = impl->ModItemDef(id);
+        return d ? "\"" + d->displayName + "\"" : "item " + std::to_string(id);
+    };
+    if (!knownItem(def->result)) return err("resultado " + std::to_string(def->result) + " desconhecido");
+    const std::string what = "receita de " + itemName(def->result) + ": ";
+    if (def->result_stack < 1) return err(what + "result_stack precisa ser >= 1");
+    if (def->ingredient_count < 1 || def->ingredient_count > TLMOD_RECIPE_MAX_INGREDIENTS || !def->ingredients)
+        return err(what + "de 1 a " + std::to_string(TLMOD_RECIPE_MAX_INGREDIENTS) + " ingredientes");
+    if (def->station_count < 0 || def->station_count > TLMOD_RECIPE_MAX_STATIONS ||
+        (def->station_count > 0 && !def->stations))
+        return err(what + "de 0 a " + std::to_string(TLMOD_RECIPE_MAX_STATIONS) + " estações");
+
+    GameAdapter::RecipeSpec spec;
+    spec.modId = modId;
+    spec.result = def->result;
+    spec.resultStack = def->result_stack;
+    for (int32_t i = 0; i < def->ingredient_count; ++i) {
+        const TLModRecipeIngredient& in = def->ingredients[i];
+        if (!knownItem(in.item)) return err(what + "ingrediente " + std::to_string(in.item) + " desconhecido");
+        if (in.stack < 1) return err(what + "a pilha de " + itemName(in.item) + " precisa ser >= 1");
+        for (const auto& [item, stack] : spec.ingredients)
+            if (item == in.item) return err(what + itemName(in.item) + " repetido nos ingredientes");
+        spec.ingredients.emplace_back(in.item, in.stack);
+    }
+    const std::optional<int32_t> vanillaTiles = reg.VanillaCount(TLMOD_CONTENT_TILE);
+    for (int32_t i = 0; i < def->station_count; ++i) {
+        const int32_t tile = def->stations[i];
+        if (tile < 0 || (vanillaTiles && tile >= *vanillaTiles))
+            return err(what + "estação " + std::to_string(tile) + " não é um bloco do jogo");
+        if (std::find(spec.stations.begin(), spec.stations.end(), tile) != spec.stations.end())
+            return err(what + "estação " + std::to_string(tile) + " repetida");
+        spec.stations.push_back(tile);
+    }
+    spec.needWater = def->need_water;
+    spec.needLava = def->need_lava;
+    spec.needHoney = def->need_honey;
+    spec.label = modId + ": " + itemName(def->result);
+    impl->recipes.push_back(std::move(spec));
+    return true;
+}
+
 bool Api_GiveItem(TLModContext* ctx, TLModId type, int32_t stack) {
     if (!ctx) return false;
     Impl* impl = ImplOf(ctx);
@@ -806,6 +863,7 @@ ModLoader::ModLoader(GameAdapter* game)
     a.set_time = &Api_SetTime;
     a.heal_player = &Api_HealPlayer;
     a.kill_hostile_npcs = &Api_KillHostileNpcs;
+    a.register_recipe = &Api_RegisterRecipe;
 
     Impl* impl = impl_.get();
     game_->SetPlayerHurtHandler([impl](TLModPlayerHurt& ev, bool after) { return impl->DispatchHurt(ev, after); });
@@ -1146,6 +1204,7 @@ size_t ModLoader::LoadAll() {
         size_t providersBefore = impl_->providers.size();
         size_t framesBefore = impl_->frameSubs.size();
         size_t commandsBefore = impl_->commands.size();
+        size_t recipesBefore = impl_->recipes.size();
         ctx->initializing = true;
         int rc = init(&impl_->api, ctx.get());
         ctx->initializing = false;
@@ -1156,6 +1215,7 @@ size_t ModLoader::LoadAll() {
             while (impl_->providers.size() > providersBefore) impl_->providers.pop_back();
             impl_->frameSubs.resize(framesBefore);
             while (impl_->commands.size() > commandsBefore) impl_->commands.pop_back();
+            impl_->recipes.resize(recipesBefore);
             rec.state = ModState::Failed;
             rec.error = "tlmod_mod_init retornou " + std::to_string(rc);
             Log(TLMOD_LOG_ERROR, rec.manifest.id, rec.error);
@@ -1184,6 +1244,10 @@ size_t ModLoader::LoadAll() {
     items.remapType = [impl](int32_t t) { return impl->RemapItemType(t); };
     items.definition = [impl](int32_t t) { return impl->ModItemDef(t); };
     game_->SetItemHooks(std::move(items));
+    // Receitas depois dos itens: a ponte monta resultado e ingredientes pelo SetDefaults (com o hook).
+    if (!impl_->recipes.empty())
+        Log(TLMOD_LOG_INFO, "runtime", std::to_string(impl_->recipes.size()) + " receita(s) de mod para o jogo");
+    game_->SetRecipes(impl_->recipes);
 
     // Texturas: lê e decodifica os PNGs agora; o envio ao motor fica na fila do
     // frame handler (thread principal). Um PNG ruim só custa a textura: o

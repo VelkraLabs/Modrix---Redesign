@@ -14,6 +14,7 @@
 // funções noinline, e as chamadas ao jogo passam por il2cpp_runtime_invoke
 // (uma exceção vira log, não atravessa o nosso código).
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -53,6 +54,7 @@ std::mutex g_mutex;  // protege g_recipes/g_received/g_added
 std::vector<ModRecipe> g_recipes;
 bool g_received = false;
 int32_t g_added = -1;  // -1 = ainda não aplicadas
+std::atomic<bool> g_done{false};  // aplicadas (ou nada a aplicar): o frame nem trava o mutex
 
 template <typename T>
 T StaticValue(FieldInfo* f) {
@@ -132,6 +134,7 @@ __attribute__((noinline)) void ApplyLocked(bool fromSetup) {
     if (g_added >= 0 || !g_received) return;
     if (g_recipes.empty()) {  // nenhum mod tem receita: nada a mexer no jogo
         g_added = 0;
+        g_done.store(true, std::memory_order_release);
         return;
     }
     Il2CppArray* recipes = StaticValue<Il2CppArray*>(r.mainRecipe);
@@ -153,6 +156,7 @@ __attribute__((noinline)) void ApplyLocked(bool fromSetup) {
         added.push_back(&m);
     }
     g_added = static_cast<int32_t>(indices.size());
+    g_done.store(true, std::memory_order_release);
     if (indices.empty()) {
         LOGW("receitas de mod: nenhuma entrou (%zu pedidas)", g_recipes.size());
         return;
@@ -162,7 +166,7 @@ __attribute__((noinline)) void ApplyLocked(bool fromSetup) {
     for (int32_t index : indices)
         if (Il2CppObject* recipe = ArrayObject(recipes, index)) patched += std::max(0, PatchQuickLookup(recipe));
     const int32_t total = StaticValue<int32_t>(r.numRecipes);
-    LOGI("receitas: %d do jogo, %d de mods (%d ingredientes de mod), sobram %d de %d posições%s", vanilla,
+    LOGI("receitas: %d do jogo, %d de mods (ingredientes de mod pelo netID: %d), sobram %d de %d posições%s", vanilla,
          g_added, patched, capacity - total, capacity, fromSetup ? "" : " (depois do SetupRecipes, no frame)");
     for (size_t i = 0; i < indices.size(); ++i) LOGI("receita %s na posição %d", added[i]->label.c_str(), indices[i]);
 }
@@ -201,7 +205,7 @@ void InstallRecipeHooks() {
 }
 
 void TickRecipes() {
-    if (!r.ready) return;
+    if (!r.ready || g_done.load(std::memory_order_acquire)) return;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_added >= 0 || !g_received) return;

@@ -71,6 +71,12 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
     própria. O ícone do item de cada mod vai com `LayoutCalculator.DrawCentred`. A área da lista
     é registrada a cada frame com `GUIInputRegionManager.RegisterInputRegion`, como fazem os botões
     do jogo: no celular, um toque fora das regiões registradas não chega à interface.
+15. Receitas de mod (`src/recipe_hooks.cpp`, `TLMod_SetModRecipes`): hook pós em `Recipe.SetupRecipes`
+    (`0x122ECB8`, chamado por `Main.Initialize_AlmostEverything`). Cada receita entra como o jogo faz
+    (`Recipe.currentRecipe` + `Recipe.AddRecipe`, `0x12B5A18`) e a consulta rápida é refeita
+    (`CreateRequiredItemQuickLookups`, `0x12B4148`), com o netID no lugar do type da casca nos ingredientes de
+    mod. Se o `SetupRecipes` já passou, o `Main.DoUpdate` aplica no frame seguinte. Ver `modapi/README.md`,
+    "Receitas de mod".
 
 ## Log
 

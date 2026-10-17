@@ -45,6 +45,9 @@ public:
     // ItemID.Sets + um Item de sonda com o SetDefaults do jogo (TLMod_ReadItemTraits):
     // só responde na thread do jogo, no frame handler.
     std::optional<ItemTraits> ItemShellTraits(int32_t type) override;
+    // Receitas: TLMod_SetModRecipes (a ponte as põe em Main.recipe depois do
+    // Recipe.SetupRecipes, na thread do jogo).
+    void SetRecipes(std::vector<RecipeSpec> recipes) override;
     void SetFrameHandler(std::function<void()> handler) override;
 
     // Texturas: TLMod_CreateTexture (UnityEngine.Texture2D embrulhada numa

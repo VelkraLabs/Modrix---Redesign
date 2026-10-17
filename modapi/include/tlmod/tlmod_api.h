@@ -107,6 +107,31 @@ typedef struct TLModItemDef {
     TLModId shell_type;
 } TLModItemDef;
 
+/* Receita: fabricar `result` com os ingredientes, perto das estações.
+ * Itens originais ou de mod (inclusive de outros mods, via find_content).
+ * Entram no jogo depois das receitas originais (Recipe.SetupRecipes) e
+ * aparecem na fabricação e no Guia como as outras. Não são desfeitas no
+ * Shimmer. Preencha struct_size = sizeof(TLModRecipeDef). */
+#define TLMOD_RECIPE_MAX_INGREDIENTS 15
+#define TLMOD_RECIPE_MAX_STATIONS 15
+typedef struct TLModRecipeIngredient {
+    TLModId item;
+    int32_t stack; /* >= 1 */
+} TLModRecipeIngredient;
+typedef struct TLModRecipeDef {
+    uint32_t struct_size;
+    TLModId result;
+    int32_t result_stack;                      /* >= 1 */
+    const TLModRecipeIngredient* ingredients;  /* 1..TLMOD_RECIPE_MAX_INGREDIENTS, sem repetir item */
+    int32_t ingredient_count;
+    /* Blocos (TileID) perto do jogador: 18 bancada, 16 bigorna, 17 fornalha,
+     * 13 garrafa (alquimia), 26 altar demoníaco, 134 bigorna de mithril...
+     * 0 estações = à mão. */
+    const int32_t* stations;
+    int32_t station_count;
+    bool need_water, need_lava, need_honey;    /* perto de água / lava / mel */
+} TLModRecipeDef;
+
 /* NPC / boss.
  *
  * Um NPC de mod roda dentro de uma "casca": um NPC original (shell_type) que
@@ -328,6 +353,12 @@ typedef struct TLModHostApi {
      * Pula amigáveis, NPCs da cidade, invulneráveis e bichinhos. Devolve
      * quantos morreram (-1 se não há jogador). */
     int32_t (*kill_hostile_npcs)(TLModContext* ctx, float radius);
+
+    /* ---- Receitas (acrescentado depois de kill_hostile_npcs) --------------- */
+
+    /* Só durante o init. false = definição inválida (motivo no log). Se o
+     * init do mod falhar, as receitas dele são descartadas. */
+    bool (*register_recipe)(TLModContext* ctx, const TLModRecipeDef* def);
 } TLModHostApi;
 
 /* Assinatura do ponto de entrada. Retorne 0 em sucesso; qualquer outro valor

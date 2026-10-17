@@ -380,6 +380,13 @@ public:
     // (no Terraria: thread do loader, antes do primeiro frame).
     bool traitsReady = true;
     int traitQueries = 0;
+    // Receitas entregues pelo LoadAll (uma vez).
+    std::vector<tlmod::rt::GameAdapter::RecipeSpec> recipes;
+    int recipeDeliveries = 0;
+    void SetRecipes(std::vector<RecipeSpec> list) override {
+        recipes = std::move(list);
+        ++recipeDeliveries;
+    }
     std::optional<tlmod::rt::ItemTraits> ItemShellTraits(int32_t type) override {
         ++traitQueries;
         if (!traitsReady || type <= 0 || type >= kItemCount) return std::nullopt;

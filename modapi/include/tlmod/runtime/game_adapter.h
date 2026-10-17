@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "tlmod/runtime/content_registry.h"
 #include "tlmod/runtime/item_shell.h"
@@ -173,6 +174,21 @@ public:
     // Terraria: fora da thread do jogo ou antes do primeiro frame); o runtime
     // tenta de novo no frame handler.
     virtual std::optional<ItemTraits> ItemShellTraits(int32_t type) = 0;
+
+    // --- Receitas de mod -------------------------------------------------------
+    // Uma vez, no fim do LoadAll (qualquer thread): as receitas que os mods
+    // registraram. O jogo as acrescenta depois das originais, quando puder
+    // (no Terraria: depois do Recipe.SetupRecipes, na thread do jogo).
+    struct RecipeSpec {
+        std::string modId;
+        std::string label;  // "mod_id: nome do resultado", para o log
+        int32_t result = 0;
+        int32_t resultStack = 1;
+        std::vector<std::pair<int32_t, int32_t>> ingredients;  // {item, pilha}
+        std::vector<int32_t> stations;                         // TileID
+        bool needWater = false, needLava = false, needHoney = false;
+    };
+    virtual void SetRecipes(std::vector<RecipeSpec> recipes) = 0;
     // Uma vez por frame, na thread do jogo (menu e mundo). Nulo desliga.
     // No Terraria mobile é a thread principal do Unity (Main.DoUpdate): a única
     // em que a API do Unity (CreateTexture) pode ser chamada.

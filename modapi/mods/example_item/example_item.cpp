@@ -6,6 +6,11 @@
 // Para testar no aparelho: crie um arquivo vazio chamado `give_on_start` na
 // pasta deste mod. Ao entrar num mundo, o jogador recebe 3 Rubis Fictícios
 // (uma vez por abertura do jogo).
+//
+// Receitas (na Bancada de Trabalho):
+//   10 Blocos de Pedra + 5 Géis  -> 1 Rubi Fictício
+//   5 Rubis Fictícios            -> 1 Rubi (o do jogo)
+// A segunda usa o item de mod como ingrediente: Lentes (a casca dele) não servem.
 #include <tlmod/tlmod.hpp>
 
 #include <cstdio>
@@ -35,6 +40,22 @@ static bool OnLoad(tlmod::Host& host) {
     if (id == TLMOD_INVALID_ID) return false;  // motivo já está no log do runtime
 
     host.Info("Rubi Fictício registrado com ID " + std::to_string(id));
+
+    // IDs do jogo: ItemID.StoneBlock 3, Gel 23, Ruby 178; TileID.WorkBenches 18.
+    constexpr TLModId kStoneBlock = 3, kGel = 23, kRuby = 178;
+    constexpr int32_t kWorkBench = 18;
+    tlmod::RecipeDef make;
+    make.result = id;
+    make.ingredients = {{kStoneBlock, 10}, {kGel, 5}};
+    make.stations = {kWorkBench};
+    tlmod::RecipeDef trade;
+    trade.result = kRuby;
+    trade.ingredients = {{id, 5}};
+    trade.stations = {kWorkBench};
+    if (host.RegisterRecipe(make) && host.RegisterRecipe(trade))
+        host.Info("receitas: Rubi Fictício (pedra + gel) e Rubi (5 Rubis Fictícios), na Bancada");
+    else
+        host.Warn("receitas não registradas (runtime sem register_recipe ou erro no log)");
     if (FileExists(std::string(host.ModDir()) + "/give_on_start")) {
         // A entrega espera o jogador estar num mundo (ver give_item em tlmod_api.h).
         if (host.GiveItem(id, 3)) host.Info("give_on_start: 3 Rubis Fictícios ao entrar num mundo");

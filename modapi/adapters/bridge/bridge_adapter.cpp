@@ -433,6 +433,30 @@ int32_t BridgeGameAdapter::CreateTexture(const Image& image, const std::string& 
     return TLMod_CreateTexture(image.rgba.data(), image.width, image.height, name.c_str());
 }
 
+void BridgeGameAdapter::SetRecipes(std::vector<RecipeSpec> recipes) {
+    std::vector<TLModRecipe> out;
+    for (const RecipeSpec& r : recipes) {
+        TLModRecipe c{};
+        c.result = r.result;
+        c.result_stack = r.resultStack;
+        for (const auto& [item, stack] : r.ingredients) {
+            if (c.ingredient_count == TLMOD_RECIPE_MAX_INGREDIENTS) break;
+            c.ingredients[c.ingredient_count] = item;
+            c.ingredient_stacks[c.ingredient_count++] = stack;
+        }
+        for (int32_t tile : r.stations) {
+            if (c.station_count == TLMOD_RECIPE_MAX_STATIONS) break;
+            c.stations[c.station_count++] = tile;
+        }
+        c.need_water = r.needWater;
+        c.need_lava = r.needLava;
+        c.need_honey = r.needHoney;
+        c.label = r.label.c_str();  // a ponte copia
+        out.push_back(c);
+    }
+    TLMod_SetModRecipes(out.data(), static_cast<int32_t>(out.size()));
+}
+
 std::optional<ItemTraits> BridgeGameAdapter::ItemShellTraits(int32_t type) {
     TLModItemTraits r{};
     if (!TLMod_ReadItemTraits(type, &r)) return std::nullopt;  // fora da thread do jogo / antes do 1º frame
