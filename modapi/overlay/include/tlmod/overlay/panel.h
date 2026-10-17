@@ -262,7 +262,7 @@ struct WorkshopEntry {
     std::string version;      // "v0.1.0" (vazio se o manifest não foi lido)
     std::string status;       // "Ativo", "Desativado", "Será desativado", "Erro"...
     int kind = 0;             // 0 ativo, 1 desativado, 2 erro, 3 mudança pendente
-    std::string summary;      // "1 item"
+    std::string summary;      // "1 item" (sem conteúdo: "por <autores>")
     std::string details;      // página de detalhes, várias linhas
     std::string toggleLabel;  // "Desativar" / "Ativar"
 };

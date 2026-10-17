@@ -63,8 +63,8 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
     "Oficina de Mods"). O clique chama o callback do runtime.
 14. Oficina de Mods nativa (`src/workshop_screen.cpp`, `TLMod_SetWorkshopSource`/`TLMod_OpenWorkshop`):
     com ela aberta, o hook do `GUIMainMenu.Draw` desenha a Oficina no lugar do menu, com as peças da seleção
-    de mundos (`WorldSelectMenu_Layout`, `GUIDraggableItemGrid`, `GUIPanel`, `GUIString`); as linhas saem do
-    hook em `GUIItemGrid.DummyDraw` (`0x1059FE0`).
+    de mundos (`WorldSelectMenu_Layout`, `GUIPanel`, `GUIString`), linhas e texto de detalhes com rolagem
+    própria.
 
 ## Log
 

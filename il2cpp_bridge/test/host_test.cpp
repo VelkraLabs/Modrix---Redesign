@@ -237,28 +237,31 @@ int TestMenu(void* lib) {
     return 0;
 }
 
-// Fonte de dados da Oficina para o teste: 3 mods; o do meio pode ser ligado/desligado.
+// Fonte de dados da Oficina para o teste: 6 mods (cabem 4 linhas); o 2º pode ser ligado/desligado.
 struct WsMod {
     const char* name;
     const char* version;
     bool enabled;
 };
-WsMod g_wsMods[] = {{"Boss Checklist", "v0.1.0", true}, {"Exemplo: Rubi", "v0.1.0", true}, {"Gemas", "v0.2.0", true}};
+WsMod g_wsMods[] = {{"Boss Checklist", "v0.1.0", true}, {"Exemplo: Rubi", "v0.1.0", true}, {"Gemas", "v0.2.0", true},
+                    {"Mod 4", "v1.0.0", true},          {"Mod 5", "v1.0.0", true},         {"Mod 6", "v1.0.0", true}};
 uint64_t g_wsRevision = 1;
 int g_wsToggles = 0;
 std::string g_wsDetails;
 TLModWorkshopSource WsSource() {
     TLModWorkshopSource s{};
     s.revision = [](void*) { return g_wsRevision; };
-    s.count = [](void*) { return 3; };
+    s.count = [](void*) { return 6; };
     s.entry = [](void*, int32_t i, TLModWorkshopEntry* out) {
         const WsMod& m = g_wsMods[i];
-        g_wsDetails = std::string(m.name) + "\nDescrição do mod\nErro: nenhum";
+        // 1 linha longa (quebrada pelo "jogo" em 37 caracteres) + 25 curtas.
+        g_wsDetails = std::string(m.name) + " com uma descrição comprida que não cabe numa linha só";
+        for (int k = 1; k <= 25; ++k) g_wsDetails += "\nlinha " + std::to_string(k);
         out->name = m.name;
         out->version = m.version;
         out->status = i == 2 ? "Erro" : m.enabled ? "Ativo" : "Será desativado";
         out->statusKind = i == 2 ? 2 : m.enabled ? 0 : 3;
-        out->summary = i == 1 ? "1 item" : "";
+        out->summary = i == 1 ? "1 item" : "por TLMod";
         out->details = g_wsDetails.c_str();
         out->toggleLabel = m.enabled ? "Desativar" : "Ativar";
         return true;
@@ -277,7 +280,7 @@ int TestWorkshop(void* lib) {
         dlsym(lib, "mock_workshop_frame"));
     auto errors = reinterpret_cast<int (*)(int*, int*)>(dlsym(lib, "mock_workshop_errors"));
     CHECK(frame_fn && errors);
-    static char buf[4096];
+    static char buf[8192];
     auto frame = [&](int32_t x, int32_t y, bool down, bool escape = false, int click = 0) {
         frame_fn(x, y, down, escape, click, buf, sizeof(buf));
         return std::string(buf);
@@ -290,21 +293,48 @@ int TestWorkshop(void* lib) {
     CHECK(TLMod_WorkshopAvailable() && !TLMod_WorkshopOpen());
     CHECK(has(frame(0, 0, false), "menu"));  // fechada: o menu do jogo
 
-    // Abre: título, as 3 linhas (nome, versão, estado colorido, resumo) e Voltar; sem o menu.
+    // Abre: título, Voltar e as linhas que cabem inteiras (4 de 6: de 100 a 378, 60 por linha).
     TLMod_OpenWorkshop();
     std::string f = frame(0, 0, false);
     CHECK(TLMod_WorkshopOpen() && !has(f, "menu"));
     CHECK(has(f, "titulo:Oficina de Mods") && has(f, "botao:voltar:Voltar") && f.find("botao:novo") == std::string::npos);
-    CHECK(has(f, "nome:Boss Checklist") && has(f, "nome:Exemplo: Rubi") && has(f, "nome:Gemas"));
-    CHECK(has(f, "versao:v0.2.0") && has(f, "resumo:1 item"));
-    CHECK(has(f, "estado:Ativo#ff78e182") && has(f, "estado:Erro#ff6e6eff"));  // verde e vermelho (ABGR)
+    CHECK(has(f, "nome:Boss Checklist") && has(f, "nome:Exemplo: Rubi") && has(f, "nome:Gemas") && has(f, "nome:Mod 4"));
+    CHECK(!has(f, "nome:Mod 5") && !has(f, "nome:Mod 6"));
+    // Estado no modo (Color do jogo: bytes A, B, G, R), versão no tamanho, resumo no tempo.
+    CHECK(has(f, "modo:Ativo#82e178ff") && has(f, "modo:Erro#ff6e6eff"));
+    CHECK(has(f, "tamanho:v0.2.0") && has(f, "tempo:1 item") && has(f, "tempo:por TLMod"));
+
+    // Arrastar a lista 120 px para cima: rola 2 linhas (encaixa ao soltar) e não abre nada.
+    frame(300, 300, true);
+    frame(300, 240, true);
+    frame(300, 180, true);
+    frame(300, 180, false);
+    f = frame(0, 0, false);
+    CHECK(has(f, "titulo:Oficina de Mods") && has(f, "nome:Mod 6") && has(f, "nome:Gemas") &&
+          !has(f, "nome:Boss Checklist") && !has(f, "nome:Exemplo: Rubi"));
+    // E de volta (puxar para baixo além do topo para no começo).
+    frame(300, 120, true);
+    frame(300, 360, true);
+    frame(300, 360, false);
+    f = frame(0, 0, false);
+    CHECK(has(f, "nome:Boss Checklist") && !has(f, "nome:Mod 5"));
 
     // Toque na 2ª linha (y 160..210): apertar e soltar no mesmo lugar abre os detalhes.
     frame(300, 190, true);
     frame(300, 190, false);
     f = frame(0, 0, false);
-    CHECK(has(f, "titulo:Exemplo: Rubi") && f.find("texto:Exemplo: Rubi\nDescrição do mod\nErro: nenhum") != std::string::npos);
-    CHECK(has(f, "botao:novo:Desativar") && has(f, "botao:voltar:Voltar") && f.find("nome:") == std::string::npos);
+    CHECK(has(f, "titulo:Exemplo: Rubi") && has(f, "botao:novo:Desativar") && has(f, "botao:voltar:Voltar") &&
+          f.find("nome:") == std::string::npos);
+    // Texto quebrado na largura (376 = 37 caracteres) e uma linha por região, a partir de y 106,
+    // de 20 em 20; só as 13 que cabem (de 106 a 372).
+    CHECK(has(f, "texto@106:Exemplo: Rubi com uma descrição comprida") && has(f, "texto@126:que não cabe numa linha só"));
+    CHECK(has(f, "texto@146:linha 1") && has(f, "texto@346:linha 11") && f.find("linha 12") == std::string::npos);
+    // Arrastar o texto 100 px para cima: 5 linhas.
+    frame(300, 300, true);
+    frame(300, 200, true);
+    frame(300, 200, false);
+    f = frame(0, 0, false);
+    CHECK(has(f, "texto@106:linha 4") && has(f, "texto@346:linha 16") && f.find("linha 3\n") == std::string::npos);
     // Ativar/Desativar: chama a fonte e o rótulo muda no frame seguinte.
     frame(0, 0, false, false, 2);
     CHECK(g_wsToggles == 1 && !g_wsMods[1].enabled);
@@ -313,12 +343,7 @@ int TestWorkshop(void* lib) {
     // Voltar: a lista, com o estado novo.
     frame(0, 0, false, false, 1);
     f = frame(0, 0, false);
-    CHECK(has(f, "titulo:Oficina de Mods") && has(f, "estado:Será desativado#ff5ad2ff"));
-    // Arrastar (soltar longe de onde apertou) não abre nada.
-    frame(300, 190, true);
-    frame(300, 260, false);  // soltou 70 px abaixo: foi arraste
-    f = frame(0, 0, false);
-    CHECK(has(f, "titulo:Oficina de Mods"));
+    CHECK(has(f, "titulo:Oficina de Mods") && has(f, "modo:Será desativado#ffd25aff"));
     // O voltar do Android (Escape) fecha; o menu volta no frame seguinte.
     frame(0, 0, false, true);
     CHECK(!TLMod_WorkshopOpen() && has(frame(0, 0, false), "menu"));

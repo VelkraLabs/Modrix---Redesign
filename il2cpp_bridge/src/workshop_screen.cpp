@@ -2,19 +2,21 @@
 // as peças da tela de seleção de mundos (WorldSelectMenu_Layout), como o
 // tModLoader faz no PC com a interface do próprio jogo.
 //
-//   Lista:    fundo, divisória, título, a lista que rola (GUIDraggableItemGrid,
-//             com arraste e momento do jogo) e Voltar. Cada linha usa o fundo de
-//             linha de mundo e os textos de nome, tempo, modo e tamanho.
+//   Lista:    fundo, divisória, título, uma linha por mod e Voltar. Cada linha usa
+//             o fundo de linha de mundo e os textos de nome, modo, tamanho e tempo
+//             (estado, versão, resumo). As linhas vão de cima para baixo, a partir
+//             da posição da primeira linha de mundo, até a divisória acima do
+//             Voltar; arrastar rola de linha em linha.
 //   Detalhes: tocar numa linha abre o texto completo do mod (descrição, autores,
-//             erro inteiro), com Voltar e o botão "Novo" virado em Ativar/Desativar.
+//             erro inteiro), quebrado pelo próprio jogo (ApplyMultiLineAlignment)
+//             e desenhado linha a linha na mesma área, com rolagem; Voltar e o
+//             botão "Novo" virado em Ativar/Desativar.
 //
-// A lista do jogo só aceita delegates gerenciados. Os três vêm de métodos que já
-// existem: GUIWorldSelectMenu.WorldScale (devolve 1), GUIWorldSelectMenu.WorldOver
-// (grava worldOver numa instância nossa) e GUIItemGrid.DummyDraw (vazio, sem
-// chamadas diretas), que ganha um hook e desenha a linha enquanto a Oficina
-// desenha a lista. As funções do jogo são chamadas direto, pelo methodPointer,
-// com as assinaturas conferidas na desmontagem (Nullable<Color> vai num
-// registrador; Nullable<Matrix>, por ser maior que 16 bytes, por referência).
+// Os textos ancorados em GridItem (os da linha de mundo) se posicionam pela
+// região de ControlAnchor.SetGridItemRegion, como na seleção de mundos. As
+// funções do jogo são chamadas direto, pelo methodPointer, com as assinaturas
+// conferidas na desmontagem (Nullable<Color> vai num registrador;
+// Nullable<Matrix>, por ser maior que 16 bytes, por referência).
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -33,6 +35,7 @@ namespace {
 
 namespace off = terraria;
 namespace ws = terraria::world_select_layout_off;
+namespace sl = terraria::string_layout_off;
 
 struct NullableMatrix {  // Nullable<Matrix>: 16 floats + hasValue
     float m[16];
@@ -43,15 +46,16 @@ typedef void (*PanelDrawFn)(Il2CppObject* layout, bool over, uint64_t backing, u
                             const MethodInfo*);
 typedef void (*PanelDrawAtFn)(Il2CppObject* layout, TLModXnaVector2 position, TLModXnaVector2 size, bool over,
                               const MethodInfo*);
-typedef TLModXnaRectangle (*PanelRegionFn)(Il2CppObject* layout, const MethodInfo*);
+typedef TLModXnaRectangle (*RegionFn)(Il2CppObject* layout, const MethodInfo*);
 typedef void (*StringDrawFn)(Il2CppObject* layout, Il2CppObject* value, const MethodInfo*);
+typedef void (*StringDrawColorFn)(Il2CppObject* layout, Il2CppObject* value, uint32_t color, bool multiline,
+                                  const MethodInfo*);
+typedef TLModXnaRectangle (*StringRegionFn)(Il2CppObject* layout, Il2CppObject* value, const MethodInfo*);
+typedef Il2CppObject* (*WrapFn)(Il2CppObject* layout, Il2CppObject* value, int32_t* lineCount, const MethodInfo*);
 typedef bool (*StringButtonFn)(Il2CppObject* layout, Il2CppObject* value, float* scale, bool forcedPressed,
                                bool disabled, const MethodInfo*);
 typedef void (*SetGridRegionFn)(TLModXnaRectangle region, const MethodInfo*);
-typedef void (*GridDrawFn)(Il2CppObject* layout, Il2CppObject* scale, Il2CppObject* over, Il2CppObject* draw,
-                           int32_t count, float* scroll, float* momentum, int32_t* dragging,
-                           TLModXnaVector2* dragPosition, TLModXnaVector2 itemSize, bool drawMissing,
-                           bool mouseScroll, bool disableDrag, const MethodInfo*);
+typedef TLModXnaVector2 (*AnchoredFn)(int32_t control, int32_t anchor, TLModXnaVector2 position, const MethodInfo*);
 typedef int32_t (*TransactionDrawFn)(Il2CppObject* layout, Il2CppObject* item, Il2CppObject* label, bool disabled,
                                      float* scale, bool forcedPressed, bool hasControllerFocus, bool forceOver,
                                      bool disablePressedState, const MethodInfo* method);
@@ -60,20 +64,19 @@ typedef void (*BeginFn)(Il2CppObject* batch, int32_t sort, Il2CppObject* blend, 
                         bool deferred, const MethodInfo*);
 typedef void (*InstanceFn)(Il2CppObject* self, const MethodInfo*);
 typedef void (*CopyFn)(Il2CppObject* self, Il2CppObject* other, const MethodInfo*);
-typedef void (*DelegateCtorFn)(Il2CppObject* self, Il2CppObject* target, const MethodInfo* method, const MethodInfo*);
 typedef bool (*KeyUpFn)(int32_t key, const MethodInfo*);
 typedef int32_t (*StaticIntFn)(const MethodInfo*);
 typedef bool (*StaticBoolFn)(const MethodInfo*);
-typedef void (*DummyDrawFn)(Il2CppObject* layout, int32_t index, TLModXnaVector2 position, float scale,
-                            const MethodInfo* method);
 
 constexpr int32_t kInputClicked = 0;     // GUITransactionButton.InputState.Clicked
 constexpr int32_t kKeyEscape = 27;       // KeyCode.Escape: o voltar do Android
 constexpr int32_t kControlGridItem = 2;  // ControlAnchor.ControlId.GridItem
 constexpr int32_t kAnchorTopLeft = 9;    // LayoutCalculator.AnchorType.TopLeft
 constexpr float kTapDistance = 30.0f;    // como o SINGLE_CLICK_DISTANCE da seleção de mundos
-// Cores do estado (Color: R, G, B, A em bytes).
-constexpr uint32_t Rgba(uint32_t r, uint32_t g, uint32_t b) { return r | (g << 8) | (b << 16) | (0xFFu << 24); }
+constexpr float kDragStart = 10.0f;      // a partir daqui o toque vira arraste
+constexpr int32_t kPad = 12;             // margem do texto de detalhes
+// Color do XNA nesta build: bytes A, B, G, R (o construtor grava r no byte 3 e a no 0).
+constexpr uint32_t Rgba(uint32_t r, uint32_t g, uint32_t b) { return 0xFFu | (b << 8) | (g << 16) | (r << 24); }
 constexpr uint32_t kStatusColors[] = {Rgba(130, 225, 120), Rgba(170, 170, 170), Rgba(255, 110, 110),
                                       Rgba(255, 210, 90)};
 
@@ -81,32 +84,21 @@ struct Resolved {
     bool ready = false;
     FieldInfo* layoutInstance = nullptr;  // static WorldSelectMenu_Layout.Instance
     FieldInfo* spriteBatch = nullptr;     // static Main.spriteBatch
-    FieldInfo* dummyDraw = nullptr;       // static GUIItemGrid.dummyDraw
-    FieldInfo* gridRegion = nullptr;      // static GUIDraggableItemGrid.fullRegion
-    Il2CppClass* worldSelectClass = nullptr;
-    Il2CppClass* scaleDelegateClass = nullptr;
-    Il2CppClass* overDelegateClass = nullptr;
-    Il2CppClass* drawDelegateClass = nullptr;
     Il2CppClass* stringLayoutClass = nullptr;
     size_t panelSize = off::panel_layout_off::Size;
-    size_t worldOver = off::gui_world_select_menu_off::worldOver;
     const MethodInfo* panelDraw = nullptr;
     const MethodInfo* panelDrawAt = nullptr;
     const MethodInfo* panelRegion = nullptr;
     const MethodInfo* stringDraw = nullptr;
     const MethodInfo* stringDrawColor = nullptr;  // GUIString.Draw(layout, string, Color, bool)
+    const MethodInfo* stringRegion = nullptr;     // GUIString.GetRegion(layout, string)
+    const MethodInfo* wrap = nullptr;             // GUIString.ApplyMultiLineAlignment(layout, string, out int)
     const MethodInfo* stringButton = nullptr;
     const MethodInfo* setGridRegion = nullptr;
-    const MethodInfo* gridDraw = nullptr;
+    const MethodInfo* anchored = nullptr;  // LayoutCalculator.GetAnchoredPosition
     const MethodInfo* transactionDraw = nullptr;
     const MethodInfo* begin = nullptr;
     const MethodInfo* end = nullptr;
-    const MethodInfo* worldScale = nullptr;
-    const MethodInfo* worldOverMethod = nullptr;
-    const MethodInfo* dummyDrawMethod = nullptr;
-    const MethodInfo* scaleCtor = nullptr;
-    const MethodInfo* overCtor = nullptr;
-    const MethodInfo* drawCtor = nullptr;
     const MethodInfo* stringCtor = nullptr;
     const MethodInfo* stringCopy = nullptr;
     const MethodInfo* keyUp = nullptr;
@@ -116,8 +108,6 @@ struct Resolved {
 };
 Resolved r;
 
-void* g_origDummyDraw = nullptr;
-
 // Fonte dos dados (runtime). Cópia imutável publicada atomicamente.
 std::atomic<const TLModWorkshopSource*> g_source{nullptr};
 std::atomic<bool> g_openRequested{false};
@@ -126,15 +116,19 @@ std::atomic<bool> g_openRequested{false};
 enum class Page { Closed, List, Detail };
 Page g_page = Page::Closed;
 int32_t g_detail = -1;
-float g_scroll = 0, g_momentum = 0;
-int32_t g_dragging = 0;
-TLModXnaVector2 g_dragPosition{};
 float g_titleScale = 0, g_backScale = 0, g_newScale = 0;
-bool g_drawingRows = false;
-bool g_prevDown = false;
-int32_t g_pressIndex = -1;
-TLModXnaVector2 g_pressAt{};
-TLModXnaRectangle g_listRegion{};  // a área da lista no último desenho (a página de detalhes usa)
+
+// Toque e arraste numa área (a lista ou o texto de detalhes).
+struct Touch {
+    bool prevDown = false;
+    bool pressed = false;   // começou dentro da área
+    bool dragging = false;  // passou de kDragStart
+    TLModXnaVector2 at{};   // onde apertou
+    float startScroll = 0;
+};
+Touch g_touch;
+float g_listScroll = 0;    // pixels; encaixa numa linha ao soltar
+float g_detailScroll = 0;  // pixels; encaixa numa linha de texto ao soltar
 
 struct Row {
     uint32_t name = 0, version = 0, status = 0, summary = 0, details = 0, toggle = 0;  // GC handles
@@ -146,19 +140,22 @@ std::vector<Row> g_rows;
 uint64_t g_revision = ~0ull;
 std::vector<uint32_t> g_oldHandles;  // handles de strings substituídas (a API não tem gchandle_free)
 
+// Texto de detalhes já quebrado em linhas (refeito ao abrir outro mod ou mudar a revisão).
+std::vector<uint32_t> g_detailLines;
+int32_t g_detailFor = -1;
+uint64_t g_detailRevision = ~0ull;
+float g_lineHeight = 0;
+
 struct Handles {
-    uint32_t scaleDel = 0, overDel = 0, drawDel = 0, overTarget = 0, detailText = 0;
-    uint32_t title = 0, back = 0, close = 0, empty = 0;
+    uint32_t line = 0;  // String_Layout de uma linha: cópia do nome da linha de mundo, no canto do GridItem
+    uint32_t wrap = 0;  // a mesma, com quebra (só para ApplyMultiLineAlignment)
+    uint32_t title = 0, back = 0, empty = 0, probe1 = 0, probe2 = 0;
 };
 Handles h;
 
 template <typename Fn>
 Fn Ptr(const MethodInfo* m) {
     return reinterpret_cast<Fn>(m->methodPointer);
-}
-template <typename Fn>
-Fn LoadOrig(void* const& slot) {
-    return reinterpret_cast<Fn>(__atomic_load_n(&slot, __ATOMIC_ACQUIRE));
 }
 Il2CppObject* Target(uint32_t handle) { return handle ? api.il2cpp_gchandle_get_target(handle) : nullptr; }
 Il2CppObject* StaticObject(FieldInfo* f) {
@@ -168,6 +165,11 @@ Il2CppObject* StaticObject(FieldInfo* f) {
 }
 uint32_t Pin(Il2CppObject* obj) { return obj ? api.il2cpp_gchandle_new(obj, false) : 0; }
 uint32_t PinString(const char* s) { return Pin(api.il2cpp_string_new(s ? s : "")); }
+void Retire(std::vector<uint32_t>& handles) {
+    for (uint32_t hd : handles)
+        if (hd) g_oldHandles.push_back(hd);
+    handles.clear();
+}
 
 const MethodInfo* Method(Il2CppClass* k, const char* name, int argc) {
     return k ? api.il2cpp_class_get_method_from_name(k, name, argc) : nullptr;
@@ -175,8 +177,7 @@ const MethodInfo* Method(Il2CppClass* k, const char* name, int argc) {
 const MethodInfo* Method(const char* ns, const char* klass, const char* name, int argc) {
     return Method(api.il2cpp_class_from_name(bridge::Image(), ns, klass), name, argc);
 }
-// Overload pelo tipo exato de um parâmetro (vários Draw com o mesmo número de
-// parâmetros). `ref` aparece como "&" no fim do nome do tipo.
+// Overload pelo tipo exato de um parâmetro (vários Draw com o mesmo número de parâmetros).
 const MethodInfo* MethodWithParam(Il2CppClass* k, const char* name, uint32_t argc, uint32_t index,
                                   const char* typeName) {
     void* iter = nullptr;
@@ -198,14 +199,16 @@ Il2CppObject* Part(Il2CppObject* layout, size_t offset) { return FieldAt<Il2CppO
 void PanelDraw(Il2CppObject* panel) {
     if (panel) Ptr<PanelDrawFn>(r.panelDraw)(panel, false, 0, 0, 0, r.panelDraw);
 }
+TLModXnaRectangle PanelRegion(Il2CppObject* panel) {
+    return panel ? Ptr<RegionFn>(r.panelRegion)(panel, r.panelRegion) : TLModXnaRectangle{};
+}
 void StringDraw(Il2CppObject* layout, uint32_t text) {
     Il2CppObject* s = Target(text);
     if (layout && s) Ptr<StringDrawFn>(r.stringDraw)(layout, s, r.stringDraw);
 }
 void StringDrawColor(Il2CppObject* layout, uint32_t text, uint32_t color) {
-    typedef void (*Fn)(Il2CppObject*, Il2CppObject*, uint32_t, bool, const MethodInfo*);
     Il2CppObject* s = Target(text);
-    if (layout && s) Ptr<Fn>(r.stringDrawColor)(layout, s, color, false, r.stringDrawColor);
+    if (layout && s) Ptr<StringDrawColorFn>(r.stringDrawColor)(layout, s, color, false, r.stringDrawColor);
 }
 int32_t Button(Il2CppObject* layout, uint32_t label, float* scale) {
     Il2CppObject* s = Target(label);
@@ -218,7 +221,7 @@ void Title(Il2CppObject* layout, uint32_t text) {
     if (layout && s) Ptr<StringButtonFn>(r.stringButton)(layout, s, &g_titleScale, false, false, r.stringButton);
 }
 void SetGridItemRegion(const TLModXnaRectangle& rect) { Ptr<SetGridRegionFn>(r.setGridRegion)(rect, r.setGridRegion); }
-// Recomeça o lote de sprites como a seleção de mundos faz antes e depois da lista.
+// Recomeça o lote de sprites como a seleção de mundos faz.
 void RestartBatch() {
     Il2CppObject* batch = StaticObject(r.spriteBatch);
     if (!batch) return;
@@ -266,111 +269,183 @@ void Refresh(bool force) {
     }
 }
 
-// Delegates e objetos próprios: criados uma vez, na thread do jogo.
-bool EnsureObjects() {
-    if (h.scaleDel) return true;
-    Il2CppObject* target = api.il2cpp_object_new(r.worldSelectClass);  // só WorldOver escreve nele
-    Il2CppObject* scale = api.il2cpp_object_new(r.scaleDelegateClass);
-    Il2CppObject* over = api.il2cpp_object_new(r.overDelegateClass);
-    if (!target || !scale || !over) return false;
-    Ptr<DelegateCtorFn>(r.scaleCtor)(scale, target, r.worldScale, r.scaleCtor);
-    Ptr<DelegateCtorFn>(r.overCtor)(over, target, r.worldOverMethod, r.overCtor);
-    Il2CppObject* draw = StaticObject(r.dummyDraw);
-    if (!draw) {  // o static ainda não existe: um delegate novo para o mesmo DummyDraw
-        draw = api.il2cpp_object_new(r.drawDelegateClass);
-        if (!draw) return false;
-        Ptr<DelegateCtorFn>(r.drawCtor)(draw, nullptr, r.dummyDrawMethod, r.drawCtor);
-    }
-    // Texto da página de detalhes: cópia do nome da linha (fonte e cor do jogo),
-    // ancorada no canto da região GridItem, com quebra de linha.
+// String_Layout próprio: cópia do nome da linha de mundo (fonte e cor do jogo),
+// no canto superior esquerdo da região GridItem.
+Il2CppObject* NewTextLayout(Il2CppObject* layout, bool wrap) {
     Il2CppObject* text = api.il2cpp_object_new(r.stringLayoutClass);
-    if (!text) return false;
+    if (!text) return nullptr;
     Ptr<InstanceFn>(r.stringCtor)(text, r.stringCtor);
-    if (Il2CppObject* layout = Layout()) Ptr<CopyFn>(r.stringCopy)(text, Part(layout, ws::ItemName), r.stringCopy);
-    namespace sl = off::string_layout_off;
+    Ptr<CopyFn>(r.stringCopy)(text, Part(layout, ws::ItemName), r.stringCopy);
     FieldAt<int32_t>(text, sl::AnchorControl) = kControlGridItem;
     FieldAt<int32_t>(text, sl::Anchor) = kAnchorTopLeft;
     FieldAt<float>(text, sl::Location) = FieldAt<float>(text, sl::Location + 4) = 0.0f;
     FieldAt<int32_t>(text, sl::Alignment) = kAnchorTopLeft;
-    FieldAt<bool>(text, sl::MultiLineUseAlignment) = true;
-    FieldAt<int32_t>(text, sl::MaxLines) = 40;
-    h.overTarget = Pin(target);
-    h.scaleDel = Pin(scale);
-    h.overDel = Pin(over);
-    h.drawDel = Pin(draw);
-    h.detailText = Pin(text);
+    FieldAt<bool>(text, sl::MultiLineUseAlignment) = wrap;
+    FieldAt<int32_t>(text, sl::MaxLines) = wrap ? 1000 : 1;
+    return text;
+}
+
+bool EnsureObjects(Il2CppObject* layout) {
+    if (h.line) return true;
+    Il2CppObject* line = NewTextLayout(layout, false);
+    Il2CppObject* wrap = NewTextLayout(layout, true);
+    if (!line || !wrap) return false;
+    h.line = Pin(line);
+    h.wrap = Pin(wrap);
     h.title = PinString("Oficina de Mods");
     h.back = PinString("Voltar");
     h.empty = PinString("Nenhum mod instalado");
+    h.probe1 = PinString("Ag");
+    h.probe2 = PinString("Ag\nAg");
     return true;
 }
 
-// ---- Toque nas linhas -----------------------------------------------------------
-int32_t RowAt(float x, float y) {
-    TLModXnaRectangle area{};
-    if (r.gridRegion) api.il2cpp_field_static_get_value(r.gridRegion, &area);
-    auto inside = [&](const TLModXnaRectangle& q) {
-        return x >= q.x && x < q.x + q.width && y >= q.y && y < q.y + q.height;
-    };
-    if (area.width > 0 && !inside(area)) return -1;
-    for (size_t i = 0; i < g_rows.size(); ++i)
-        if (g_rows[i].drawn && inside(g_rows[i].rect)) return static_cast<int32_t>(i);
-    return -1;
+// ---- Geometria da lista --------------------------------------------------------
+// A lista começa onde a seleção de mundos põe a primeira linha (FirstItemLocation
+// do WorldGrid) e vai até a divisória acima do Voltar.
+struct ListArea {
+    TLModXnaRectangle rect{};  // área visível
+    TLModXnaVector2 rowSize{};
+    float stride = 0;          // altura da linha + espaço
+};
+ListArea Area(Il2CppObject* layout) {
+    ListArea a;
+    Il2CppObject* grid = Part(layout, ws::WorldGrid);
+    Il2CppObject* backing = Part(layout, ws::ItemBacking);
+    if (!grid || !backing) return a;
+    namespace ig = off::item_grid_layout_off;
+    TLModXnaVector2 first = Ptr<AnchoredFn>(r.anchored)(
+        FieldAt<int32_t>(grid, ig::FirstAnchorControl), FieldAt<int32_t>(grid, ig::FirstItemAnchor),
+        FieldAt<TLModXnaVector2>(grid, ig::FirstItemLocation), r.anchored);
+    a.rowSize = FieldAt<TLModXnaVector2>(backing, r.panelSize);
+    const float gap = std::max(FieldAt<TLModXnaVector2>(grid, ig::ExtraElementSpacing).y, 4.0f);
+    a.stride = a.rowSize.y + gap;
+    TLModXnaRectangle divider = PanelRegion(Part(layout, ws::MenuDivider));
+    TLModXnaRectangle panel = PanelRegion(Part(layout, ws::Backing));
+    float bottom = divider.height > 0 && divider.y > first.y + a.rowSize.y
+                       ? static_cast<float>(divider.y) - 2.0f
+                       : static_cast<float>(panel.y + panel.height) - 2.0f * a.rowSize.y;
+    a.rect = {static_cast<int32_t>(first.x), static_cast<int32_t>(first.y), static_cast<int32_t>(a.rowSize.x),
+              static_cast<int32_t>(std::max(bottom - first.y, a.rowSize.y))};
+    return a;
 }
 
-// Um toque (soltar perto de onde apertou, sem arrastar a lista) abre a linha.
-int32_t TappedRow() {
+bool Inside(const TLModXnaRectangle& q, float x, float y) {
+    return x >= q.x && x < q.x + q.width && y >= q.y && y < q.y + q.height;
+}
+
+// Toque numa área com rolagem: arrastar muda `scroll` (limitado a [0, maxScroll]);
+// ao soltar, a rolagem encaixa num múltiplo de `step`. Devolve true num toque
+// curto (soltar perto de onde apertou, sem arrastar); `at` = onde foi.
+bool TrackTouch(const TLModXnaRectangle& area, float* scroll, float maxScroll, float step, TLModXnaVector2* at) {
     const bool down = Ptr<StaticBoolFn>(r.mouseLeft)(r.mouseLeft);
     const float x = static_cast<float>(Ptr<StaticIntFn>(r.mouseX)(r.mouseX));
     const float y = static_cast<float>(Ptr<StaticIntFn>(r.mouseY)(r.mouseY));
-    int32_t tapped = -1;
-    if (down && !g_prevDown) {
-        g_pressIndex = RowAt(x, y);
-        g_pressAt = {x, y};
-    } else if (!down && g_prevDown) {
-        if (g_pressIndex >= 0 && std::hypot(x - g_pressAt.x, y - g_pressAt.y) < kTapDistance &&
-            RowAt(x, y) == g_pressIndex)
-            tapped = g_pressIndex;
-        g_pressIndex = -1;
+    bool tapped = false;
+    if (down && !g_touch.prevDown) {
+        g_touch.pressed = Inside(area, x, y);
+        g_touch.dragging = false;
+        g_touch.at = {x, y};
+        g_touch.startScroll = *scroll;
+    } else if (down && g_touch.pressed) {
+        if (std::fabs(y - g_touch.at.y) > kDragStart) g_touch.dragging = true;
+        if (g_touch.dragging) *scroll = std::clamp(g_touch.startScroll - (y - g_touch.at.y), 0.0f, maxScroll);
+    } else if (!down && g_touch.prevDown && g_touch.pressed) {
+        if (g_touch.dragging && step > 0) *scroll = std::clamp(std::round(*scroll / step) * step, 0.0f, maxScroll);
+        else if (std::hypot(x - g_touch.at.x, y - g_touch.at.y) < kTapDistance) tapped = true;
+        if (at) *at = g_touch.at;
+        g_touch.pressed = g_touch.dragging = false;
     }
-    g_prevDown = down;
+    g_touch.prevDown = down;
     return tapped;
 }
 
 // ---- Páginas -------------------------------------------------------------------
+void DrawRow(Il2CppObject* layout, Row& row, const TLModXnaVector2& position, const TLModXnaVector2& size,
+             bool pressed) {
+    Il2CppObject* backing = Part(layout, pressed ? ws::ItemSelectedBacking : ws::ItemBacking);
+    if (!backing) backing = Part(layout, ws::ItemBacking);
+    row.rect = {static_cast<int32_t>(position.x), static_cast<int32_t>(position.y), static_cast<int32_t>(size.x),
+                static_cast<int32_t>(size.y)};
+    row.drawn = true;
+    SetGridItemRegion(row.rect);
+    Ptr<PanelDrawAtFn>(r.panelDrawAt)(backing, position, size, pressed, r.panelDrawAt);
+    for (size_t part : {ws::ItemSizeBacking, ws::ItemModeBacking, ws::ItemTimeBacking, ws::ItemNameDivider})
+        PanelDraw(Part(layout, part));
+    // Na linha de mundo: modo (esquerda), tamanho (meio) e tempo (direita, o mais largo).
+    StringDraw(Part(layout, ws::ItemName), row.name);
+    StringDrawColor(Part(layout, ws::ItemMode), row.status, kStatusColors[row.kind]);
+    StringDraw(Part(layout, ws::ItemSize), row.version);
+    StringDraw(Part(layout, ws::ItemTime), row.summary);
+}
+
 void DrawList(Il2CppObject* layout) {
     PanelDraw(Part(layout, ws::Backing));
     PanelDraw(Part(layout, ws::MenuDivider));
-    Il2CppObject* backing = Part(layout, ws::ItemBacking);
-    TLModXnaVector2 itemSize = backing ? FieldAt<TLModXnaVector2>(backing, r.panelSize) : TLModXnaVector2{};
-    FieldAt<int32_t>(Target(h.overTarget), r.worldOver) = -1;
-    for (Row& row : g_rows) row.drawn = false;
-    g_drawingRows = true;
-    Ptr<GridDrawFn>(r.gridDraw)(Part(layout, ws::WorldGrid), Target(h.scaleDel), Target(h.overDel), Target(h.drawDel),
-                                static_cast<int32_t>(g_rows.size()), &g_scroll, &g_momentum, &g_dragging,
-                                &g_dragPosition, itemSize, false, true, false, r.gridDraw);
-    g_drawingRows = false;
-    if (r.gridRegion) api.il2cpp_field_static_get_value(r.gridRegion, &g_listRegion);
-    RestartBatch();  // a lista recorta o desenho; o resto da tela vem sem recorte
     Title(Part(layout, ws::Title), h.title);
-    if (g_rows.empty()) {
-        Il2CppObject* text = Target(h.detailText);
-        FieldAt<float>(text, off::string_layout_off::WrapWidth) = static_cast<float>(g_listRegion.width);
-        SetGridItemRegion(g_listRegion);
-        StringDraw(text, h.empty);
+    const ListArea a = Area(layout);
+    const float total = static_cast<float>(g_rows.size()) * a.stride;
+    // Só linhas inteiras: a rolagem máxima deixa a última linha encostada embaixo.
+    const float gap = a.stride - a.rowSize.y;
+    const int visible = a.stride > 0 ? std::max(1, static_cast<int>((a.rect.height + gap) / a.stride)) : 1;
+    const float maxScroll = std::max(0.0f, total - static_cast<float>(visible) * a.stride);
+    g_listScroll = std::clamp(g_listScroll, 0.0f, maxScroll);
+    TLModXnaVector2 at{};
+    const bool tapped = TrackTouch(a.rect, &g_listScroll, maxScroll, a.stride, &at);
+    const int pressedRow = g_touch.pressed && !g_touch.dragging && a.stride > 0
+                               ? static_cast<int>((g_touch.at.y - a.rect.y + g_listScroll) / a.stride)
+                               : -1;
+    for (Row& row : g_rows) row.drawn = false;
+    for (size_t i = 0; i < g_rows.size(); ++i) {
+        const float y = static_cast<float>(a.rect.y) + static_cast<float>(i) * a.stride - g_listScroll;
+        if (y < a.rect.y - 0.5f || y + a.rowSize.y > a.rect.y + a.rect.height + 0.5f) continue;  // só linhas inteiras
+        DrawRow(layout, g_rows[i], {static_cast<float>(a.rect.x), y}, a.rowSize, static_cast<int>(i) == pressedRow);
     }
-    const int32_t tapped = TappedRow();
-    if (tapped >= 0) {
-        PlaySound(12);
-        g_page = Page::Detail;
-        g_detail = tapped;
-        g_newScale = 0;
-        return;
+    if (g_rows.empty()) {
+        SetGridItemRegion(a.rect);
+        StringDraw(Target(h.line), h.empty);
+    }
+    if (tapped) {
+        for (size_t i = 0; i < g_rows.size(); ++i) {
+            if (!g_rows[i].drawn || !Inside(g_rows[i].rect, at.x, at.y)) continue;
+            PlaySound(12);
+            g_page = Page::Detail;
+            g_detail = static_cast<int32_t>(i);
+            g_detailScroll = 0;
+            g_newScale = 0;
+            return;
+        }
     }
     if (Button(Part(layout, ws::Back), h.back, &g_backScale) == kInputClicked || BackKey()) {
         PlaySound(11);
         g_page = Page::Closed;
     }
+}
+
+// Quebra o texto do mod na largura da área (pelo jogo) e guarda uma string por linha.
+void PrepareDetail(const Row& row, float width) {
+    if (g_detailFor == g_detail && g_detailRevision == g_revision) return;
+    g_detailFor = g_detail;
+    g_detailRevision = g_revision;
+    Retire(g_detailLines);
+    Il2CppObject* wrap = Target(h.wrap);
+    FieldAt<float>(wrap, sl::WrapWidth) = width;
+    int32_t count = 0;
+    Il2CppObject* wrapped = Ptr<WrapFn>(r.wrap)(wrap, Target(row.details), &count, r.wrap);
+    std::string text = bridge::Utf8String(wrapped ? wrapped : Target(row.details));
+    size_t start = 0;
+    while (start <= text.size()) {
+        size_t nl = text.find('\n', start);
+        if (nl == std::string::npos) nl = text.size();
+        g_detailLines.push_back(PinString(text.substr(start, nl - start).c_str()));
+        start = nl + 1;
+    }
+    // Altura de linha da fonte: a diferença entre duas linhas e uma.
+    Il2CppObject* line = Target(h.line);
+    TLModXnaRectangle one = Ptr<StringRegionFn>(r.stringRegion)(line, Target(h.probe1), r.stringRegion);
+    TLModXnaRectangle two = Ptr<StringRegionFn>(r.stringRegion)(line, Target(h.probe2), r.stringRegion);
+    g_lineHeight = static_cast<float>(two.height > one.height ? two.height - one.height : one.height);
+    if (g_lineHeight <= 0) g_lineHeight = 20.0f;
 }
 
 void DrawDetail(Il2CppObject* layout) {
@@ -382,17 +457,22 @@ void DrawDetail(Il2CppObject* layout) {
     }
     const Row& row = g_rows[static_cast<size_t>(g_detail)];
     Title(Part(layout, ws::Title), row.name);
-    // O texto ocupa a área da lista (abaixo do título), com uma margem.
-    TLModXnaRectangle area = g_listRegion;
-    if (area.width <= 0) area = Ptr<PanelRegionFn>(r.panelRegion)(Part(layout, ws::Backing), r.panelRegion);
-    const int32_t pad = 12;
-    area = {area.x + pad, area.y + pad, std::max(0, area.width - 2 * pad), std::max(0, area.height - 2 * pad)};
-    Il2CppObject* text = Target(h.detailText);
-    FieldAt<float>(text, off::string_layout_off::WrapWidth) = static_cast<float>(area.width);
-    SetGridItemRegion(area);
-    StringDraw(text, row.details);
-    g_prevDown = Ptr<StaticBoolFn>(r.mouseLeft)(r.mouseLeft);  // um toque aqui não vale para a lista
-    g_pressIndex = -1;
+    const ListArea a = Area(layout);
+    const TLModXnaRectangle area{a.rect.x + kPad, a.rect.y + kPad / 2, std::max(0, a.rect.width - 2 * kPad),
+                                 std::max(0, a.rect.height - kPad)};
+    PrepareDetail(row, static_cast<float>(area.width));
+    const int visible = std::max(1, static_cast<int>(static_cast<float>(area.height) / g_lineHeight));
+    const int lines = static_cast<int>(g_detailLines.size());
+    const float maxScroll = static_cast<float>(std::max(0, lines - visible)) * g_lineHeight;
+    TrackTouch(a.rect, &g_detailScroll, maxScroll, g_lineHeight, nullptr);
+    const int first = static_cast<int>(std::floor(g_detailScroll / g_lineHeight));
+    const float offset = g_detailScroll - static_cast<float>(first) * g_lineHeight;
+    for (int k = first; k < lines; ++k) {
+        const float y = static_cast<float>(area.y) + static_cast<float>(k - first) * g_lineHeight - offset;
+        if (y < area.y - 0.5f || y + g_lineHeight > area.y + area.height + 0.5f) continue;  // só linhas inteiras
+        SetGridItemRegion({area.x, static_cast<int32_t>(y), area.width, static_cast<int32_t>(g_lineHeight)});
+        StringDraw(Target(h.line), g_detailLines[static_cast<size_t>(k)]);
+    }
     if (Button(Part(layout, ws::New), row.toggle, &g_newScale) == kInputClicked) {
         PlaySound(12);
         const TLModWorkshopSource* src = g_source.load(std::memory_order_acquire);
@@ -414,23 +494,9 @@ bool ResolveWorkshop() {
     Il2CppClass* layout = api.il2cpp_class_from_name(img, "", off::kWorldSelectLayoutClass);
     r.layoutInstance = layout ? api.il2cpp_class_get_field_from_name(layout, "Instance") : nullptr;
     r.spriteBatch = api.il2cpp_class_get_field_from_name(MainClass(), "spriteBatch");
-    Il2CppClass* grid = api.il2cpp_class_from_name(img, "", "GUIItemGrid");
-    r.dummyDraw = grid ? api.il2cpp_class_get_field_from_name(grid, "dummyDraw") : nullptr;
-    Il2CppClass* dragGrid = api.il2cpp_class_from_name(img, "", "GUIDraggableItemGrid");
-    r.gridRegion = dragGrid ? api.il2cpp_class_get_field_from_name(dragGrid, "fullRegion") : nullptr;
-    r.worldSelectClass = api.il2cpp_class_from_name(img, "", "GUIWorldSelectMenu");
-    // Delegates aninhados em GUIItemGrid.
-    void* iter = nullptr;
-    while (Il2CppClass* nested = grid ? api.il2cpp_class_get_nested_types(grid, &iter) : nullptr) {
-        const char* name = api.il2cpp_class_get_name(nested);
-        if (std::strcmp(name, "GetItemScaleHandler") == 0) r.scaleDelegateClass = nested;
-        else if (std::strcmp(name, "CursorOver") == 0) r.overDelegateClass = nested;
-        else if (std::strcmp(name, "DrawItemHandler") == 0) r.drawDelegateClass = nested;
-    }
     r.stringLayoutClass = api.il2cpp_class_from_name(img, "", "String_Layout");
     if (Il2CppClass* panel = api.il2cpp_class_from_name(img, "", "Panel_Layout"))
         r.panelSize = FieldOffset(panel, "Size", r.panelSize);
-    if (r.worldSelectClass) r.worldOver = FieldOffset(r.worldSelectClass, "worldOver", r.worldOver);
 
     namespace argc = off::argc;
     Il2CppClass* guiPanel = api.il2cpp_class_from_name(img, "", "GUIPanel");
@@ -440,21 +506,16 @@ bool ResolveWorkshop() {
     Il2CppClass* guiString = api.il2cpp_class_from_name(img, "", "GUIString");
     r.stringDraw = MethodWithParam(guiString, "Draw", argc::GUIString_Draw, 1, "System.String");
     r.stringDrawColor = MethodWithParam(guiString, "Draw", 4, 1, "System.String");
+    r.stringRegion = Method(guiString, "GetRegion", argc::GUIString_GetRegion);
+    r.wrap = Method(guiString, "ApplyMultiLineAlignment", argc::GUIString_ApplyMultiLineAlignment);
     r.stringButton = Method("", "GUIStringButton", "DrawButton", argc::GUIStringButton_DrawButton);
     r.setGridRegion = Method("", "ControlAnchor", "SetGridItemRegion", argc::ControlAnchor_SetGridItemRegion);
-    r.gridDraw =
-        MethodWithParam(dragGrid, "Draw", argc::GUIDraggableItemGrid_Draw, 9, "Microsoft.Xna.Framework.Vector2");
+    r.anchored = Method("", "LayoutCalculator", "GetAnchoredPosition", argc::LayoutCalculator_GetAnchoredPosition);
     r.transactionDraw = MethodWithParam(api.il2cpp_class_from_name(img, "", "GUITransactionButton"), "Draw",
                                         argc::GUITransactionButton_Draw, 1, "Terraria.Item");
     Il2CppClass* batch = api.il2cpp_class_from_name(img, "Microsoft.Xna.Framework.Graphics", "SpriteBatch");
     r.begin = Method(batch, "Begin", argc::SpriteBatch_Begin);
     r.end = Method(batch, "End", argc::SpriteBatch_End);
-    r.worldScale = Method(r.worldSelectClass, "WorldScale", argc::GUIWorldSelectMenu_WorldScale);
-    r.worldOverMethod = Method(r.worldSelectClass, "WorldOver", argc::GUIWorldSelectMenu_WorldOver);
-    r.dummyDrawMethod = Method(grid, "DummyDraw", argc::GUIItemGrid_DummyDraw);
-    r.scaleCtor = Method(r.scaleDelegateClass, ".ctor", 2);
-    r.overCtor = Method(r.overDelegateClass, ".ctor", 2);
-    r.drawCtor = Method(r.drawDelegateClass, ".ctor", 2);
     r.stringCtor = Method(r.stringLayoutClass, ".ctor", 0);
     r.stringCopy = Method(r.stringLayoutClass, "Copy", argc::StringLayout_Copy);
     r.keyUp = Method("", "KeyboardInput", "GetKeyUp", argc::KeyboardInput_GetKeyUp);
@@ -462,12 +523,11 @@ bool ResolveWorkshop() {
     r.mouseY = Method(MainClass(), "get_mouseY", argc::Main_get_mouseY);
     r.mouseLeft = Method(MainClass(), "get_mouseLeft", argc::Main_get_mouseLeft);
 
-    const void* needed[] = {r.layoutInstance, r.spriteBatch, r.gridRegion, r.worldSelectClass, r.scaleDelegateClass,
-                            r.overDelegateClass, r.drawDelegateClass, r.stringLayoutClass, r.panelDraw, r.panelDrawAt,
-                            r.panelRegion, r.stringDraw, r.stringDrawColor, r.stringButton, r.setGridRegion,
-                            r.gridDraw, r.transactionDraw, r.begin, r.end, r.worldScale, r.worldOverMethod,
-                            r.dummyDrawMethod, r.scaleCtor, r.overCtor, r.drawCtor, r.stringCtor, r.stringCopy,
-                            r.mouseX, r.mouseY, r.mouseLeft};
+    const void* needed[] = {r.layoutInstance, r.spriteBatch,   r.stringLayoutClass, r.panelDraw,    r.panelDrawAt,
+                            r.panelRegion,    r.stringDraw,    r.stringDrawColor,   r.stringRegion, r.wrap,
+                            r.stringButton,   r.setGridRegion, r.anchored,          r.transactionDraw, r.begin,
+                            r.end,            r.stringCtor,    r.stringCopy,        r.mouseX,       r.mouseY,
+                            r.mouseLeft};
     int missing = 0;
     for (const void* p : needed) missing += p == nullptr;
     if (missing) {
@@ -475,9 +535,6 @@ bool ResolveWorkshop() {
         return false;
     }
     if (!r.keyUp) LOGW("Oficina nativa: KeyboardInput.GetKeyUp ausente; o voltar do Android não fecha a Oficina");
-    if (!InstallHook("GUIItemGrid.DummyDraw", r.dummyDrawMethod, off::rva::GUIItemGrid_DummyDraw,
-                     reinterpret_cast<void*>(&TLMod_Hooked_GUIItemGridDummyDraw), &g_origDummyDraw))
-        return false;
     r.ready = true;
     LOGI("Oficina nativa pronta (peças da tela de seleção de mundos)");
     return true;
@@ -490,23 +547,27 @@ bool DrawWorkshop() {
         g_source.load(std::memory_order_acquire)) {
         g_page = Page::List;
         g_detail = -1;
-        g_scroll = g_momentum = 0;
-        g_dragging = 0;
+        g_listScroll = g_detailScroll = 0;
         g_titleScale = g_backScale = 0;
-        g_prevDown = true;  // o dedo que tocou em "Mods" ainda pode estar na tela
-        g_pressIndex = -1;
+        g_touch = Touch{};
+        g_touch.prevDown = true;  // o dedo que tocou em "Mods" ainda pode estar na tela
         Refresh(true);
     }
     if (g_page == Page::Closed) return false;
     Il2CppObject* layout = Layout();
-    if (!r.ready || !layout || !EnsureObjects()) {
+    if (!r.ready || !layout || !EnsureObjects(layout)) {
         g_page = Page::Closed;
         return false;
     }
     Refresh(false);
     RestartBatch();
+    const Page before = g_page;
     if (g_page == Page::List) DrawList(layout);
     else DrawDetail(layout);
+    if (g_page != before) {  // um toque não atravessa para a página seguinte
+        g_touch = Touch{};
+        g_touch.prevDown = true;
+    }
     return true;
 }
 
@@ -520,33 +581,5 @@ void TLMod_SetWorkshopSource(const TLModWorkshopSource* source) {
 bool TLMod_WorkshopAvailable(void) { return r.ready && g_source.load(std::memory_order_acquire); }
 void TLMod_OpenWorkshop(void) { g_openRequested.store(true, std::memory_order_release); }
 bool TLMod_WorkshopOpen(void) { return g_page != Page::Closed; }
-
-// GUIItemGrid.DummyDraw: vazio no jogo. Enquanto a Oficina desenha a lista, é a
-// linha `index` (o GUIDraggableItemGrid já descontou a rolagem em `position`).
-void TLMod_Hooked_GUIItemGridDummyDraw(Il2CppObject* gridLayout, int32_t index, TLModXnaVector2 position, float scale,
-                                       const MethodInfo* method) {
-    if (!g_drawingRows || index < 0 || static_cast<size_t>(index) >= g_rows.size()) {
-        if (auto orig = LoadOrig<DummyDrawFn>(g_origDummyDraw)) orig(gridLayout, index, position, scale, method);
-        return;
-    }
-    Il2CppObject* layout = Layout();
-    Row& row = g_rows[static_cast<size_t>(index)];
-    const bool pressed = g_pressIndex == index;
-    Il2CppObject* backing = Part(layout, pressed ? ws::ItemSelectedBacking : ws::ItemBacking);
-    if (!backing) backing = Part(layout, ws::ItemBacking);
-    TLModXnaVector2 size = FieldAt<TLModXnaVector2>(backing, r.panelSize);
-    row.rect = {static_cast<int32_t>(position.x), static_cast<int32_t>(position.y), static_cast<int32_t>(size.x),
-                static_cast<int32_t>(size.y)};
-    row.drawn = true;
-    SetGridItemRegion(row.rect);
-    const bool over = FieldAt<int32_t>(Target(h.overTarget), r.worldOver) == index;
-    Ptr<PanelDrawAtFn>(r.panelDrawAt)(backing, position, size, over, r.panelDrawAt);
-    for (size_t part : {ws::ItemSizeBacking, ws::ItemModeBacking, ws::ItemTimeBacking, ws::ItemNameDivider})
-        PanelDraw(Part(layout, part));
-    StringDraw(Part(layout, ws::ItemName), row.name);
-    StringDraw(Part(layout, ws::ItemTime), row.version);
-    StringDrawColor(Part(layout, ws::ItemMode), row.status, kStatusColors[row.kind]);
-    StringDraw(Part(layout, ws::ItemSize), row.summary);
-}
 
 }  // extern "C"

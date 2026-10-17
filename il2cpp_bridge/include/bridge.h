@@ -514,8 +514,6 @@ int32_t TLMod_Hooked_GUITransactionButtonDraw(Il2CppObject* layout, Il2CppObject
                                               const MethodInfo* method);
 void TLMod_Hooked_GUIReforgePopupDrawItem(Il2CppObject* self, const MethodInfo* method);
 void TLMod_Hooked_GUIMainMenuDraw(Il2CppObject* self, const MethodInfo* method);  // menu_hooks.cpp
-void TLMod_Hooked_GUIItemGridDummyDraw(Il2CppObject* gridLayout, int32_t index, TLModXnaVector2 position,
-                                       float scale, const MethodInfo* method);  // workshop_screen.cpp
 void TLMod_Hooked_GUIResearchDrawResearchItem(Il2CppObject* self, const MethodInfo* method);
 int32_t TLMod_Hooked_GUIResearchCanBeResearched(Il2CppObject* self, Il2CppObject* item, int32_t* percent,
                                                 const MethodInfo* method);

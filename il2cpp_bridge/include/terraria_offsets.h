@@ -346,7 +346,7 @@ constexpr size_t Instance = 0x0;
 }  // namespace world_select_layout_static_off
 namespace world_select_layout_off {
 constexpr size_t Backing = 0x18;               // Panel_Layout: fundo da tela
-constexpr size_t WorldGrid = 0x20;             // DraggableItemGrid_Layout: a lista que rola
+constexpr size_t WorldGrid = 0x20;             // DraggableItemGrid_Layout: onde fica a 1ª linha
 constexpr size_t Title = 0x28;                 // StringButton_Layout
 constexpr size_t New = 0x30;                   // TransactionButton_Layout ("Novo"): Ativar/Desativar
 constexpr size_t Back = 0x38;                  // TransactionButton_Layout ("Voltar")
@@ -363,6 +363,13 @@ constexpr size_t ItemSizeBacking = 0x130;      // Panel_Layout
 constexpr size_t ItemSize = 0x138;             // String_Layout: o que o mod adiciona
 constexpr size_t ItemImage = 0x150;            // Panel_Layout: moldura do ícone
 }  // namespace world_select_layout_off
+// ItemGrid_Layout (base de DraggableItemGrid_Layout): a primeira linha e o espaço entre elas.
+namespace item_grid_layout_off {
+constexpr size_t ExtraElementSpacing = 0x30;  // Vector2
+constexpr size_t FirstAnchorControl = 0x38;   // ControlAnchor.ControlId
+constexpr size_t FirstItemAnchor = 0x3C;      // LayoutCalculator.AnchorType
+constexpr size_t FirstItemLocation = 0x40;    // Vector2
+}  // namespace item_grid_layout_off
 namespace panel_layout_off {
 constexpr size_t Size = 0x20;  // Vector2
 }  // namespace panel_layout_off
@@ -375,15 +382,6 @@ constexpr size_t MultiLineUseAlignment = 0x30;  // bool: quebra em WrapWidth (GU
 constexpr size_t WrapWidth = 0x34;              // float
 constexpr size_t MaxLines = 0x38;               // int
 }  // namespace string_layout_off
-namespace gui_world_select_menu_off {
-constexpr size_t worldOver = 0xCC;  // int: gravado por WorldOver(int), o CursorOver da lista
-}  // namespace gui_world_select_menu_off
-namespace gui_draggable_item_grid_static_off {
-constexpr size_t fullRegion = 0x10;  // Rectangle: a área da lista no último desenho
-}  // namespace gui_draggable_item_grid_static_off
-namespace gui_item_grid_static_off {
-constexpr size_t dummyDraw = 0x20;  // GUIItemGrid.DrawItemHandler para DummyDraw (vazio)
-}  // namespace gui_item_grid_static_off
 
 // Button_Layout (base de TransactionButton_Layout): onde o botão fica na tela.
 namespace button_layout_off {
@@ -557,13 +555,10 @@ constexpr uintptr_t GUIPanel_DrawAtPosition = 0x105CCD0;  // (Panel_Layout, Vect
 constexpr uintptr_t GUIPanel_Region = 0x105AF2C;        // (Panel_Layout): Rectangle
 constexpr uintptr_t GUIString_Draw = 0x121DD6C;         // (String_Layout, string)
 constexpr uintptr_t GUIStringButton_DrawButton = 0x121F26C;  // (StringButton_Layout, string, ref float, bool, bool)
-// (DraggableItemGrid_Layout, scale, over, draw, int count, ref float scroll, ref float momentum,
-//  ref int dragging, ref Vector2 dragPosition, Vector2 itemSize, bool drawMissing, bool mouseScroll,
-//  bool disableDrag): o overload de tamanho fixo; ele cuida do arraste, do momento e do recorte.
-constexpr uintptr_t GUIDraggableItemGrid_Draw = 0x105614C;
-constexpr uintptr_t GUIItemGrid_DummyDraw = 0x1059FE0;  // DrawItemHandler vazio, sem chamadas diretas: o hook desenha a linha
-constexpr uintptr_t GUIWorldSelectMenu_WorldScale = 0xA8484C;  // float(int): devolve 1 (alvo do GetItemScaleHandler)
-constexpr uintptr_t GUIWorldSelectMenu_WorldOver = 0xA84854;   // void(int): grava worldOver (alvo do CursorOver)
+constexpr uintptr_t GUIString_GetRegion = 0x121E030;    // (String_Layout, string): Rectangle (altura da linha)
+// (String_Layout, string, out int lineCount): o texto com '\n' na largura WrapWidth
+constexpr uintptr_t GUIString_ApplyMultiLineAlignment = 0x121CA00;
+constexpr uintptr_t LayoutCalculator_GetAnchoredPosition = 0xA28DB0;  // (ControlId, AnchorType, Vector2)
 constexpr uintptr_t SpriteBatch_Begin = 0xB1CA74;  // (sort, blend, sampler, depth, raster, effect, Matrix?, bool)
 constexpr uintptr_t SpriteBatch_End = 0xB1C974;
 constexpr uintptr_t StringLayout_Copy = 0xA0E724;
@@ -651,10 +646,9 @@ constexpr int GUIPanel_DrawAtPosition = 4;
 constexpr int GUIPanel_Region = 1;
 constexpr int GUIString_Draw = 2;  // o overload (String_Layout, string)
 constexpr int GUIStringButton_DrawButton = 5;
-constexpr int GUIDraggableItemGrid_Draw = 13;  // 3 overloads de 13: o do Vector2 itemSize
-constexpr int GUIItemGrid_DummyDraw = 4;
-constexpr int GUIWorldSelectMenu_WorldScale = 1;
-constexpr int GUIWorldSelectMenu_WorldOver = 1;
+constexpr int GUIString_GetRegion = 2;
+constexpr int GUIString_ApplyMultiLineAlignment = 3;
+constexpr int LayoutCalculator_GetAnchoredPosition = 3;
 constexpr int SpriteBatch_Begin = 8;
 constexpr int SpriteBatch_End = 0;
 constexpr int StringLayout_Copy = 1;

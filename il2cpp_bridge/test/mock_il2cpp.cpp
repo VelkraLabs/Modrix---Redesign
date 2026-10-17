@@ -1496,10 +1496,13 @@ MainMenuFn g_mainMenuEntry = &MockMainMenuDraw;
 MethodInfo g_mMainMenuDraw{reinterpret_cast<Il2CppMethodPointer>(&MockMainMenuDraw), "Draw", 0};
 
 // ---- Oficina nativa: as peças da tela de seleção de mundos ------------------------
-// O "desenho" vira linhas de texto em g_frame ("titulo:...", "nome:...", "botao:...").
+// O "desenho" vira linhas de texto em g_frame ("titulo:...", "nome:...", "texto@y:...").
 std::vector<std::string> g_frame;
 struct MockVec2 {
     float x, y;
+};
+struct MockRectI {
+    int32_t x, y, w, h;
 };
 Il2CppClass g_worldSelectLayout{"", "WorldSelectMenu_Layout", {}, {}};
 Il2CppObject* g_wsLayout = nullptr;
@@ -1508,88 +1511,71 @@ Il2CppObject* WsPart(size_t off) { return At<Il2CppObject*>(g_wsLayout, off); }
 Il2CppClass g_panelLayout{"", "Panel_Layout", {}, {}};
 FieldInfo g_fPanelSize{"Size", 0x20, nullptr};
 Il2CppClass g_stringLayout{"", "String_Layout", {}, {}};
-Il2CppClass g_worldSelect{"", "GUIWorldSelectMenu", {}, {}};
-FieldInfo g_fWorldOver{"worldOver", 0xCC, nullptr};
 const char* PartName(Il2CppObject* layout) {
     static const std::pair<size_t, const char*> kParts[] = {
-        {0x100, "nome"}, {0x118, "versao"}, {0x128, "estado"}, {0x138, "resumo"}, {0x28, "titulo"},
+        {0x100, "nome"}, {0x118, "tempo"}, {0x128, "modo"}, {0x138, "tamanho"}, {0x28, "titulo"},
         {0x30, "novo"},  {0x38, "voltar"}};
     for (const auto& [off, name] : kParts)
         if (g_wsLayout && WsPart(off) == layout) return name;
-    return "texto";  // o String_Layout criado pela Oficina
+    return "texto";  // os String_Layout criados pela Oficina
 }
-// Delegates: mesmos campos do Delegate real (method_ptr 0x10, m_target 0x20, method 0x28).
-void MockDelegateCtor(Il2CppObject* self, Il2CppObject* target, const MethodInfo* method, const MethodInfo*) {
-    At<void*>(self, 0x10) = reinterpret_cast<void*>(method->methodPointer);
-    At<Il2CppObject*>(self, 0x20) = target;
-    At<const MethodInfo*>(self, 0x28) = method;
-}
-float MockWorldScale(Il2CppObject*, int32_t, const MethodInfo*) { return 1.0f; }
-void MockWorldOver(Il2CppObject* self, int32_t index, const MethodInfo*) { At<int32_t>(self, 0xCC) = index; }
-void MockDummyDraw(Il2CppObject*, int32_t, MockVec2, float, const MethodInfo*) {}
-using DummyDrawFn = decltype(&MockDummyDraw);
-DummyDrawFn g_dummyDrawEntry = &MockDummyDraw;
-MethodInfo g_mWorldScale{reinterpret_cast<Il2CppMethodPointer>(&MockWorldScale), "WorldScale", 1};
-MethodInfo g_mWorldOver{reinterpret_cast<Il2CppMethodPointer>(&MockWorldOver), "WorldOver", 1};
-MethodInfo g_mDummyDraw{reinterpret_cast<Il2CppMethodPointer>(&MockDummyDraw), "DummyDraw", 4};
-MethodInfo g_mDelegateCtor{reinterpret_cast<Il2CppMethodPointer>(&MockDelegateCtor), ".ctor", 2};
-Il2CppClass g_scaleDelegate{"", "GetItemScaleHandler", {}, {&g_mDelegateCtor}};
-Il2CppClass g_overDelegate{"", "CursorOver", {}, {&g_mDelegateCtor}};
-Il2CppClass g_drawDelegate{"", "DrawItemHandler", {}, {&g_mDelegateCtor}};
-Il2CppClass g_itemGrid{"", "GUIItemGrid", {}, {}};
-Il2CppObject* g_dummyDrawDelegate = nullptr;
-FieldInfo g_fDummyDraw{"dummyDraw", 0x20, &g_dummyDrawDelegate};
-// A lista: linhas de 60 a partir de (100, 100), área de 400x300; a rolagem desconta.
-struct MockRectI {
-    int32_t x, y, w, h;
-};
-MockRectI g_gridRegion{};
-FieldInfo g_fGridRegion{"fullRegion", 0x10, &g_gridRegion, sizeof(MockRectI)};
-int32_t g_mouseX = 0, g_mouseY = 0;
-bool g_mouseDown = false, g_escape = false;
-int g_gridErrors = 0;
-void MockGridDraw(Il2CppObject* layout, Il2CppObject* scale, Il2CppObject* over, Il2CppObject* draw, int32_t count,
-                  float* scroll, float*, int32_t*, MockVec2*, MockVec2 itemSize, bool, bool, bool, const MethodInfo*) {
-    g_gridRegion = {100, 100, 400, 300};
-    // Como o jogo: os três delegates são obrigatórios (sem eles, NullReferenceException).
-    if (!scale || !over || !draw || !layout) {
-        ++g_gridErrors;
-        return;
-    }
-    auto scaleFn = reinterpret_cast<float (*)(Il2CppObject*, int32_t, const MethodInfo*)>(At<void*>(scale, 0x10));
-    auto overFn = reinterpret_cast<void (*)(Il2CppObject*, int32_t, const MethodInfo*)>(At<void*>(over, 0x10));
-    if (At<const MethodInfo*>(draw, 0x28) != &g_mDummyDraw) ++g_gridErrors;
-    for (int32_t i = 0; i < count; ++i) {
-        MockVec2 pos{100, 100 + 60.0f * static_cast<float>(i) - *scroll};
-        if (pos.y + itemSize.y <= 100 || pos.y >= 400) continue;
-        float s = scaleFn(At<Il2CppObject*>(scale, 0x20), i, At<const MethodInfo*>(scale, 0x28));
-        if (g_mouseX >= pos.x && g_mouseX < pos.x + itemSize.x && g_mouseY >= pos.y && g_mouseY < pos.y + itemSize.y)
-            overFn(At<Il2CppObject*>(over, 0x20), i, At<const MethodInfo*>(over, 0x28));
-        g_dummyDrawEntry(layout, i, pos, s, &g_mDummyDraw);  // Invoke do delegate: o DummyDraw (com hook)
-    }
-}
-MethodInfo g_mGridDraw{reinterpret_cast<Il2CppMethodPointer>(&MockGridDraw), "Draw", 13,
-                       "Microsoft.Xna.Framework.Vector2"};
-Il2CppClass g_dragGrid{"", "GUIDraggableItemGrid", {}, {}};
+// Tela de 969x454 como a do aparelho: a 1ª linha em (100, 100), linhas de 400x50 com
+// 10 de espaço; a divisória acima do Voltar em y = 380.
+MockVec2 MockAnchored(int32_t, int32_t, MockVec2 pos, const MethodInfo*) { return {pos.x + 100, pos.y + 100}; }
+MethodInfo g_mAnchored{reinterpret_cast<Il2CppMethodPointer>(&MockAnchored), "GetAnchoredPosition", 3};
+Il2CppClass g_layoutCalculator{"", "LayoutCalculator", {}, {&g_mAnchored}};
 void MockPanelDraw(Il2CppObject*, bool, uint64_t, uint64_t, uint64_t, const MethodInfo*) {}
 void MockPanelDrawAt(Il2CppObject*, MockVec2, MockVec2, bool, const MethodInfo*) {}
-MockRectI MockPanelRegion(Il2CppObject*, const MethodInfo*) { return {80, 60, 440, 400}; }
+MockRectI MockPanelRegion(Il2CppObject* panel, const MethodInfo*) {
+    return panel == WsPart(0x40) ? MockRectI{80, 380, 440, 4} : MockRectI{80, 60, 440, 400};
+}
 MethodInfo g_mPanelDraw{reinterpret_cast<Il2CppMethodPointer>(&MockPanelDraw), "Draw", 5};
 MethodInfo g_mPanelDrawAt{reinterpret_cast<Il2CppMethodPointer>(&MockPanelDrawAt), "DrawAtPosition", 4};
 MethodInfo g_mPanelRegion{reinterpret_cast<Il2CppMethodPointer>(&MockPanelRegion), "Region", 1};
 Il2CppClass g_guiPanel{"", "GUIPanel", {}, {&g_mPanelDraw, &g_mPanelDrawAt, &g_mPanelRegion}};
 MockRectI g_lastGridItem{};
+// Textos do Oficina: "texto@<y da região GridItem>:" para as linhas de detalhes.
 void MockStringDraw(Il2CppObject* layout, Il2CppObject* value, const MethodInfo*) {
-    g_frame.push_back(std::string(PartName(layout)) + ":" + Utf8Of(value));
+    std::string name = PartName(layout);
+    if (name == "texto") name += "@" + std::to_string(g_lastGridItem.y);
+    g_frame.push_back(name + ":" + Utf8Of(value));
 }
 void MockStringDrawColor(Il2CppObject* layout, Il2CppObject* value, uint32_t color, bool, const MethodInfo*) {
     char hex[16];
     std::snprintf(hex, sizeof(hex), "#%08x", color);
     g_frame.push_back(std::string(PartName(layout)) + ":" + Utf8Of(value) + hex);
 }
+// Quebra simulada: 10 unidades por caractere, por palavra.
+Il2CppObject* MockWrap(Il2CppObject* layout, Il2CppObject* value, int32_t* lines, const MethodInfo*) {
+    const size_t width = static_cast<size_t>(At<float>(layout, 0x34) / 10.0f);
+    std::string in = Utf8Of(value), out, line;
+    *lines = 1;
+    auto flush = [&] { out += line; line.clear(); };
+    for (size_t i = 0; i <= in.size(); ++i) {
+        if (i == in.size() || in[i] == '\n') {
+            flush();
+            if (i < in.size()) out += '\n', ++*lines;
+            continue;
+        }
+        if (in[i] == ' ' && line.size() >= width) {
+            flush();
+            out += '\n';
+            ++*lines;
+            continue;
+        }
+        line += in[i];
+    }
+    return il2cpp_string_new(out.c_str());
+}
+MockRectI MockStringRegion(Il2CppObject*, Il2CppObject* value, const MethodInfo*) {
+    std::string s = Utf8Of(value);
+    return {0, 0, 10 * static_cast<int32_t>(s.size()), 20 * (1 + static_cast<int32_t>(std::count(s.begin(), s.end(), '\n')))};
+}
 MethodInfo g_mStringDraw{reinterpret_cast<Il2CppMethodPointer>(&MockStringDraw), "Draw", 2, "System.String"};
 MethodInfo g_mStringDrawColor{reinterpret_cast<Il2CppMethodPointer>(&MockStringDrawColor), "Draw", 4, "System.String"};
-Il2CppClass g_guiString{"", "GUIString", {}, {&g_mStringDraw, &g_mStringDrawColor}};
+MethodInfo g_mWrap{reinterpret_cast<Il2CppMethodPointer>(&MockWrap), "ApplyMultiLineAlignment", 3};
+MethodInfo g_mStringRegion{reinterpret_cast<Il2CppMethodPointer>(&MockStringRegion), "GetRegion", 2};
+Il2CppClass g_guiString{"", "GUIString", {}, {&g_mStringDraw, &g_mStringDrawColor, &g_mWrap, &g_mStringRegion}};
 bool MockStringButton(Il2CppObject* layout, Il2CppObject* value, float*, bool, bool, const MethodInfo*) {
     g_frame.push_back(std::string(PartName(layout)) + ":" + Utf8Of(value));
     return false;
@@ -1598,7 +1584,7 @@ MethodInfo g_mStringButton{reinterpret_cast<Il2CppMethodPointer>(&MockStringButt
 Il2CppClass g_guiStringButton{"", "GUIStringButton", {}, {&g_mStringButton}};
 void MockSetGridItemRegion(MockRectI region, const MethodInfo*) { g_lastGridItem = region; }
 MethodInfo g_mSetGridItemRegion{reinterpret_cast<Il2CppMethodPointer>(&MockSetGridItemRegion), "SetGridItemRegion", 1};
-int g_batchBegins = 0, g_batchEnds = 0;
+int g_batchBegins = 0, g_batchEnds = 0, g_workshopErrors = 0;
 Il2CppObject* g_spriteBatch = nullptr;
 FieldInfo g_fSpriteBatch{"spriteBatch", 0xC98, &g_spriteBatch};
 struct MockNullableMatrix {
@@ -1607,7 +1593,7 @@ struct MockNullableMatrix {
 };
 void MockBegin(Il2CppObject*, int32_t, Il2CppObject*, Il2CppObject*, Il2CppObject*, Il2CppObject*, Il2CppObject*,
                MockNullableMatrix matrix, bool deferred, const MethodInfo*) {
-    if (matrix.hasValue || !deferred) ++g_gridErrors;  // a Oficina começa como a tela de mundos
+    if (matrix.hasValue || !deferred) ++g_workshopErrors;  // a Oficina começa como a tela de mundos
     ++g_batchBegins;
 }
 void MockEnd(Il2CppObject*, const MethodInfo*) { ++g_batchEnds; }
@@ -1620,6 +1606,8 @@ void MockStringLayoutCopy(Il2CppObject* self, Il2CppObject* other, const MethodI
 }
 MethodInfo g_mStringLayoutCtor{reinterpret_cast<Il2CppMethodPointer>(&MockStringLayoutCtor), ".ctor", 0};
 MethodInfo g_mStringLayoutCopy{reinterpret_cast<Il2CppMethodPointer>(&MockStringLayoutCopy), "Copy", 1};
+int32_t g_mouseX = 0, g_mouseY = 0;
+bool g_mouseDown = false, g_escape = false;
 bool MockKeyUp(int32_t key, const MethodInfo*) {
     bool hit = key == 27 && g_escape;
     if (hit) g_escape = false;
@@ -1638,33 +1626,25 @@ void InitWorkshop() {
     g_wsLayout = NewObject(0x200);
     for (size_t off = 0x18; off <= 0x158; off += 8) {
         Il2CppObject* part = NewObject(0x150);
-        At<float>(part, 0x20) = 400.0f;  // Panel_Layout.Size (linha 400x50)
+        At<float>(part, 0x20) = 400.0f;  // Panel_Layout.Size: linha de 400x50
         At<float>(part, 0x24) = 50.0f;
         At<Il2CppObject*>(g_wsLayout, off) = part;
     }
+    Il2CppObject* grid = WsPart(0x20);  // WorldGrid: 1ª linha em (0, 0) + âncora, 10 entre as linhas
+    At<float>(grid, 0x30) = 0.0f;
+    At<float>(grid, 0x34) = 10.0f;
+    At<float>(grid, 0x40) = At<float>(grid, 0x44) = 0.0f;
     g_worldSelectLayout.fields = {&g_fWsInstance};
     g_panelLayout.fields = {&g_fPanelSize};
     g_stringLayout.methods = {&g_mStringLayoutCtor, &g_mStringLayoutCopy};
     g_stringLayout.size = 0x60;
-    g_worldSelect.fields = {&g_fWorldOver};
-    g_worldSelect.methods = {&g_mWorldScale, &g_mWorldOver};
-    g_worldSelect.size = 0x100;
-    for (Il2CppClass* d : {&g_scaleDelegate, &g_overDelegate, &g_drawDelegate}) d->size = 0x80;
-    g_itemGrid.fields = {&g_fDummyDraw};
-    g_itemGrid.methods = {&g_mDummyDraw};
-    g_itemGrid.nested = {&g_scaleDelegate, &g_overDelegate, &g_drawDelegate};
-    g_dummyDrawDelegate = NewObject(0x80);  // o static do jogo: delegate para o DummyDraw
-    MockDelegateCtor(g_dummyDrawDelegate, nullptr, &g_mDummyDraw, &g_mDelegateCtor);
-    g_dragGrid.fields = {&g_fGridRegion};
-    g_dragGrid.methods = {&g_mGridDraw};
     g_controlAnchor.methods.push_back(&g_mSetGridItemRegion);
     g_spriteBatch = NewObject(0x40);
     g_main.fields.push_back(&g_fSpriteBatch);
     g_main.methods.insert(g_main.methods.end(), {&g_mMouseX, &g_mMouseY, &g_mMouseLeft});
     g_csharp.classes.insert(g_csharp.classes.end(),
-                            {&g_worldSelectLayout, &g_panelLayout, &g_stringLayout, &g_worldSelect, &g_itemGrid,
-                             &g_dragGrid, &g_guiPanel, &g_guiString, &g_guiStringButton, &g_spriteBatchClass,
-                             &g_keyboardInput});
+                            {&g_worldSelectLayout, &g_panelLayout, &g_stringLayout, &g_guiPanel, &g_guiString,
+                             &g_guiStringButton, &g_spriteBatchClass, &g_keyboardInput, &g_layoutCalculator});
 }
 
 // Reforja: GUIInstance.Active.GUIReforge.get_ReforgeItem().
@@ -1876,7 +1856,6 @@ bool PatchScreens(void* target, void* r) {
     else if (target == reinterpret_cast<void*>(&MockDrawResearchItem)) g_researchEntry = reinterpret_cast<InstanceFn>(r);
     else if (target == reinterpret_cast<void*>(&MockCanBeResearched)) g_canResearchEntry = reinterpret_cast<CanResearchFn>(r);
     else if (target == reinterpret_cast<void*>(&MockMainMenuDraw)) g_mainMenuEntry = reinterpret_cast<MainMenuFn>(r);
-    else if (target == reinterpret_cast<void*>(&MockDummyDraw)) g_dummyDrawEntry = reinterpret_cast<DummyDrawFn>(r);
     else if (target == reinterpret_cast<void*>(&MockSacrificeCap)) g_sacrificeCapEntry = reinterpret_cast<SacrificeCapFn>(r);
     else if (target == reinterpret_cast<void*>(&MockTooltipLines)) g_tooltipLinesEntry = reinterpret_cast<TooltipLinesFn>(r);
     else if (target == reinterpret_cast<void*>(&MockGuidePopupDrawItem)) g_guidePopupEntry = reinterpret_cast<InstanceFn>(r);
@@ -2032,7 +2011,7 @@ __attribute__((visibility("default"))) size_t mock_workshop_frame(int32_t x, int
 __attribute__((visibility("default"))) int mock_workshop_errors(int* begins, int* ends) {
     *begins = g_batchBegins;
     *ends = g_batchEnds;
-    return g_gridErrors;
+    return g_workshopErrors;
 }
 __attribute__((visibility("default"))) void mock_set_screen(int32_t w, int32_t h) { g_screenW = w, g_screenH = h; }
 // Location do botão i do MainMenu_Layout (0 = Singleplayer ... 6 = PurchaseFullGame/Mods).

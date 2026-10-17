@@ -454,6 +454,7 @@ static void TestNativeWorkshop(const fs::path& tmp) {
           entries[1].details.find("Adiciona: 1 item") != std::string::npos &&
           entries[1].details.find("Estado: Carregado") != std::string::npos);
     CHECK(entries[2].status == "Desativado" && entries[2].kind == 1 && entries[2].toggleLabel == "Ativar");
+    CHECK(entries[0].summary.empty() && entries[2].summary == "1 NPC");  // sem conteúdo nem autores: vazio
     CHECK(entries[3].status == "Erro" && entries[3].kind == 2 &&
           entries[3].details.find("Erro:\ndlopen failed: símbolo ausente") != std::string::npos);
     // Desligar um ativo: "Será desativado", cor de aviso, e a pendência no texto.

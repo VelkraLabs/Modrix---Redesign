@@ -402,21 +402,23 @@ Os dois são gerados por `tools/make_example_textures.py`.
 Como a tela de mods do tModLoader: o botão **Mods** no menu principal do jogo abre a Oficina, uma tela
 do próprio jogo montada com as peças da seleção de mundos (`il2cpp_bridge/src/workshop_screen.cpp`):
 
-- **Lista.** Fundo, divisória, título "Oficina de Mods", a lista que rola com o dedo (o
-  `GUIDraggableItemGrid` do jogo, com arraste e momento) e Voltar. Cada linha usa o fundo de linha de
-  mundo e os textos de nome, versão, estado (colorido: ativo, desativado, erro, mudança pendente) e o
-  que o mod adiciona. Em ordem: ativos, desativados e com erro, cada grupo por nome.
+- **Lista.** Fundo, divisória, título "Oficina de Mods", uma linha por mod e Voltar. Cada linha usa o
+  fundo de linha de mundo e os quadros de modo, tamanho e tempo com o estado (colorido: ativo,
+  desativado, erro, mudança pendente), a versão e o que o mod adiciona (ou os autores). As linhas vão
+  de cima para baixo, a partir de onde a seleção de mundos põe a primeira (`FirstItemLocation` do
+  `WorldGrid`), até a divisória acima do Voltar; arrastar rola e encaixa numa linha ao soltar. Em
+  ordem: ativos, desativados e com erro, cada grupo por nome.
 - **Detalhes.** Tocar numa linha abre o texto completo do mod (versão, autores, descrição, conteúdo,
   estado e, se falhou, o erro inteiro), com Voltar e o botão "Novo" da tela de mundos virado em
-  **Ativar/Desativar**. O voltar do Android (Escape) volta uma página.
+  **Ativar/Desativar**. O texto é quebrado pelo próprio jogo (`GUIString.ApplyMultiLineAlignment`) e
+  desenhado linha a linha na área da lista, com rolagem; nunca passa por cima dos botões. O voltar do
+  Android (Escape) volta uma página.
 - Ligar ou desligar vale na próxima abertura do jogo: uma `.so` carregada não é descarregada.
 
-A lista do jogo só aceita delegates gerenciados. Os três vêm de métodos que já existem:
-`GUIWorldSelectMenu.WorldScale` (devolve 1), `GUIWorldSelectMenu.WorldOver` (grava a linha sob o dedo
-numa instância própria) e `GUIItemGrid.DummyDraw` (vazio, sem chamadas diretas), que ganha um hook e
-desenha a linha enquanto a Oficina desenha a lista. Cada linha marca sua região com
-`ControlAnchor.SetGridItemRegion`, e os textos ancorados em `GridItem` se posicionam sozinhos, como na
-seleção de mundos. Os dados vêm do runtime (`TLModWorkshopSource`, montado com `BuildWorkshopEntries`);
+A lista própria do jogo (`GUIDraggableItemGrid`) não serve: nesta tela ela cresce para o lado e não
+recorta o que sai do painel. Cada linha marca sua região com `ControlAnchor.SetGridItemRegion`, e os
+textos ancorados em `GridItem` se posicionam sozinhos, como na seleção de mundos. A cor do estado vai
+como `Color` do XNA desta build, que guarda os bytes na ordem A, B, G, R. Os dados vêm do runtime (`TLModWorkshopSource`, montado com `BuildWorkshopEntries`);
 a configuração é thread-safe e o painel vê as mudanças pela revisão dela. Se alguma peça do jogo não
 resolver, o botão Mods abre a Oficina do painel (Views Android), que também abre pela aba Mods.
 

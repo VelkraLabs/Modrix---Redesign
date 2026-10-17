@@ -288,7 +288,8 @@ std::vector<WorkshopEntry> BuildWorkshopEntries(const std::vector<ModInfo>& mods
                 e.kind = 2;
                 break;
         }
-        e.summary = m->content;
+        // O resumo vai num quadro da linha: sem conteúdo novo, os autores.
+        e.summary = !m->content.empty() ? m->content : m->authors.empty() ? "" : "por " + m->authors;
         e.toggleLabel = enabled ? "Desativar" : "Ativar";
         std::string d = m->name + (e.version.empty() ? "" : "  " + e.version);
         if (!m->authors.empty()) d += "\npor " + m->authors;
