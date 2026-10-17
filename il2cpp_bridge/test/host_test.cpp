@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -964,7 +965,16 @@ int TestSettings(void* lib) {
     auto entries = reinterpret_cast<size_t (*)()>(sym("mock_settings_entries"));
     auto setScreen = reinterpret_cast<void (*)(int32_t, int32_t)>(sym("mock_set_screen"));
     auto sounds = reinterpret_cast<int (*)(int*)>(sym("mock_sounds_played"));
-    CHECK(open && frameFn && state && tab && gameTab && setBacking && entries && setScreen && sounds);
+    auto item = reinterpret_cast<bool (*)(int64_t, int32_t*)>(sym("mock_hud_item"));
+    auto itemSize = reinterpret_cast<void (*)(int32_t, int32_t, int32_t)>(sym("mock_set_item_texture_size"));
+    CHECK(open && frameFn && state && tab && gameTab && setBacking && entries && setScreen && sounds && item && itemSize);
+    itemSize(509, 20, 20);
+    // O item no meio da região (o jogo põe o centro a ItemOffset do canto).
+    auto centred = [&](const int32_t* q) {
+        int32_t it[4];
+        return item(-1, it) && std::abs(2 * it[0] + it[2] - (2 * q[0] + q[2])) <= 2 &&
+               std::abs(2 * it[1] + it[3] - (2 * q[1] + q[3])) <= 2;
+    };
     setScreen(1600, 1200);
     setBacking(400, 80, 800, 100);  // faixa larga: cabe uma aba depois da última
     char buf[4096];
@@ -992,7 +1002,8 @@ int TestSettings(void* lib) {
     f = frame(-1, -1, -1, -1, 0, false, false);
     CHECK(tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour));
     std::printf("    aba Mods em (%d, %d) %dx%d\n", rect[0], rect[1], rect[2], rect[3]);
-    CHECK(rect[0] == 1120 && rect[1] == 100 && rect[2] == 60 && rect[3] == 60);  // depois da última, no mesmo passo
+    CHECK(rect[0] == 1120 && rect[1] == 100 && rect[2] == 75 && rect[3] == 60);  // depois da última, no mesmo passo
+    CHECK(centred(rect));
     CHECK(!pressed && drawItem && !drawIcon && texture != nullptr);  // o ícone é a textura do item 509
     CHECK(colour == (0xFFFFFFFFull | (1ull << 32)));
     CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 4 && tabsPressed == 1 && errors == 0);
@@ -1046,22 +1057,34 @@ int TestSettings(void* lib) {
     CHECK(state(&closed, &resets, &openedUI, &tabsPressed, &errors) == 4 && openedUI == 63 && resets == 1);
     CHECK(g_settingsSrc.clicks == 2 && g_settingsSrc.resets == 1 && g_settingsSrc.steps == 1);
 
-    // Faixa justa: não cabe antes nem depois; as 9 abas reespaçadas na faixa, de 72,5 em 72,5 px.
-    setBacking(470, 80, 640, 100);
+    // Faixa justa: não cabe antes nem depois; as 9 abas reespaçadas na faixa, de 80,6 em 80,6 px.
+    int32_t first[4], last[4];
+    setBacking(450, 80, 720, 100);
     setScreen(1600, 1202);  // outra tela: a aba é rearrumada
     frame(-1, -1, -1, -1, 0, false, false);
     CHECK(tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour));
-    int32_t first[4], last[4];
     gameTab(0, first);
     gameTab(7, last);
     std::printf("    reespaçadas: 1ª em %d, 8ª em %d, Mods em %d\n", first[0], last[0], rect[0]);
-    CHECK(first[0] == 470 && last[0] == 977 && rect[0] == 1050 && rect[0] + rect[2] <= 1110);
-    // De volta à tela larga: as abas do jogo nas posições originais e a Mods depois da última.
+    CHECK(first[0] == 450 && last[0] == 1014 && rect[0] == 1095 && rect[2] == 75 && centred(rect));
+    // Mais justa: nem reespaçadas cabem; as 9 ficam com 67 px (de 75), 5 px entre elas, e o
+    // ícone continua no meio de cada uma.
+    setBacking(470, 80, 640, 100);
+    setScreen(1600, 1204);
+    frame(-1, -1, -1, -1, 0, false, false);
+    CHECK(tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour));
+    gameTab(0, first);
+    gameTab(7, last);
+    std::printf("    estreitas: 1ª em %d (%d), 8ª em %d, Mods em %d (%d)\n", first[0], first[2], last[0], rect[0], rect[2]);
+    CHECK(first[0] == 471 && first[2] == 67 && last[0] == 975 && last[2] == 67);
+    CHECK(rect[0] == 1047 && rect[2] == 67 && rect[3] == 60 && rect[0] + rect[2] <= 1115 && centred(rect));
+    // De volta à tela larga: as abas do jogo como eram e a Mods depois da última.
     setBacking(400, 80, 800, 100);
     setScreen(1600, 1200);
     frame(-1, -1, -1, -1, 0, false, false);
     gameTab(0, first);
-    CHECK(tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour) && first[0] == 480 && rect[0] == 1120);
+    CHECK(tab(rect, &pressed, &drawItem, &drawIcon, &texture, &colour) && first[0] == 480 && first[2] == 75);
+    CHECK(rect[0] == 1120 && rect[2] == 75 && centred(rect));
     state(&closed, &resets, &openedUI, &tabsPressed, &errors);
     CHECK(errors == 0);
     TLMod_SetSettingsTab(nullptr);
@@ -1098,8 +1121,19 @@ int TestHud(void* lib) {
     auto draw = reinterpret_cast<bool (*)(size_t, int32_t*, bool*, uint64_t*, uint32_t*, void**)>(sym("mock_hud_draw"));
     auto setScreen = reinterpret_cast<void (*)(int32_t, int32_t)>(sym("mock_set_screen"));
     auto sounds = reinterpret_cast<int (*)(int*)>(sym("mock_sounds_played"));
-    CHECK(frame && draw && setScreen && sounds);
+    auto item = reinterpret_cast<bool (*)(int64_t, int32_t*)>(sym("mock_hud_item"));
+    auto itemSize = reinterpret_cast<void (*)(int32_t, int32_t, int32_t)>(sym("mock_set_item_texture_size"));
+    CHECK(frame && draw && setScreen && sounds && item && itemSize);
     setScreen(1600, 1200);
+    itemSize(149, 26, 30);  // Livro
+    itemSize(43, 22, 24);   // Olho de Aparência Suspeita
+    itemSize(3611, 40, 40); // maior que o espaço do ícone
+    // O item no meio do botão (com o arredondamento do jogo: 1 px).
+    auto centred = [&](size_t i, const int32_t* q, int32_t* it) {
+        return item(static_cast<int64_t>(i), it) && std::abs(2 * it[0] + it[2] - (2 * q[0] + q[2])) <= 2 &&
+               std::abs(2 * it[1] + it[3] - (2 * q[1] + q[3])) <= 2;
+    };
+    int32_t it[4];
     CHECK(TLMod_HudAvailable());
     CHECK(frame(false, -1, -1, false) == 0);  // sem fonte, nada
 
@@ -1119,6 +1153,11 @@ int TestHud(void* lib) {
     CHECK(colour == (0x7F7F7F7Full | (1ull << 32)) && layoutColour == 0x7F7F7F7Fu);  // opacidade 50%
     CHECK(draw(1, rect, &pressed, &colour, &layoutColour, &texture) && rect[0] == 34 && rect[1] == 330);
     CHECK(draw(2, rect, &pressed, &colour, &layoutColour, &texture) && rect[0] == 770 && rect[1] == 570);
+    // Ícones no meio, no tamanho natural até 32/52 do lado (60 aqui: 36 px); o maior encolhe.
+    for (size_t i = 0; i < 3; ++i) CHECK(draw(i, rect, &pressed, &colour, &layoutColour, &texture) && centred(i, rect, it));
+    CHECK(item(0, it) && it[2] == 26 && it[3] == 30);
+    CHECK(item(1, it) && it[2] == 22 && it[3] == 24);
+    CHECK(item(2, it) && it[2] == 36 && it[3] == 36);
 
     // Toque no "M": som do jogo e o id de volta; a tela aberta desenha o botão apertado.
     int last = 0;
@@ -1143,6 +1182,10 @@ int TestHud(void* lib) {
     CHECK(draw(0, rect, &pressed, &colour, &layoutColour, &texture) && rect[2] == 90 && rect[0] == 19 && rect[1] == 243);
     CHECK(layoutColour == 0xFFFFFFFFu && colour == (0xFFFFFFFFull | (1ull << 32)));
     CHECK(draw(1, rect, &pressed, &colour, &layoutColour, &texture) && rect[1] == 243 + 108);
+    // A 150%, o ícone cresce junto (até 1,5x o natural) e continua no meio.
+    for (size_t i = 0; i < 3; ++i) CHECK(draw(i, rect, &pressed, &colour, &layoutColour, &texture) && centred(i, rect, it));
+    CHECK(item(0, it) && it[2] == 39 && it[3] == 45);
+    CHECK(item(2, it) && it[2] == 55 && it[3] == 55);
 
     // Inventário aberto: nenhum (o toque valeria para os dois). Menu: só o "M". Sem botões: nada.
     CHECK(frame(false, 64, 288, true) == 0 && g_hudSrc.taps.size() == 2);

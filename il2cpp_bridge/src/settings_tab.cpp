@@ -57,6 +57,7 @@ constexpr int32_t kInputClicked = 0;  // GUITransactionButton.InputState.Clicked
 constexpr int32_t kTabSound = 12;     // o som do toque nas abas
 // Color? com valor: branco (Color: 4 bytes) e hasValue no 5º byte.
 constexpr uint64_t kWhiteItem = 0xFFFFFFFFull | (1ull << 32);
+constexpr float kMinNarrow = 0.8f;  // a aba estreitada não fica menor que 80% do tamanho do jogo
 
 struct Resolved {
     bool ready = false;
@@ -72,6 +73,7 @@ struct Resolved {
     size_t drawIcon = tbl::DrawIcon, drawItem = tbl::DrawItem, iconOffset = tbl::IconOffset;
     size_t disableItemResize = tbl::DisableItemResize, forceItemScale = tbl::ForceItemScale;
     size_t itemOffset = tbl::ItemOffset, itemColour = tbl::ItemColour;
+    size_t overloadSize = tbl::overloadSize, overloadedSize = tbl::overloadedSize;
     size_t disabledItemColour = tbl::DisabledItemColour, pressedItemColour = tbl::PressedItemColour;
     size_t layoutEnd = tbl::PressedBorderColour + 4;  // fim dos campos de TransactionButton_Layout
     size_t anchorControl = off::button_layout_off::AnchorControl;
@@ -163,11 +165,13 @@ uint32_t g_tabLayout = 0;
 int32_t g_arrangedW = -1, g_arrangedH = -1;
 bool g_tabBlocked = false;
 bool g_loggedOpen = false;
-// Posições originais das abas do jogo (a arrumação pode reespaçá-las).
+// Posições e tamanhos originais das abas do jogo (a arrumação pode reespaçá-las e
+// estreitá-las; cada arrumação parte destes valores).
 struct TabPlace {
     Il2CppObject* layout;
     const char* name;
     float x, y;
+    TLModXnaVector2 size, icon, item;  // overloadedSize, IconOffset, ItemOffset
 };
 std::vector<TabPlace> g_tabPlaces;
 bool g_tabsSaved = false;
@@ -325,6 +329,8 @@ void Place(Il2CppObject* l, float x, float y) {
     FieldAt<float>(l, r.location) = x;
     FieldAt<float>(l, r.location + 4) = y;
 }
+TLModXnaVector2& Vec(Il2CppObject* l, size_t offset) { return FieldAt<TLModXnaVector2>(l, offset); }
+float& Axis(TLModXnaVector2& v, bool horizontal) { return horizontal ? v.x : v.y; }
 bool SameAnchor(Il2CppObject* a, Il2CppObject* b) {
     return FieldAt<int32_t>(a, r.anchorControl) == FieldAt<int32_t>(b, r.anchorControl) &&
            FieldAt<int32_t>(a, r.anchor) == FieldAt<int32_t>(b, r.anchor);
@@ -372,6 +378,7 @@ Il2CppObject* CloneLayout(Il2CppObject* source) {
 //   1. depois da última (à direita, ou embaixo se as abas forem uma coluna);
 //   2. antes da primeira;
 //   3. as 9 reespaçadas por igual na faixa, se couberem sem se sobrepor;
+//   3b. senão, as 9 mais estreitas (até kMinNarrow do tamanho), lado a lado na faixa;
 //   4. depois da última mesmo assim, se ficar dentro da tela.
 // Refeito quando o tamanho da tela muda; o log registra a decisão.
 __attribute__((noinline)) void Arrange(Il2CppObject* cats, const TLModXnaRectangle& screen) {
@@ -381,9 +388,16 @@ __attribute__((noinline)) void Arrange(Il2CppObject* cats, const TLModXnaRectang
     if (!g_tabsSaved) {
         g_tabsSaved = true;
         for (const GameTab& t : g_gameTabs)
-            if (Il2CppObject* l = FieldAt<Il2CppObject*>(cats, t.offset)) g_tabPlaces.push_back({l, t.name, LocX(l), LocY(l)});
+            if (Il2CppObject* l = FieldAt<Il2CppObject*>(cats, t.offset))
+                g_tabPlaces.push_back({l, t.name, LocX(l), LocY(l), Vec(l, r.overloadedSize), Vec(l, r.iconOffset),
+                                       Vec(l, r.itemOffset)});
     }
-    for (const TabPlace& p : g_tabPlaces) Place(p.layout, p.x, p.y);
+    for (const TabPlace& p : g_tabPlaces) {
+        Place(p.layout, p.x, p.y);
+        Vec(p.layout, r.overloadedSize) = p.size;
+        Vec(p.layout, r.iconOffset) = p.icon;
+        Vec(p.layout, r.itemOffset) = p.item;
+    }
     if (g_tabPlaces.size() < 2) {
         LOGW("Configurações: só %zu abas do jogo encontradas; sem aba Mods", g_tabPlaces.size());
         return;
@@ -460,6 +474,42 @@ __attribute__((noinline)) void Arrange(Il2CppObject* cats, const TLModXnaRectang
         }
         g_tabBlocked = false;
         LOGI("Configurações: as abas não cabiam com mais uma; 9 abas reespaçadas na faixa: %s",
+             Describe("Mods", clone).c_str());
+        return;
+    }
+    // 3b. As 9 mais estreitas, lado a lado na faixa (como as do jogo, que se encostam).
+    // O ícone fica a IconOffset do canto da aba: ele anda metade do que a aba encolheu.
+    bool overloaded = sameAnchor && k > 0.0f && FieldAt<bool>(clone, r.overloadSize);
+    int32_t minStep = 0;
+    for (size_t i = 0; i < tabs.size(); ++i) {
+        overloaded = overloaded && FieldAt<bool>(tabs[i].place->layout, r.overloadSize);
+        if (i > 0) {
+            const int32_t step = along(tabs[i].rect) - along(tabs[i - 1].rect);
+            minStep = i == 1 ? step : std::min(minStep, step);
+        }
+    }
+    const int32_t gap = std::clamp(minStep - static_cast<int32_t>(size), 0, static_cast<int32_t>(size) / 10);
+    const int32_t narrow = static_cast<int32_t>((span - static_cast<float>(gap * (n - 1))) / static_cast<float>(n));
+    if (overloaded && narrow >= static_cast<int32_t>(kMinNarrow * size)) {
+        const float total = static_cast<float>(narrow * n + gap * (n - 1));
+        const float start = static_cast<float>(horizontal ? bounds.x : bounds.y) + 0.5f * (span - total);
+        for (int i = 0; i < n; ++i) {
+            Il2CppObject* l = i + 1 < n ? tabs[static_cast<size_t>(i)].place->layout : clone;
+            const TLModXnaRectangle q = Region(l);
+            const float now = static_cast<float>(horizontal ? q.width : q.height);
+            if (now <= 0.0f) continue;
+            // + 1/100: o jogo trunca o tamanho (vezes Scale) para int.
+            float& length = Axis(Vec(l, r.overloadedSize), horizontal);
+            length = length * static_cast<float>(narrow) / now + 0.01f;
+            const float shift = 0.5f * (now - static_cast<float>(narrow));
+            Axis(Vec(l, r.iconOffset), horizontal) -= shift;
+            Axis(Vec(l, r.itemOffset), horizontal) -= shift;
+            const float delta = (start + static_cast<float>((narrow + gap) * i) - static_cast<float>(along(first.rect))) / k;
+            if (horizontal) Place(l, first.place->x + delta, last.place->y);
+            else Place(l, last.place->x, first.place->y + delta);
+        }
+        g_tabBlocked = false;
+        LOGI("Configurações: as abas não cabiam com mais uma; 9 abas de %d px na faixa: %s", narrow,
              Describe("Mods", clone).c_str());
         return;
     }
@@ -571,6 +621,8 @@ void InstallSettingsHooks() {
         r.disableItemResize = FieldOffset(tbLayout, "DisableItemResize", r.disableItemResize);
         r.forceItemScale = FieldOffset(tbLayout, "ForceItemScale", r.forceItemScale);
         r.itemOffset = FieldOffset(tbLayout, "ItemOffset", r.itemOffset);
+        r.overloadSize = FieldOffset(tbLayout, "overloadSize", r.overloadSize);
+        r.overloadedSize = FieldOffset(tbLayout, "overloadedSize", r.overloadedSize);
         r.itemColour = FieldOffset(tbLayout, "ItemColour", r.itemColour);
         r.disabledItemColour = FieldOffset(tbLayout, "DisabledItemColour", r.disabledItemColour);
         r.pressedItemColour = FieldOffset(tbLayout, "PressedItemColour", r.pressedItemColour);

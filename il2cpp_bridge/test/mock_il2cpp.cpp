@@ -2012,6 +2012,7 @@ struct HudDraw {
     MockRect rect;
     bool pressed;
     uint64_t colour;
+    MockRect item;  // onde o jogo desenhou o item
 };
 std::vector<HudDraw> g_textureDraws;
 bool g_playerInventory = false;
@@ -2038,6 +2039,7 @@ struct DrawnTab {
     Il2CppObject* texture = nullptr;
     MockRect rect{};
     uint64_t colour = 0;
+    MockRect item{};
 };
 DrawnTab g_drawnTab;
 int32_t g_tabsPressed = 0;  // abas do jogo desenhadas apertadas no último frame
@@ -2116,8 +2118,19 @@ MethodInfo g_mSliderString{reinterpret_cast<Il2CppMethodPointer>(&MockSliderStri
 MethodInfo g_mSliderCtor{nullptr, ".ctor", 1};
 MethodInfo g_mListAdd{nullptr, "Add", 1};
 
+// O item como o jogo o põe (GUITransactionButton.Draw, 0x1224B5C): GetLayoutRect com a mesma
+// âncora e Location (o canto não depende do tamanho), centro a ItemOffset desse canto, na
+// ForcedItemScale se ForceItemScale (o encaixe no fundo da aba fica de fora: escala 1).
+MockRect MockItemRect(Il2CppObject* layout, Il2CppObject* texture, const MockRect& region) {
+    if (!texture || !At<bool>(layout, 0xA2)) return {};
+    const float s = At<bool>(layout, 0x105) ? At<float>(layout, 0x108) : 1.0f;
+    const int32_t w = static_cast<int32_t>(static_cast<float>(At<int32_t>(texture, kXnaWidth)) * s);
+    const int32_t h = static_cast<int32_t>(static_cast<float>(At<int32_t>(texture, kXnaHeight)) * s);
+    return {region.x - w / 2 + static_cast<int32_t>(At<float>(layout, 0x10C)),
+            region.y - h / 2 + static_cast<int32_t>(At<float>(layout, 0x110)), w, h};
+}
 // GUITransactionButton.Draw(layout, Texture2D, label, disabled, ref scale, Color?, pressed, ...):
-// só a aba Mods usa. Clicked se o toque cair na região do botão.
+// a aba Mods e os botões de mods. Clicked se o toque cair na região do botão.
 int32_t MockTextureDraw(Il2CppObject* layout, Il2CppObject* texture, Il2CppObject* label, bool disabled, float* scale,
                         uint64_t colour, bool pressed, bool, bool, bool, const MethodInfo*) {
     if (!layout || !label || !scale || disabled) ++g_settingsErrors;
@@ -2129,7 +2142,8 @@ int32_t MockTextureDraw(Il2CppObject* layout, Il2CppObject* texture, Il2CppObjec
     g_drawnTab.texture = texture;
     g_drawnTab.rect = MockButtonRegion(layout, nullptr);
     g_drawnTab.colour = colour;
-    g_textureDraws.push_back({layout, texture, g_drawnTab.rect, pressed, colour});
+    g_drawnTab.item = MockItemRect(layout, texture, g_drawnTab.rect);
+    g_textureDraws.push_back({layout, texture, g_drawnTab.rect, pressed, colour, g_drawnTab.item});
     return Tapped(g_drawnTab.rect) && g_mouseLeftRelease ? 0 : 3;
 }
 void MockDrawItemHandlerDraw() { std::abort(); }  // o overload errado de 10 parâmetros
@@ -2201,9 +2215,11 @@ void InitSettings() {
         At<float>(tab, 0x18) = -160.0f + 40.0f * static_cast<float>(i);
         At<float>(tab, 0x1C) = -250.0f;
         At<bool>(tab, 0xA1) = true;    // DrawIcon
-        At<float>(tab, 0xBC) = 3.0f;   // IconOffset
-        At<bool>(tab, 0x12C) = true;   // overloadSize: 60x60
-        At<float>(tab, 0x130) = At<float>(tab, 0x134) = 60.0f;
+        At<float>(tab, 0xBC) = 37.5f;  // IconOffset: o centro do ícone, a partir do canto
+        At<float>(tab, 0xC0) = 30.0f;
+        At<bool>(tab, 0x12C) = true;   // overloadSize: 75x60 (as do jogo também não são quadradas)
+        At<float>(tab, 0x130) = 75.0f;
+        At<float>(tab, 0x134) = 60.0f;
         At<uint32_t>(tab, 0x1C8) = 0xDEADBEEFu;  // o último campo: a cópia tem de levar
         At<Il2CppObject*>(cats, kTabOffsets[i]) = tab;
         g_settingsTabs[i] = tab;
@@ -2589,6 +2605,19 @@ __attribute__((visibility("default"))) bool mock_hud_draw(size_t i, int32_t* rec
     *layoutColour = At<uint32_t>(d.layout, 0x34);
     *texture = d.texture;
     return true;
+}
+// Onde o item do botão i (ou da aba Mods, i = -1) foi desenhado.
+__attribute__((visibility("default"))) bool mock_hud_item(int64_t i, int32_t* rect) {
+    if (i >= static_cast<int64_t>(g_textureDraws.size())) return false;
+    const MockRect& q = i < 0 ? g_drawnTab.item : g_textureDraws[static_cast<size_t>(i)].item;
+    rect[0] = q.x, rect[1] = q.y, rect[2] = q.w, rect[3] = q.h;
+    return q.w > 0;
+}
+// Tamanho da textura de um item do jogo (TextureAssets.Item[id].Value).
+__attribute__((visibility("default"))) void mock_set_item_texture_size(int32_t id, int32_t w, int32_t h) {
+    Il2CppObject* xna = At<Il2CppObject*>(Elem(g_itemAssets, static_cast<uint32_t>(id)), kAssetValue);
+    At<int32_t>(xna, kXnaWidth) = w;
+    At<int32_t>(xna, kXnaHeight) = h;
 }
 // Location do botão i do MainMenu_Layout (0 = Singleplayer ... 6 = PurchaseFullGame/Mods).
 __attribute__((visibility("default"))) void mock_menu_button_location(int i, float* x, float* y) {

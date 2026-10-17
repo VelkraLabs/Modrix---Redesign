@@ -81,7 +81,9 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
     (`GUISettingsOverlay.DrawCategories`, `0xA68C68`) são 8 `GUITransactionButton.Draw` fixos. O hook pós
     desenha uma 9ª: uma cópia do layout da última aba, com a textura de um item (Chave Inglesa, 509)
     pelo overload `Draw(layout, Texture2D, ...)` (`0x1223F70`, `DrawItem`). Ela fica depois da última, no
-    mesmo passo; se não couber na faixa, antes da primeira; senão as 9 são reespaçadas na faixa. O log
+    mesmo passo; se não couber na faixa, antes da primeira; senão as 9 são reespaçadas na faixa; e, se nem
+    assim couberem (o caso do celular: a faixa tem exatamente as 8), as 9 ficam mais estreitas, lado a lado
+    (`overloadedSize`, até 80% do tamanho), com o `IconOffset` acompanhando para o ícone ficar no meio. O log
     registra a geometria. O toque chama `SetCategory(20)`, uma categoria fora do enum (0..19), que nenhuma
     aba do jogo marca e nenhuma entrada do jogo tem. O hook pós em `SetCategory` (`0xA67B94`) põe na lista
     as nossas entradas: `GUIOpenUIButtonSetting` (botão) e `GUISliderSetting` (barra), criadas com
@@ -96,7 +98,10 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
     cópia do layout de uma aba das Configurações, pelo `GUITransactionButton.Draw(layout, Texture2D, ...)`,
     com o ícone de um item. O tamanho vem de `overloadSize`/`overloadedSize`. A posição é o centro em
     frações da tela, convertido para `Location` (âncora Screen/TopLeft) medindo a região em duas posições.
-    A opacidade multiplica as cores do layout (alfa pré-multiplicado). A camada "Virtual Controllers" é
+    A opacidade multiplica as cores do layout (alfa pré-multiplicado). O jogo põe o centro do item a
+    `ItemOffset` do canto da região (`GetLayoutRect` não desloca o canto pelo tamanho) e o encolhe para caber
+    no fundo da aba menos o `ItemOffset`: a ponte dá o meio da região como `ItemOffset` e a escala
+    (`ForceItemScale`/`ForcedItemScale`): o tamanho natural, até 32/52 do lado, vezes o tamanho escolhido. A camada "Virtual Controllers" é
     desenhada antes de Opções, Fancy UI, Inventário e Hotbar (`Main.SetupDrawInterfaceLayers`), e o
     `DrawControls` só roda sem tela do jogo aberta (`GUIVirtualInputController.InGameUIOpen`). Assim, os
     menus do jogo ficam por cima e os botões somem com eles. Com o inventário aberto

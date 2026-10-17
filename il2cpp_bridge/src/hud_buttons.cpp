@@ -58,6 +58,7 @@ constexpr float kPlacementMax = 10000.0f;
 // Primeiro botão sem posição salva: centro em 4% da largura e 24% da altura da tela (onde o
 // "M" do overlay ficava); os outros em coluna abaixo dele, com 1/5 do botão entre eles.
 constexpr float kDefaultX = 0.04f, kDefaultY = 0.24f, kGap = 0.2f;
+constexpr float kIconFill = 32.0f / 52.0f;  // o item no slot do inventário: 32 de 52
 
 // As cores de TransactionButton_Layout (e das bases) que a opacidade multiplica.
 const char* const kColourFields[] = {
@@ -80,7 +81,7 @@ struct Resolved {
     size_t location = off::button_layout_off::Location;
     size_t drawIcon = tbl::DrawIcon, drawItem = tbl::DrawItem, iconOffset = tbl::IconOffset;
     size_t disableItemResize = tbl::DisableItemResize, forceItemScale = tbl::ForceItemScale;
-    size_t itemOffset = tbl::ItemOffset;
+    size_t itemOffset = tbl::ItemOffset, forcedItemScale = tbl::ForcedItemScale;
     size_t overloadSize = tbl::overloadSize, overloadedSize = tbl::overloadedSize;
     size_t layoutEnd = tbl::PressedBorderColour + 4;
     size_t colours[kColourCount] = {};
@@ -115,6 +116,7 @@ struct Calibration {
     float kx = 0, ky = 0;      // pixels por unidade de Location
     float cx0 = 0, cy0 = 0;    // centro da região com Location (0, 0)
     float base = 0;            // lado do botão do jogo a 100%, em pixels da interface
+    TLModXnaVector2 middle{};  // meio da região, a partir do canto (o ItemOffset que centraliza o ícone)
     bool ok = false;
 };
 Calibration g_cal;
@@ -180,9 +182,11 @@ Il2CppObject* CloneTemplate(Il2CppObject* source) {
     FieldAt<int32_t>(copy, r.anchor) = kAnchorTopLeft;
     FieldAt<bool>(copy, r.drawIcon) = false;
     FieldAt<bool>(copy, r.drawItem) = false;  // ligado no desenho, quando a textura existe
-    FieldAt<bool>(copy, r.forceItemScale) = false;
-    FieldAt<bool>(copy, r.disableItemResize) = false;
-    FieldAt<TLModXnaVector2>(copy, r.itemOffset) = FieldAt<TLModXnaVector2>(source, r.iconOffset);
+    // O jogo põe o centro do item a ItemOffset do canto da região, e o encolhe para caber no
+    // fundo da aba menos o ItemOffset. Com o botão quadrado (e não a aba 46x38), a ponte dá o
+    // meio da região e a escala do item (Calibrate e Draw).
+    FieldAt<bool>(copy, r.forceItemScale) = true;
+    FieldAt<bool>(copy, r.disableItemResize) = true;
     return copy;
 }
 
@@ -209,8 +213,9 @@ __attribute__((noinline)) bool Calibrate(Il2CppObject* tmpl, const TLModXnaRecta
     const TLModXnaRectangle b = Region(probe);
     g_cal.kx = static_cast<float>(b.x - a.x) / kProbe;
     g_cal.ky = static_cast<float>(b.y - a.y) / kProbe;
-    g_cal.cx0 = static_cast<float>(a.x) + 0.5f * static_cast<float>(a.width);
-    g_cal.cy0 = static_cast<float>(a.y) + 0.5f * static_cast<float>(a.height);
+    g_cal.middle = {0.5f * static_cast<float>(a.width), 0.5f * static_cast<float>(a.height)};
+    g_cal.cx0 = static_cast<float>(a.x) + g_cal.middle.x;
+    g_cal.cy0 = static_cast<float>(a.y) + g_cal.middle.y;
     g_cal.screenW = screen.width;
     g_cal.screenH = screen.height;
     g_cal.ok = g_cal.kx > 0 && g_cal.ky > 0 && g_cal.base > 0;
@@ -308,6 +313,12 @@ __attribute__((noinline)) void Draw(bool menu) {
         int32_t w = 0, h = 0;
         Il2CppObject* texture = b.iconItem > 0 ? drawx::ItemIconTexture(b.iconItem, &w, &h) : nullptr;
         FieldAt<bool>(l, r.drawItem) = texture != nullptr;
+        // O item no meio do botão, no tamanho do inventário: até kIconFill do lado, sem
+        // passar do tamanho natural vezes o tamanho escolhido (arte em pixel não cresce à toa).
+        FieldAt<TLModXnaVector2>(l, r.itemOffset) = g_cal.middle;
+        const float longest = static_cast<float>(std::max(w, h));
+        FieldAt<float>(l, r.forcedItemScale) =
+            longest > 0 ? std::min(kIconFill * side / longest, side / g_cal.base) : 1.0f;
         const int32_t state = Ptr<TextureDrawFn>(r.textureDraw)(l, texture, Target(g_emptyHandle), false, &btn.scale,
                                                                 colour, b.active, false, false, false, r.textureDraw);
         if (!g_loggedPlace) {
@@ -358,6 +369,7 @@ void ResolveHud() {
         r.iconOffset = FieldOffset(tb, "IconOffset", r.iconOffset);
         r.disableItemResize = FieldOffset(tb, "DisableItemResize", r.disableItemResize);
         r.forceItemScale = FieldOffset(tb, "ForceItemScale", r.forceItemScale);
+        r.forcedItemScale = FieldOffset(tb, "ForcedItemScale", r.forcedItemScale);
         r.itemOffset = FieldOffset(tb, "ItemOffset", r.itemOffset);
         r.overloadSize = FieldOffset(tb, "overloadSize", r.overloadSize);
         r.overloadedSize = FieldOffset(tb, "overloadedSize", r.overloadedSize);
