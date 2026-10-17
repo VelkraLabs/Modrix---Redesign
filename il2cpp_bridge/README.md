@@ -9,7 +9,11 @@ Alvo: Unity 2021.3.56f2, arm64-v8a. Offsets e RVAs em `include/terraria_offsets.
 
 ## O que faz
 
-1. Espera a `libil2cpp.so` estar mapeada e o `il2cpp_init` ter rodado (`il2cpp_get_corlib() != NULL`).
+1. Espera a `libil2cpp.so` estar mapeada e o `il2cpp_init` ter terminado. O `il2cpp_get_corlib()` fica
+   não nulo logo no começo do `Runtime::Init`, que ainda monta o domínio e anexa a thread principal;
+   usar a API nessa hora já derrubou o jogo na abertura (2 vezes em ~20). Nesta build a ponte espera
+   ainda o byte que o `Runtime::Init` grava perto do fim (`terraria::il2cpp_build`, conferido no
+   binário); com outra `libil2cpp.so`, espera 1,5 s depois do corlib.
 2. Anexa a thread ao IL2CPP, acha `Assembly-CSharp.dll` e resolve `Terraria.Player` e `Terraria.Main`.
 3. Resolve o offset de `Player.statLife` pela API e o compara com o dump (`0x704`).
 4. Resolve `Player.Hurt` (8 parâmetros), compara `methodPointer` com `base + 0xFA15B8` e instala o
@@ -100,8 +104,9 @@ porque o mock não tem o layout do binário real.
 ## O que falta para rodar no jogo
 
 - **Forma de carregar a `.so` no processo**: `System.loadLibrary` injetado no smali, `wrap.sh`, ou um loader.
-- **Instante da inicialização**: o polling de `il2cpp_get_corlib` é uma heurística. Hookar `il2cpp_init`
-  é mais preciso.
+- **Instante da inicialização**: o fim do `Runtime::Init` é lido por um endereço desta build (veja o
+  item 1). Hookar `il2cpp_init` serviria para qualquer build, mas ele pode já estar rodando quando a
+  ponte começa.
 
 ## Notas sobre o ShadowHook
 

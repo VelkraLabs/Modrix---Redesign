@@ -227,6 +227,31 @@ bool TLMod_Init(int timeoutMs) {
         LOGE("timeout esperando il2cpp_init");
         return false;
     }
+    // 2b) O corlib aparece no começo do Runtime::Init, que segue montando o domínio e as
+    //     threads na thread do jogo; anexar esta thread ou procurar classes no meio disso
+    //     já derrubou o jogo na abertura. Nesta build, espera a marca do fim do Init
+    //     (terraria_offsets.h, il2cpp_build); em outra, um tempo fixo.
+    namespace ib = terraria::il2cpp_build;
+    const uintptr_t corlibRva = reinterpret_cast<uintptr_t>(api.il2cpp_get_corlib) - g_base;
+    if (corlibRva == ib::kGetCorlibExport) {
+        const volatile uint8_t* done = reinterpret_cast<const volatile uint8_t*>(g_base + ib::kInitDoneFlag);
+        int waited = 0;
+        while (!*done) {
+            if (remaining <= 0) {
+                LOGE("timeout esperando o fim do il2cpp_init");
+                return false;
+            }
+            SleepMs(10);
+            remaining -= 10;
+            waited += 10;
+        }
+        SleepMs(ib::kInitTailMs);
+        LOGI("il2cpp_init concluído (%d ms depois do corlib)", waited);
+    } else {
+        LOGW("libil2cpp de outra build (il2cpp_get_corlib em +0x%lx): esperando %d ms pelo fim do il2cpp_init",
+             static_cast<unsigned long>(corlibRva), ib::kUnknownBuildMs);
+        SleepMs(ib::kUnknownBuildMs);
+    }
     g.domain = api.il2cpp_domain_get();
 
     // 3) Esta thread não é do jogo: anexá-la ao IL2CPP antes de usar a API

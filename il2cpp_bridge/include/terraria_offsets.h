@@ -428,6 +428,19 @@ constexpr size_t gameMenu = 0x320;
 //   downedQueenSlime 0xA7  downedDeerclops 0xA8  downedMechBoss1..3 0xCA..0xCC
 // Main.hardMode (static_fields+0x360) liga quando o Wall of Flesh morre.
 
+// libil2cpp.so desta build (não vem do dump: é o código do runtime IL2CPP, conferido no
+// binário). il2cpp_get_corlib fica não nulo logo no começo do Runtime::Init, que ainda
+// preenche il2cpp_defaults, cria o domínio e anexa a thread principal; quem usa a API
+// nessa hora disputa com ele. O byte em kInitDoneFlag é gravado com 1 perto do fim do
+// Runtime::Init (0x62666C, depois do domínio, das threads e do AppContext) e nada mais
+// o escreve. Só vale se il2cpp_get_corlib estiver em kGetCorlibExport (a mesma build).
+namespace il2cpp_build {
+constexpr uintptr_t kGetCorlibExport = 0x6968EC;
+constexpr uintptr_t kInitDoneFlag = 0x2BFE998;  // .bss, bool
+constexpr int kInitTailMs = 200;     // o resto do Runtime::Init depois da marca
+constexpr int kUnknownBuildMs = 1500;  // outra libil2cpp: espera fixa depois do corlib
+}  // namespace il2cpp_build
+
 // --- RVAs de métodos (endereço real = base da libil2cpp.so + RVA) ----------
 namespace rva {
 // double Player.Hurt(PlayerDeathReason damageSource, int Damage, int hitDirection,
