@@ -2,7 +2,8 @@
 
 Terraria Mobile 1.4.4.9 (Unity 2021.3.56f2, IL2CPP, Android arm64), comparado com o TLMod da branch
 `ccr-bbd92bf9-i01buk` (código da ponte e do runtime no commit `f917b04`; os commits seguintes só
-acrescentaram as auditorias e arquivos do jogo: as bibliotecas em `054be54` e o manifest em `4960d19`).
+acrescentaram as auditorias e arquivos do jogo: as bibliotecas em `054be54`, o manifest em `4960d19` e
+arquivos de `assets/bin/Data` em `27af838`).
 
 Auditoria só de leitura. As fontes são:
 
@@ -11,6 +12,8 @@ Auditoria só de leitura. As fontes são:
   `libmain.so`, e é do Unity 2021.3.56f2 (`667925324b48`), a mesma versão do jogo;
 - o `AndroidManifest.xml` do APK (commit `4960d19`), decodificado do XML binário: pacote
   `com.and.games505.TerrariaPaid`, versão 1.4.4.9.8 (código 301423);
+- o `boot.config` e o `ScriptingAssemblies.json` de `assets/bin/Data` (commit `27af838`). As bibliotecas
+  gerenciadas da lista são as do dump, menos a `Unity.MemoryProfiler.dll`, que a build IL2CPP removeu;
 - o código da ponte (`il2cpp_bridge/`), do runtime, da API e do painel (`modapi/`);
 - o código do ShadowHook 2.0.1, que a ponte compila;
 - as bibliotecas do TLMod compiladas para arm64 (`libtlmod_bridge.so`, `libtlmod_runtime.so` e os mods de
@@ -115,7 +118,8 @@ Afirmações sobre código-fonte trazem arquivo e linha e valem como confirmadas
    - a `libunity.so` trata SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV, SIGPIPE e SIGSTKFLT. Grava um
      relatório da queda e encadeia para o tratador anterior. A opção de boot
      `androidChainedSignalHandlerBehavior` muda isso: com `disabled`, nada é instalado; com `legacy`, o
-     tratador pode pular para fora do sinal com `longjmp` ou parar a thread para sempre.
+     tratador pode pular para fora do sinal com `longjmp` ou parar a thread para sempre. O `boot.config`
+     do jogo não tem a opção: vale o modo padrão.
 
    O TLMod já tem um tratador de SIGSEGV e SIGBUS: o `bytesig` do ShadowHook. Ele é instalado no primeiro
    hook, fica na frente da cadeia e encadeia para o anterior.
@@ -213,7 +217,7 @@ Juntos, de 10 a 16 dias sem o passo 9, que é opcional; com ele, de 11 a 17, mai
 | `init` devolve diferente de 0 | carga | `Failed`, registros do mod desfeitos |
 | sinal (SIGSEGV etc.) num construtor estático ou no `init` | carga (L) | o processo morre; na próxima abertura, o mod carrega de novo |
 | exceção C++ no `init` | carga (L) | sai de `RuntimeMain` sem captura: `std::terminate` e o processo morre (inferido) |
-| sinal num callback | jogo (P ou UI) | o Unity grava o relatório dele e repassa à bionic; o processo morre, e nada registra qual mod estava ativo. No modo `legacy` do Unity, a thread pode ficar parada em vez de morrer (3.3) |
+| sinal num callback | jogo (P ou UI) | o Unity grava o relatório dele e repassa à bionic (3.3); o processo morre, e nada registra qual mod estava ativo |
 | laço infinito num callback | jogo (P) | o jogo congela; nada detecta |
 | laço infinito no `init` | carga (L) | L fica presa; o jogo segue sem o que o `LoadAll` liga no fim (itens, receitas, desenho, frame e saves, `mod_loader.cpp:1240–1272`) e sem painel nem Oficina; pela interface, não há como desligar o mod |
 | o usuário desliga um mod | Oficina | entra em `disabled_mods` (`config_store.cpp:76–82`) e vale na próxima abertura |
@@ -521,8 +525,13 @@ relatório de queda de uma thread. Ela tem dezenas de chamadores, então a insta
 - O Unity também cria uma pilha alternativa de sinal de 256 KiB para cada estado de thread (`mmap` de
   `0x40000` e `sigaltstack`, `0x2B3FD8`–`0x2B4004`).
 
-Confirmado no binário. O modo que o Terraria usa está no `boot.config` do APK, que não está no material; o
-[E10](#e10-a-cadeia-de-sinais) diz como conferir.
+Confirmado no binário.
+
+**O modo do Terraria.** O `boot.config` do jogo (commit `27af838`) tem quatro opções:
+`wait-for-native-debugger`, `hdr-display-enabled`, `androidStartInFullscreen` e
+`androidRenderOutsideSafeArea`. Não tem `androidChainedSignalHandlerBehavior`, então o Terraria usa o modo
+0: grava o relatório e encaminha. O modo 1 acima não vale para esta versão; uma versão nova do jogo pede
+conferir o `boot.config` de novo. Confirmado no arquivo.
 
 ### 3.4 A cadeia de tratadores num app Android
 
@@ -534,8 +543,9 @@ Confirmado no binário. O modo que o Terraria usa está no `boot.config` do APK,
 | Unity (`libunity.so`) | SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV, SIGPIPE, SIGSTKFLT | `sigaction` comum, que a `libsigchain` intercepta; grava o relatório e chama o anterior que guardou (3.3) | confirmado no binário; a passagem pela `libsigchain` é inferida |
 | o resto do TLMod | nenhum | não há `sigaction` nem `signal` no código da ponte, do runtime ou do painel | confirmado no código |
 
-O manifest não declara relator de quedas de terceiros, como o Firebase Crashlytics. As bibliotecas de
-licença e de proteção ficaram fora do escopo: se elas instalarem tratadores, o E10 mostra.
+Nem o manifest nem a lista de bibliotecas gerenciadas (`ScriptingAssemblies.json`) trazem relator de
+quedas de terceiros, como o Firebase Crashlytics ou o Sentry. As bibliotecas de licença e de proteção
+ficaram fora do escopo: se elas instalarem tratadores, o E10 mostra.
 
 **Como o `bytesig` se encaixa:**
 
@@ -594,9 +604,9 @@ primeiro (3.3). Confirmado no binário; a ordem real, no E10.
 
 - o Unity devolver as ações que guardou quando o contador dele zera (3.3). Se o TLMod instalou depois, o
   tratador do TLMod some; a conferência da condição 5 pega isso;
-- o jogo usar o modo `legacy`: fora da thread que carregou a `libunity.so`, o Unity não encaminha e deixa a
-  thread parada para sempre (3.3). O tratador do TLMod, que vem antes, registra a queda, mas o processo não
-  morre;
+- uma versão futura do jogo ligar o modo `legacy`, que esta não usa (3.3). Fora da thread que carregou a
+  `libunity.so`, o Unity deixaria a thread parada para sempre, e o processo não morreria. Basta conferir o
+  `boot.config` a cada versão;
 - dois tratadores que encadeiam um para o outro (recursão infinita);
 - mudança de comportamento entre versões do Android.
 
@@ -731,14 +741,10 @@ de mod algum.
 **Na carga não há caixa:** o painel só sobe depois do `LoadAll` (`android_main.cpp:231–258`). O registro no
 diário basta: a abertura seguinte suspende o mod.
 
-**Queda que vira travamento.** O tratador do Unity pode transformar uma queda em travamento (3.3):
-
-- ele usa `malloc` e trava dentro do sinal, e uma queda dentro do `malloc` pode prendê-lo (inferido);
-- no modo `legacy`, uma queda fora da thread que carregou a `libunity.so` deixa a thread dormindo para
-  sempre. Isso vale para P, se P não for essa thread (inferido).
-
-Nos dois casos o processo não morre, e o marcador da thread fica ímpar. O vigia vê um travamento e culpa o
-mod do marcador, que é o que se quer.
+**Queda que vira travamento.** O tratador do Unity usa `malloc` e trava dentro do sinal (3.3). Uma queda
+dentro do `malloc` pode prendê-lo, e então o processo não morre (inferido). O modo `legacy` faria o mesmo
+de propósito, mas esta versão do jogo não o usa. O marcador da thread fica ímpar: o vigia vê um travamento
+e culpa o mod do marcador, que é o que se quer.
 
 **A caixa:**
 
@@ -1011,8 +1017,8 @@ Nenhum mod pode ser suspenso em nenhum destes:
 
 ### E10: a cadeia de sinais
 
-**Antes, sem aparelho:** o APK é um zip. Abrir `assets/bin/Data/boot.config` e procurar
-`androidChainedSignalHandlerBehavior`. Sem a linha, o Unity está no modo padrão (3.3).
+**Já conferido sem aparelho:** o `boot.config` desta versão não tem `androidChainedSignalHandlerBehavior`,
+então o Unity está no modo padrão (3.3).
 
 Build de teste da ponte. Registrar no log, em três momentos (início da thread B, primeiro frame, 60 s
 depois), para SIGSEGV, SIGBUS, SIGABRT, SIGFPE, SIGILL, SIGPIPE, SIGSTKFLT, SIGTRAP, SIGPWR, SIGXCPU,
@@ -1029,8 +1035,7 @@ SIGCONT, SIGINT e SIGWINCH:
 - SIGSEGV e SIGBUS no `bytesig` da `libtlmod_bridge.so` depois do primeiro hook, com o anterior na
   `libsigchain`;
 - na visão da `libsigchain`, SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV e SIGSTKFLT no tratador do Unity
-  (`libunity.so`, deslocamento `0x2B35CC`), a não ser que o `boot.config` diga `disabled`. SIGPIPE também,
-  se não vinha ignorado;
+  (`libunity.so`, deslocamento `0x2B35CC`). SIGPIPE também, se não vinha ignorado;
 - SIGCONT, SIGINT e SIGWINCH sem tratador do IL2CPP.
 
 Depois de uma queda proposital (E1 ou E5), o logcat deve ter a linha `CRASH` "Tombstone written to: …", com
@@ -1084,9 +1089,9 @@ Num APK de teste com o carregador de referência (2.5):
    a troca de chave assinada (6.4) e uma mensagem clara.
 9. **Comportamento da plataforma.** `libsigchain`, `ApplicationExitInfo` e o `mmap` mudam entre versões do
    Android. Mitigação: o diário funciona em qualquer versão; o resto só acrescenta.
-10. **Queda que não termina o processo.** No modo `legacy` do Unity, ou se o tratador dele travar dentro do
-    `malloc`, a queda vira travamento (3.3). Mitigação: o vigia (5.2). Sem mod em chamada, nada é suspenso,
-    mas o log registra a parada.
+10. **Queda que não termina o processo.** Se o tratador do Unity travar dentro do `malloc`, a queda vira
+    travamento (3.3). Mitigação: o vigia (5.2). Sem mod em chamada, nada é suspenso, mas o log registra a
+    parada.
 
 ---
 
@@ -1117,8 +1122,8 @@ Num APK de teste com o carregador de referência (2.5):
 - **O Unity:** a `libunity.so` trata SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV, SIGPIPE e SIGSTKFLT, com
   `SA_SIGINFO | SA_ONSTACK | SA_RESTART`. Grava um relatório e encaminha para o tratador anterior, que
   guardou. A opção `androidChainedSignalHandlerBehavior` desliga tudo (`disabled`) ou muda para `legacy`,
-  que pode usar `longjmp` ou parar a thread para sempre. Confirmado no binário; o modo do jogo está no
-  `boot.config` do APK (E10).
+  que pode usar `longjmp` ou parar a thread para sempre. O `boot.config` do jogo não tem a opção: vale o
+  modo padrão. Confirmado no binário e no arquivo.
 - **O TLMod:** já tem um tratador de SIGSEGV e SIGBUS na frente da cadeia, o `bytesig` do ShadowHook, que
   encadeia para o anterior.
 - **Encadear mais um** não quebra o IL2CPP nem o Unity, com estas condições:
