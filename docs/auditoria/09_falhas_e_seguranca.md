@@ -2,17 +2,20 @@
 
 Terraria Mobile 1.4.4.9 (Unity 2021.3.56f2, IL2CPP, Android arm64), comparado com o TLMod da branch
 `ccr-bbd92bf9-i01buk` (código da ponte e do runtime no commit `f917b04`; os commits seguintes só
-acrescentaram as auditorias e as bibliotecas do jogo, em `054be54`).
+acrescentaram as auditorias e arquivos do jogo: as bibliotecas em `054be54` e o manifest em `4960d19`).
 
 Auditoria só de leitura. As fontes são:
 
 - a desmontagem da `libil2cpp.so` e o dump (`dump.cs`, `script.json`);
 - a desmontagem da `libunity.so`, só nos tratadores de sinal. Ela chegou no commit `054be54`, junto com a
   `libmain.so`, e é do Unity 2021.3.56f2 (`667925324b48`), a mesma versão do jogo;
+- o `AndroidManifest.xml` do APK (commit `4960d19`), decodificado do XML binário: pacote
+  `com.and.games505.TerrariaPaid`, versão 1.4.4.9.8 (código 301423);
 - o código da ponte (`il2cpp_bridge/`), do runtime, da API e do painel (`modapi/`);
 - o código do ShadowHook 2.0.1, que a ponte compila;
 - as bibliotecas do TLMod compiladas para arm64 (`libtlmod_bridge.so`, `libtlmod_runtime.so` e os mods de
-  exemplo), só para conferir tabelas de desenrolamento e dependências;
+  exemplo), só para conferir tabelas de desenrolamento e dependências, e as do pacote de teste (branch
+  `entrega/tlmod-teste`), para as versões da libc que elas exigem;
 - as auditorias 01 a 04.
 
 O relatório do Módulo 8 não está no repositório (`docs/auditoria/` tem de 01 a 04); a relação com ele parte
@@ -21,10 +24,13 @@ da premissa do enunciado, de que scripts podem ser isolados.
 Dump e metadata ficam fora do repositório. Nenhum código foi alterado; este arquivo é o único acréscimo.
 
 Fora do escopo: licença, proteção contra alteração e checagens de integridade do jogo, assinatura e
-empacotamento do APK e anticheat. Isso inclui duas bibliotecas do mesmo commit, que não foram analisadas:
+empacotamento do APK e anticheat. Isso inclui itens que chegaram com os arquivos do jogo e não foram
+analisados:
 
 - a `libstub.so`, que traz cadeias da biblioteca de licença do Google Play e de um protetor de APK;
-- a `libpairipcore.so`.
+- a `libpairipcore.so`;
+- os componentes `com.pairip.*` do manifest: a classe `Application`, uma `Activity` e um provedor de
+  licença.
 
 A seção 6 trata só do pacote de mod.
 
@@ -143,6 +149,11 @@ Afirmações sobre código-fonte trazem arquivo e linha e valem como confirmadas
 
    Limite: um mod nativo pode tudo que o jogo pode. A assinatura prova quem assinou, não que o código é
    seguro. Só scripts (Módulo 8) podem ser isolados.
+9. **Carregador.** O modo seguro só começa quando a ponte roda. Antes disso, quem instala o TLMod põe um
+   `System.loadLibrary` no APK, e uma falha ali fecha o jogo a cada abertura. Há uma falha certa: as `.so`
+   do pacote de teste exigem `__write_chk` e `__fwrite_chk`, da versão `LIBC_N` da libc (Android 7), e o
+   manifest aceita Android 6 (`minSdkVersion` 23). Confirmado no binário. Proposta: um carregador de
+   referência, com `try/catch`, teste de versão e uma chave para abrir sem o TLMod (2.5).
 
 **Ordem de implementação** (detalhe na [seção 11](#11-ações-recomendadas-e-ordem-de-implementação)):
 
@@ -150,7 +161,7 @@ Afirmações sobre código-fonte trazem arquivo e linha e valem como confirmadas
 |---|---|---|
 | 1 | SDK e runtime capturam exceção em toda chamada a mod | 1 dia |
 | 2 | diário, suspensão automática e motivo na Oficina | 2–3 dias |
-| 3 | modo seguro da própria ponte e modo seguro geral | 0,5–1 dia |
+| 3 | modo seguro do carregador, da ponte e geral | 1–1,5 dia |
 | 4 | vigia de travamento, com ciclo de vida da Activity | 1–1,5 dia |
 | 5 | estado dos hooks quando o jogo lança (`Hurt`, trocas de textura) | 0,5–1 dia |
 | 6 | motivo da morte do processo pelo Android (API 30+) | 0,5–1 dia |
@@ -158,7 +169,7 @@ Afirmações sobre código-fonte trazem arquivo e linha e valem como confirmadas
 | 8 | assinatura Ed25519 e confiança por mod | 1–2 dias |
 | 9 | opcional: tratador mínimo de SIGSEGV | 1 dia, mais testes |
 
-Juntos, de 9,5 a 15,5 dias sem o passo 9, que é opcional; com ele, de 10,5 a 16,5, mais os testes.
+Juntos, de 10 a 16 dias sem o passo 9, que é opcional; com ele, de 11 a 17, mais os testes.
 
 ---
 
@@ -166,32 +177,37 @@ Juntos, de 9,5 a 15,5 dias sem o passo 9, que é opcional; com ele, de 10,5 a 16
 
 **A abertura, em ordem:**
 
-1. **Ponte (B).** O construtor da `libtlmod_bridge.so` dispara a thread de init (`entry.cpp:10–17`), que
+1. **Carregador, fora do TLMod.** O pacote de teste não traz o carregador (`entrega/README_TESTE.md:115–117`):
+   quem instala põe um `System.loadLibrary` no APK, um loader ou um `wrap.sh`. A `Activity` de entrada é a
+   `com.unity3d.player.UnityPlayerActivity`, e o app tem um processo só (o manifest não declara
+   `android:process`).
+2. **Ponte (B).** O construtor da `libtlmod_bridge.so` dispara a thread de init (`entry.cpp:10–17`), que
    instala os hooks. A primeira instalação chama `shadowhook_init(SHADOWHOOK_MODE_SHARED, true)`
    (`hook_shadowhook.cpp:134`), e cada hook usa `SHADOWHOOK_HOOK_WITH_MULTI_MODE` (`:181`).
-2. **Runtime (L).** O construtor da `libtlmod_runtime.so` cria a thread `RuntimeMain`
+3. **Runtime (L).** O construtor da `libtlmod_runtime.so` cria a thread `RuntimeMain`
    (`android_main.cpp:264–267`), que:
    - espera a ponte (até 120 s) e se anexa ao IL2CPP (`:200–204`);
    - lê `tlmod_config.json` e a lista `disabled_mods` (`:211–214`);
    - procura os mods em `Android/data/<pacote>/files/tlmod/mods`, ou no armazenamento interno (`:169–176`);
    - chama o `LoadAll` (`:223`);
    - só depois instala o painel, as duas Oficinas e o botão "Mods" (`:231–258`).
-3. **`LoadAll`, por mod** (`mod_loader.cpp`):
+4. **`LoadAll`, por mod** (`mod_loader.cpp`):
    - pula os desligados;
    - copia a `.so` para `code_cache/tlmod/<mod>/`, conferindo o SHA-256 (`library_cache.cpp`);
    - faz `dlopen(RTLD_NOW | RTLD_LOCAL)` (`dynlib.cpp`), que roda os construtores estáticos do mod;
    - chama o `tlmod_mod_init` sem `try/catch` (`:1209`).
-4. **Jogo (P).** A cada frame, o hook de `Main.DoUpdate` (`world_state.cpp:103`) chama o frame do runtime,
+5. **Jogo (P).** A cada frame, o hook de `Main.DoUpdate` (`world_state.cpp:103`) chama o frame do runtime,
    que chama o de cada mod. Os hooks de NPC chamam `on_ai` e `on_spawn`, e o de `Player.Hurt` chama os
    ouvintes de dano. Esses dois o construtor do `ModLoader` liga antes do `LoadAll`
    (`mod_loader.cpp:869–877`); o resto, só no fim dele.
-5. **UI.** O painel faz um `Tick` a cada 100 ms (`TLModOverlay.java:66`, `:165–175`). Provedores e
+6. **UI.** O painel faz um `Tick` a cada 100 ms (`TLModOverlay.java:66`, `:165–175`). Provedores e
    comandos dos mods rodam nessa thread.
 
 **O que acontece em cada falha:**
 
 | falha | onde | hoje |
 |---|---|---|
+| a `.so` do TLMod não carrega: falta um arquivo, ou o aparelho tem Android 6 | carregador | `UnsatisfiedLinkError` no Java; se o carregador não a captura, o jogo fecha a cada abertura, e nada do TLMod roda para ajudar |
 | manifest inválido, dependência, versão de API | descoberta | `Rejected`, com motivo na Oficina |
 | `dlopen` falha | carga | `Failed`, com o texto do `dlerror()` |
 | `init` devolve diferente de 0 | carga | `Failed`, registros do mod desfeitos |
@@ -323,6 +339,8 @@ existe.
 
 ### 2.5 Modo seguro do próprio TLMod
 
+- **O carregador.** É o único passo que roda antes do diário, então a proteção dele fica no próprio
+  carregador (abaixo).
 - **A ponte.** Se ela cair ao instalar os hooks (fase 1), o runtime nunca chega à decisão da 2.4. Então a
   própria thread B lê o diário, antes do primeiro hook. Com duas mortes seguidas na fase 1 em primeiro
   plano, ela abre sem instalar hooks. O runtime avisa "TLMod desligado nesta abertura" e oferece "Tentar de
@@ -331,6 +349,26 @@ existe.
   seguinte suspende todos os mods, com um aviso. O usuário religa um por um.
 - **Chave manual.** Se existir `tlmod/modo_seguro` na pasta do TLMod (criado pelo computador), abrir com
   todos os mods desligados.
+
+**Carregador de referência**, para o README de instalação, no começo de `UnityPlayerActivity.onCreate`:
+
+```java
+try {
+    File desligar = new File(getExternalFilesDir(null), "tlmod/desligar");
+    if (Build.VERSION.SDK_INT >= 24 && !desligar.exists()) System.loadLibrary("tlmod_runtime");
+} catch (Throwable t) {
+    Toast.makeText(this, "TLMod não carregou: " + t, Toast.LENGTH_LONG).show();
+}
+```
+
+- O `try/catch (Throwable)` transforma uma `.so` que falta ou não liga num aviso, e o jogo abre sem o
+  TLMod.
+- O teste de versão evita a falha certa no Android 6: as `.so` do pacote de teste importam
+  `__write_chk@LIBC_N` (ponte) e `__fwrite_chk@LIBC_N` (runtime), e `LIBC_N` é a libc do Android 7.
+  Confirmado no binário. A alternativa é compilar para a API 23, a do jogo; não foi verificado se algo mais
+  exige a 24.
+- A chave `tlmod/desligar`, criada pelo computador, cobre o que o `try/catch` não pega: uma queda nativa
+  durante a carga das `.so`.
 
 ### 2.6 O motivo da morte pelo Android
 
@@ -349,11 +387,13 @@ sinal (3.3), em qualquer versão do Android, e o caminho sai no log (E10). Se el
 pilha, o runtime pode procurar ali uma biblioteca de mod também no Android 7 a 10. O formato não foi lido
 nesta auditoria: só o aparelho confirma.
 
-Isso fortalece a tabela da 2.3; não substitui o diário, porque aparelhos com Android 7 a 10 não têm a API
-(o TLMod compila para a API 24: `-DANDROID_PLATFORM=android-24` em `modapi/README.md:614` e
-`--min-api 24` em `modapi/CMakeLists.txt:85`). Inferido: comportamento da plataforma; o E11 confirma.
+Isso fortalece a tabela da 2.3; não substitui o diário, porque aparelhos com Android 7 a 10 não têm a API.
+O TLMod compila para a API 24 (`-DANDROID_PLATFORM=android-24` em `modapi/README.md:614` e `--min-api 24`
+em `modapi/CMakeLists.txt:85`); o jogo aceita a 23, mas o TLMod não carrega nela (2.5). O app tem um
+processo só, então a lista do Android cobre o jogo inteiro. Inferido: comportamento da plataforma; o E11
+confirma.
 
-**Esforço:** 2–3 dias (diário, regras, suspensão, Oficina) + 0,5–1 dia (2.5) + 0,5–1 dia (2.6).
+**Esforço:** 2–3 dias (diário, regras, suspensão, Oficina) + 1–1,5 dia (2.5) + 0,5–1 dia (2.6).
 
 ---
 
@@ -493,6 +533,9 @@ Confirmado no binário. O modo que o Terraria usa está no `boot.config` do APK,
 | ShadowHook, dentro da ponte do TLMod | SIGSEGV, SIGBUS | `bytesig_init` no `shadowhook_init` (`shadowhook.c:84–85`), no primeiro hook (`hook_shadowhook.cpp:134`) | confirmado no código |
 | Unity (`libunity.so`) | SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV, SIGPIPE, SIGSTKFLT | `sigaction` comum, que a `libsigchain` intercepta; grava o relatório e chama o anterior que guardou (3.3) | confirmado no binário; a passagem pela `libsigchain` é inferida |
 | o resto do TLMod | nenhum | não há `sigaction` nem `signal` no código da ponte, do runtime ou do painel | confirmado no código |
+
+O manifest não declara relator de quedas de terceiros, como o Firebase Crashlytics. As bibliotecas de
+licença e de proteção ficaram fora do escopo: se elas instalarem tratadores, o E10 mostra.
 
 **Como o `bytesig` se encaixa:**
 
@@ -713,7 +756,14 @@ O diário já tem o registro: quando o usuário ou o Android fechar o app, a abe
 **Ciclo de vida.** O painel não acompanha `onPause` e `onResume` hoje (`TLModOverlay.java` não registra
 callbacks de ciclo de vida). Com o app em segundo plano o Unity para de chamar `DoUpdate`, e o vigia veria
 uma parada a cada pausa. Solução: `Application.ActivityLifecycleCallbacks` grava "em primeiro plano" no
-diário (API 14+).
+diário (API 14+). O manifest acrescenta três detalhes:
+
+- o app tem duas `Activity`: a `UnityPlayerActivity`, de entrada, e uma de licença (fora do escopo), que
+  pode ficar na frente do jogo. O vigia olha só a `UnityPlayerActivity`;
+- a `UnityPlayerActivity` trata sozinha as mudanças de configuração (`configChanges` = `0x40003FFF`):
+  girar a tela não a recria nem pausa;
+- o painel sobe com a `Activity` já rodando, e os callbacks perdem o primeiro `onResume`. Ao registrá-los,
+  já marcar "em primeiro plano".
 
 **Limites de tempo:**
 
@@ -785,6 +835,8 @@ Um zip, com entradas armazenadas ou com deflate; o runtime já liga a zlib por c
 
 1. **Escolher.** Na Oficina, "Instalar mod" abre o seletor do sistema (`ACTION_OPEN_DOCUMENT`, sem
    permissão de armazenamento). O arquivo é copiado para `files/tlmod/entrada/`, no armazenamento interno.
+   É o caminho que sobra: o manifest só pede `INTERNET` e a permissão de licença, e o `targetSdkVersion` é
+   35, então o jogo não lê a pasta Download por conta própria (inferido).
 2. **Ler o diretório do zip e recusar:**
    - caminhos absolutos ou com `..`, `\` ou NUL;
    - links simbólicos e entradas repetidas;
@@ -849,6 +901,8 @@ confiança, troca de chave).
 ---
 
 ## 7. Experimentos no aparelho (pergunta 6)
+
+No APK enviado, `<pacote>` é `com.and.games505.TerrariaPaid`.
 
 **O mod de teste.** `tlmod.falhas`, só para build de teste.
 
@@ -993,6 +1047,17 @@ Num aparelho com Android 11+, logo depois do E1, do E5 e do E9.1, registrar
 - `REASON_SIGNALED` ou `REASON_OTHER` no E9.1 (o código exato varia com o jeito de encerrar);
 - no Android 12+, o tombstone do E5 tem um frame em `code_cache/tlmod/tlmod.falhas/`.
 
+### E12: carregador
+
+Num APK de teste com o carregador de referência (2.5):
+
+1. Tirar a `libtlmod_bridge.so` do APK e abrir o jogo. **Esperado:** o aviso "TLMod não carregou", e o
+   jogo abre sem o TLMod. Com um carregador sem `try/catch`, o jogo fecha.
+2. Recolocar a biblioteca, criar `Android/data/<pacote>/files/tlmod/desligar` e abrir. **Esperado:** o
+   jogo abre sem o TLMod e sem aviso.
+3. Se houver um aparelho com Android 6: **esperado**, o jogo abre sem o TLMod. Sem o teste de versão, o
+   aviso mostraria o símbolo `__write_chk` ou `__fwrite_chk`.
+
 ---
 
 ## 8. Riscos do desenho proposto
@@ -1041,6 +1106,8 @@ Num aparelho com Android 11+, logo depois do E1, do E5 e do E9.1, registrar
 - **Mostrar:** a suspensão vai para `suspended_mods` em `tlmod_config.json`, e a Oficina mostra "Suspenso"
   com o motivo.
 - **O próprio TLMod:** duas quedas seguidas da ponte deixam a abertura seguinte sem hooks.
+- **Antes do TLMod:** o carregador precisa de `try/catch`, teste de versão e uma chave para não carregar.
+  O jogo aceita Android 6, e as `.so` do TLMod exigem o 7.
 
 **2. Sinais.**
 
@@ -1094,14 +1161,15 @@ Ninguém interrompe a thread. O registro no diário garante a suspensão mesmo q
   fez.
 - **Módulo 8:** só scripts num interpretador podem ter permissões impostas.
 
-**6. Experimentos.** O mod `tlmod.falhas` com nove modos de falha e os experimentos E1 a E11 da seção 7:
+**6. Experimentos.** O mod `tlmod.falhas` com nove modos de falha e os experimentos E1 a E12 da seção 7:
 
 - queda e exceção no `init` e no construtor;
 - `init` que não termina;
 - queda e travamento no jogo;
 - exceção no `on_ai` e num comando;
 - falsos positivos;
-- a cadeia de sinais e o motivo de saída do Android.
+- a cadeia de sinais e o motivo de saída do Android;
+- o carregador.
 
 ---
 
@@ -1118,17 +1186,22 @@ Ninguém interrompe a thread. O registro no diário garante a suspensão mesmo q
    registro. No `init`, deixa o jogo sem os hooks do fim do `LoadAll` e sem painel nem Oficina
    (`android_main.cpp:231–258`), sem jeito de desligar o mod pela interface. Uma queda também pode virar
    travamento, pelo tratador do Unity (3.3). Ação 4.
-4. <a id="lacuna-4"></a>**Pacote sem integridade nem origem** (médio). O manifest não lista arquivos nem
+4. <a id="lacuna-4"></a>**Carga do TLMod sem rede de proteção** (médio). O TLMod não traz carregador
+   (`entrega/README_TESTE.md:115–117`), e uma falha no `System.loadLibrary` acontece antes de qualquer
+   código dele. No Android 6, que o jogo aceita (`minSdkVersion` 23), ela é certa: as `.so` do pacote de
+   teste exigem `__write_chk` e `__fwrite_chk` (`LIBC_N`, Android 7). Com um carregador sem `try/catch`, o
+   jogo não abre. Ação 3.
+5. <a id="lacuna-5"></a>**Pacote sem integridade nem origem** (médio). O manifest não lista arquivos nem
    hashes. Textura e manifest são lidos do armazenamento externo a cada abertura. O SHA-256 da biblioteca é
    calculado, mas não comparado com nada. Não há assinatura. Ações 7 e 8.
-5. <a id="lacuna-5"></a>**Estado preso quando o jogo lança dentro de um hook** (médio-baixo). O
+6. <a id="lacuna-6"></a>**Estado preso quando o jogo lança dentro de um hook** (médio-baixo). O
    `t_hurtDepth` (`bridge.cpp:384–402`) e as trocas de textura (`draw_hooks.cpp:471–525`). Ação 5.
-6. <a id="lacuna-6"></a>**Um `catch` para todos os frames** (médio-baixo). Um mod que lança no frame impede os
+7. <a id="lacuna-7"></a>**Um `catch` para todos os frames** (médio-baixo). Um mod que lança no frame impede os
    mods seguintes no laço de rodar, em todo frame, e nada vai para o log (`bridge_adapter.cpp:227–231`,
    `mod_loader.cpp:285–292`). Ação 1.
-7. <a id="lacuna-7"></a>**Desligado sem motivo na Oficina** (baixo). As duas Oficinas só mostram o erro dos
+8. <a id="lacuna-8"></a>**Desligado sem motivo na Oficina** (baixo). As duas Oficinas só mostram o erro dos
    estados de falha (`panel.cpp:319` e `:556`). Ação 2.
-8. <a id="lacuna-8"></a>**Configuração sem `fsync`** (baixo). `ConfigStore::Save` renomeia sem `fsync`
+9. <a id="lacuna-9"></a>**Configuração sem `fsync`** (baixo). `ConfigStore::Save` renomeia sem `fsync`
    (`config_store.cpp:117–153`): falta de energia logo depois de mudar a configuração pode perdê-la. Ação 2.
 
 ---
@@ -1140,7 +1213,7 @@ sobrarem.
 
 1. **Capturar exceções em toda chamada a mod** (1 dia): `catch (...)` nos trampolins e na `TLMOD_MOD` do SDK,
    e no runtime por chamada e por mod, com contador e desligamento na sessão
-   ([4.4](#44-caminho-de-implementação), passos 1 e 2). [Lacunas 2](#lacuna-2) e [6](#lacuna-6).
+   ([4.4](#44-caminho-de-implementação), passos 1 e 2). [Lacunas 2](#lacuna-2) e [7](#lacuna-7).
 2. **Diário e suspensão automática** (2–3 dias):
    - o diário mapeado;
    - os marcadores em toda chamada a mod, inclusive o `dlopen`;
@@ -1149,20 +1222,21 @@ sobrarem.
    - `suspended_mods` com `fsync`;
    - o motivo na Oficina e o aviso no painel.
 
-   [Lacunas 1](#lacuna-1), [7](#lacuna-7) e [8](#lacuna-8).
-3. **Modo seguro da ponte e geral** (0,5–1 dia): a thread B lê o diário antes dos hooks, mais o modo seguro
-   geral e a chave manual (2.5). [Lacuna 1](#lacuna-1).
+   [Lacunas 1](#lacuna-1), [8](#lacuna-8) e [9](#lacuna-9).
+3. **Modo seguro do carregador, da ponte e geral** (1–1,5 dia): o carregador de referência no README de
+   instalação, a thread B lendo o diário antes dos hooks, o modo seguro geral e as chaves manuais (2.5).
+   Decidir entre exigir Android 7 e compilar para a API 23. [Lacunas 1](#lacuna-1) e [4](#lacuna-4).
 4. **Vigia de travamento** (1–1,5 dia): thread nativa, regras da 5.2, caixa no painel e
    `ActivityLifecycleCallbacks`. [Lacuna 3](#lacuna-3).
 5. **Estado dos hooks** (0,5–1 dia): `Hurt` pelo modelo dos saves e varredura das trocas de textura no
-   `DoUpdate` ([4.4](#44-caminho-de-implementação), passo 3). [Lacuna 5](#lacuna-5).
+   `DoUpdate` ([4.4](#44-caminho-de-implementação), passo 3). [Lacuna 6](#lacuna-6).
 6. **Motivo de saída do Android** (0,5–1 dia): `getHistoricalProcessExitReasons` no painel (API 30+) e o
    tombstone no 12+, alimentando as regras da 2.3.
 7. **Pacote `.tlmod`** (3–5 dias): formato, verificação completa na pasta de preparo, instalação pelo
    seletor do sistema, mods no armazenamento interno, comparação do hash a cada abertura e modo de
-   desenvolvimento para as pastas soltas (6.2, 6.3). [Lacuna 4](#lacuna-4).
+   desenvolvimento para as pastas soltas (6.2, 6.3). [Lacuna 5](#lacuna-5).
 8. **Assinatura e confiança** (1–2 dias): Ed25519, chave fixada por id, troca de chave assinada, e "Nativo
-   (acesso total)" na Oficina (6.4, 6.6). [Lacuna 4](#lacuna-4).
+   (acesso total)" na Oficina (6.4, 6.6). [Lacuna 5](#lacuna-5).
 9. **Opcional: tratador mínimo de SIGSEGV** (1 dia, mais testes): só se o Android 7 a 10 precisar apontar a
    biblioteca; com as condições da 3.5.
 
@@ -1171,7 +1245,7 @@ Depois de cada passo, o experimento correspondente da seção 7:
 | passos | experimentos |
 |---|---|
 | 1 | E3, E7, E8 |
-| 2 e 3 | E1, E2, E5, E9 |
+| 2 e 3 | E1, E2, E5, E9, E12 |
 | 4 | E4, E6 |
 | 6 | E11 |
 | antes de decidir o passo 9 | E10 |
